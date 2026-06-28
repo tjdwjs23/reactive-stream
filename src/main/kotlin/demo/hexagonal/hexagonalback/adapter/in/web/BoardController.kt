@@ -13,41 +13,28 @@ import java.net.URI
 @RestController
 @RequestMapping("/api/boards")
 class BoardController(
-    // Service 구현체가 아닌, UseCase 인터페이스를 주입받습니다.
     private val createBoardUseCase: CreateBoardUseCase,
     private val getBoardUseCase: GetBoardUseCase,
     private val updateBoardUseCase: UpdateBoardUseCase,
-    private val deleteBoardUseCase: DeleteBoardUseCase
+    private val deleteBoardUseCase: DeleteBoardUseCase,
+    private val boardWebMapper: BoardWebMapper
 ) {
 
     @PostMapping
     fun createBoard(@RequestBody request: CreateBoardRequest): ResponseEntity<BoardResponse> {
-        // 1. Request DTO -> UseCase Command 변환
-        val command = CreateBoardCommand(
-            title = request.title,
-            content = request.content
-        )
-
-        // 2. UseCase 실행
-        val createdBoard = createBoardUseCase.createBoard(command)
-
-        // 3. Domain -> Response DTO 변환 및 반환
-        val response = BoardResponse.from(createdBoard)
+        val command = CreateBoardCommand(title = request.title, content = request.content)
+        val response = boardWebMapper.toResponse(createBoardUseCase.createBoard(command))
         return ResponseEntity.created(URI.create("/api/boards/${response.id}")).body(response)
     }
 
     @GetMapping("/{id}")
     fun getBoard(@PathVariable id: Long): ResponseEntity<BoardResponse> {
-        val board = getBoardUseCase.getBoard(id)
-        return ResponseEntity.ok(BoardResponse.from(board))
+        return ResponseEntity.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
     }
 
     @GetMapping
     fun getAllBoards(): ResponseEntity<List<BoardResponse>> {
-        val boards = getBoardUseCase.getAllBoards()
-        // 리스트 내부의 각 요소를 변환
-        val responses = boards.map { BoardResponse.from(it) }
-        return ResponseEntity.ok(responses)
+        return ResponseEntity.ok(boardWebMapper.toResponseList(getBoardUseCase.getAllBoards()))
     }
 
     @PutMapping("/{id}")
@@ -55,14 +42,8 @@ class BoardController(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest
     ): ResponseEntity<BoardResponse> {
-        val command = UpdateBoardCommand(
-            id = id,
-            title = request.title,
-            content = request.content
-        )
-
-        val updatedBoard = updateBoardUseCase.updateBoard(command)
-        return ResponseEntity.ok(BoardResponse.from(updatedBoard))
+        val command = UpdateBoardCommand(id = id, title = request.title, content = request.content)
+        return ResponseEntity.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
     }
 
     @DeleteMapping("/{id}")
