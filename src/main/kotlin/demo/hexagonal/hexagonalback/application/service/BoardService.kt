@@ -13,7 +13,9 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
-@Transactional // 트랜잭션 관리는 서비스 계층에서 합니다.
+// 클래스 레벨 @Transactional이 모든 메서드에 기본 적용됩니다.
+// 조회 메서드는 @Transactional(readOnly = true)로 재정의해 DB가 불필요한 변경 감지(dirty checking)를 생략하도록 합니다.
+@Transactional
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort
 ) : CreateBoardUseCase, GetBoardUseCase, UpdateBoardUseCase, DeleteBoardUseCase {

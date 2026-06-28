@@ -12,6 +12,8 @@ import java.net.URI
 
 @RestController
 @RequestMapping("/api/boards")
+// BoardService 전체가 아닌 UseCase 인터페이스를 개별 주입합니다.
+// 컨트롤러가 구현체에 의존하지 않고, 각 핸들러가 어떤 유즈케이스를 사용하는지 명시적으로 드러납니다.
 class BoardController(
     private val createBoardUseCase: CreateBoardUseCase,
     private val getBoardUseCase: GetBoardUseCase,
