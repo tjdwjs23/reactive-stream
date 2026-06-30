@@ -186,3 +186,23 @@ Controller에서 넘어온 데이터는 UseCase로 진입하기 전, Command 객
 
 #### 2. Isolation of Persistence
 DB 테이블 구조(JPA Entity)가 변경되어도 비즈니스 로직(Domain Model)은 영향을 받지 않습니다. `BoardPersistenceAdapter`가 중간에서 `Mapper`를 이용해 두 객체 간의 변환을 담당합니다.
+
+#### 3. Common Response Envelope & Global Exception Handling
+모든 응답은 `ApiResponse<T>`(`success`, `data`, `error`)로 감싸 클라이언트가 일관된 형태로 파싱하도록 합니다. `GlobalExceptionHandler`(`@RestControllerAdvice`)가 도메인 예외부터 잘못된 요청, 예상치 못한 예외까지 한 곳에서 매핑합니다.
+
+| 예외 | HTTP Status | error.code |
+| :--- | :--- | :--- |
+| `BoardNotFoundException` | 404 | `BOARD_NOT_FOUND` |
+| `BoardValidationException` | 400 | `VALIDATION_ERROR` |
+| `IllegalArgumentException` (Command 자가 검증) | 400 | `VALIDATION_ERROR` |
+| `HttpMessageNotReadableException` (잘못된 요청 Body) | 400 | `INVALID_REQUEST_BODY` |
+| `MethodArgumentTypeMismatchException` (잘못된 PathVariable) | 400 | `INVALID_PARAMETER` |
+| 그 외 모든 예외 | 500 | `INTERNAL_SERVER_ERROR` |
+
+```json
+// 성공
+{ "success": true, "data": { "id": 1, "title": "..." }, "error": null }
+
+// 실패
+{ "success": false, "data": null, "error": { "code": "BOARD_NOT_FOUND", "message": "Board not found with id: 999" } }
+```

@@ -31,28 +31,31 @@ class BoardController(
     @PostMapping
     fun createBoard(
         @RequestBody request: CreateBoardRequest,
-    ): ResponseEntity<BoardResponse> {
+    ): ResponseEntity<ApiResponse<BoardResponse>> {
         val command = CreateBoardCommand(title = request.title, content = request.content)
         val response = boardWebMapper.toResponse(createBoardUseCase.createBoard(command))
-        return ResponseEntity.created(URI.create("/api/boards/${response.id}")).body(response)
+        return ResponseEntity.created(URI.create("/api/boards/${response.id}")).body(ApiResponse.success(response))
     }
 
     @GetMapping("/{id}")
     fun getBoard(
         @PathVariable id: Long,
-    ): ResponseEntity<BoardResponse> = ResponseEntity.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
+    ): ResponseEntity<ApiResponse<BoardResponse>> =
+        ResponseEntity.ok(ApiResponse.success(boardWebMapper.toResponse(getBoardUseCase.getBoard(id))))
 
     @GetMapping
-    fun getAllBoards(): ResponseEntity<List<BoardResponse>> =
-        ResponseEntity.ok(boardWebMapper.toResponseList(getBoardUseCase.getAllBoards()))
+    fun getAllBoards(): ResponseEntity<ApiResponse<List<BoardResponse>>> =
+        ResponseEntity.ok(ApiResponse.success(boardWebMapper.toResponseList(getBoardUseCase.getAllBoards())))
 
     @PutMapping("/{id}")
     fun updateBoard(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest,
-    ): ResponseEntity<BoardResponse> {
+    ): ResponseEntity<ApiResponse<BoardResponse>> {
         val command = UpdateBoardCommand(id = id, title = request.title, content = request.content)
-        return ResponseEntity.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
+        return ResponseEntity.ok(
+            ApiResponse.success(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command))),
+        )
     }
 
     @DeleteMapping("/{id}")

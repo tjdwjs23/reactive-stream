@@ -64,9 +64,10 @@ class BoardControllerTest :
                                 .content("""{"title":"테스트 제목","content":"테스트 내용입니다."}"""),
                         ).andExpect(status().isCreated)
                         .andExpect(header().string("Location", "/api/boards/1"))
-                        .andExpect(jsonPath("$.id").value(1))
-                        .andExpect(jsonPath("$.title").value("테스트 제목"))
-                        .andExpect(jsonPath("$.content").value("테스트 내용입니다."))
+                        .andExpect(jsonPath("$.success").value(true))
+                        .andExpect(jsonPath("$.data.id").value(1))
+                        .andExpect(jsonPath("$.data.title").value("테스트 제목"))
+                        .andExpect(jsonPath("$.data.content").value("테스트 내용입니다."))
                 }
             }
         }
@@ -80,9 +81,10 @@ class BoardControllerTest :
                     fixture.mockMvc
                         .perform(get("/api/boards/1"))
                         .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.id").value(1))
-                        .andExpect(jsonPath("$.title").value("테스트 제목"))
-                        .andExpect(jsonPath("$.content").value("테스트 내용입니다."))
+                        .andExpect(jsonPath("$.success").value(true))
+                        .andExpect(jsonPath("$.data.id").value(1))
+                        .andExpect(jsonPath("$.data.title").value("테스트 제목"))
+                        .andExpect(jsonPath("$.data.content").value("테스트 내용입니다."))
                 }
             }
         }
@@ -92,11 +94,27 @@ class BoardControllerTest :
             every { fixture.getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
 
             When("GET 요청을 보내면") {
-                Then("404 Not Found를 반환한다") {
+                Then("404 Not Found와 에러 코드/메시지를 반환한다") {
                     fixture.mockMvc
                         .perform(get("/api/boards/999"))
                         .andExpect(status().isNotFound)
-                        .andExpect(jsonPath("$.message").value("Board not found with id: 999"))
+                        .andExpect(jsonPath("$.success").value(false))
+                        .andExpect(jsonPath("$.error.code").value("BOARD_NOT_FOUND"))
+                        .andExpect(jsonPath("$.error.message").value("Board not found with id: 999"))
+                }
+            }
+        }
+
+        Given("존재하지 않는 형식의 id가 주어졌을 때 - GET /api/boards/{id}") {
+            val fixture = ControllerFixture()
+
+            When("GET 요청을 보내면") {
+                Then("400 Bad Request와 에러 코드를 반환한다") {
+                    fixture.mockMvc
+                        .perform(get("/api/boards/abc"))
+                        .andExpect(status().isBadRequest)
+                        .andExpect(jsonPath("$.success").value(false))
+                        .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"))
                 }
             }
         }
@@ -115,9 +133,10 @@ class BoardControllerTest :
                     fixture.mockMvc
                         .perform(get("/api/boards"))
                         .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.length()").value(2))
-                        .andExpect(jsonPath("$[0].id").value(1))
-                        .andExpect(jsonPath("$[1].id").value(2))
+                        .andExpect(jsonPath("$.success").value(true))
+                        .andExpect(jsonPath("$.data.length()").value(2))
+                        .andExpect(jsonPath("$.data[0].id").value(1))
+                        .andExpect(jsonPath("$.data[1].id").value(2))
                 }
             }
         }
@@ -131,7 +150,7 @@ class BoardControllerTest :
                     fixture.mockMvc
                         .perform(get("/api/boards"))
                         .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.length()").value(0))
+                        .andExpect(jsonPath("$.data.length()").value(0))
                 }
             }
         }
@@ -149,8 +168,38 @@ class BoardControllerTest :
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""{"title":"수정된 제목","content":"수정된 내용"}"""),
                         ).andExpect(status().isOk)
-                        .andExpect(jsonPath("$.title").value("수정된 제목"))
-                        .andExpect(jsonPath("$.content").value("수정된 내용"))
+                        .andExpect(jsonPath("$.data.title").value("수정된 제목"))
+                        .andExpect(jsonPath("$.data.content").value("수정된 내용"))
+                }
+            }
+        }
+
+        Given("유효하지 않은 요청 Body가 주어졌을 때 - POST /api/boards") {
+            val fixture = ControllerFixture()
+
+            When("내용이 10자 미만인 요청을 보내면") {
+                Then("400 Bad Request와 에러 코드를 반환한다") {
+                    fixture.mockMvc
+                        .perform(
+                            post("/api/boards")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""{"title":"제목","content":"짧음"}"""),
+                        ).andExpect(status().isBadRequest)
+                        .andExpect(jsonPath("$.success").value(false))
+                        .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                }
+            }
+
+            When("Body 자체가 비어 있는 요청을 보내면") {
+                Then("400 Bad Request와 에러 코드를 반환한다") {
+                    fixture.mockMvc
+                        .perform(
+                            post("/api/boards")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(""),
+                        ).andExpect(status().isBadRequest)
+                        .andExpect(jsonPath("$.success").value(false))
+                        .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST_BODY"))
                 }
             }
         }
