@@ -8,9 +8,11 @@
 
 * **Language**: Kotlin (JDK 21)
 * **Framework**: Spring Boot 4.0.1
-* **Persistence**: Spring Data JPA (Hibernate)
+* **Persistence**: Spring Data JPA (Hibernate), PostgreSQL
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters)
+* **Test**: Kotest (BehaviorSpec), MockK, Testcontainers
+* **Lint**: ktlint
 
 ## 📂 Project Structure
 
@@ -20,13 +22,13 @@
 demo.hexagonal.hexagonalback
 ├── 📂 adapter                 # [Infra] 외부 세계와 소통하는 어댑터
 │   ├── 📂 in                  # Driving Adapter (요청을 받아들이는 곳)
-│   │   └── 📂 web             # Web Controller, Web DTO
+│   │   └── 📂 web             # Web Controller, Web DTO, GlobalExceptionHandler
 │   └── 📂 out                 # Driven Adapter (요청을 내보내는 곳)
 │       └── 📂 persistence     # JPA Entity, Repository Impl, Mapper
 │
 ├── 📂 application             # [App] 도메인과 어댑터를 연결하는 오케스트레이션
 │   ├── 📂 port                # 인터페이스 (Port) 정의
-│   │   ├── 📂 in              # UseCase Interface (Input Port)
+│   │   ├── 📂 in              # UseCase Interface (Input Port), Self-Validating Command
 │   │   └── 📂 out             # Repository Interface (Output Port)
 │   └── 📂 service             # UseCase 구현체 (트랜잭션 관리, 흐름 제어)
 │
@@ -67,21 +69,26 @@ demo.hexagonal.hexagonalback
 
 ## 🧪 Test Strategy
 
-헥사고날 아키텍처의 각 계층을 **독립적으로** 테스트합니다. 모든 테스트는 `Given / When / Then` 패턴과 `@Nested` 클래스로 의도를 명확히 표현합니다.
+헥사고날 아키텍처의 각 계층을 **독립적으로** 테스트합니다. 모든 테스트는 [Kotest](https://kotest.io/) `BehaviorSpec`의 `Given / When / Then` DSL로 의도를 명확히 표현하고, mock은 [MockK](https://mockk.io/)를 사용합니다.
 
 ### 테스트 구조
 
 ```text
 src/test
 └── demo.hexagonal.hexagonalback
+    ├── HexagonalBackApplicationTests          # 전체 ApplicationContext 로딩 검증 (Testcontainers)
     ├── domain/model/
-    │   └── BoardTest                      # Domain 단위 테스트
+    │   └── BoardTest                          # Domain 단위 테스트
     ├── application/port/in/
-    │   └── CreateBoardCommandTest         # Command 자가 검증 테스트
+    │   └── CreateBoardCommandTest             # Command 자가 검증 테스트
     ├── application/service/
-    │   └── BoardServiceTest               # Service 단위 테스트 (Mock)
-    └── adapter/in/web/
-        └── BoardControllerTest            # Controller 슬라이스 테스트 (MockMvc)
+    │   └── BoardServiceTest                   # Service 단위 테스트 (MockK)
+    ├── adapter/in/web/
+    │   └── BoardControllerTest                # Controller 슬라이스 테스트 (MockMvc + MockK)
+    ├── adapter/out/persistence/
+    │   └── BoardPersistenceAdapterTest        # 영속성 계층 통합 테스트 (Testcontainers)
+    └── support/
+        └── PostgresTestContainer              # Postgres 컨테이너 싱글톤 (위 두 통합 테스트가 공유)
 ```
 
 ### 계층별 테스트 전략
@@ -90,64 +97,23 @@ src/test
 | :--- | :--- | :--- |
 | `BoardTest` | Domain 단위 | `update()` 후 새 인스턴스 반환, 원본 불변성 보장, 빈 제목 시 `BoardValidationException` 발생 |
 | `CreateBoardCommandTest` | Command 자가 검증 | 빈 제목 / 10자 미만 내용 시 `IllegalArgumentException` 발생, 유효 입력 시 정상 생성 |
-| `BoardServiceTest` | Service 단위 (Mockito) | `BoardRepositoryPort`를 Mock하여 각 UseCase 메서드의 흐름 및 예외 위임 검증 |
-| `BoardControllerTest` | Web 슬라이스 (MockMvc) | HTTP 상태 코드, 응답 JSON, Location 헤더, `GlobalExceptionHandler` 동작 검증 |
+| `BoardServiceTest` | Service 단위 (MockK) | `BoardRepositoryPort`를 Mock하여 각 UseCase 메서드의 흐름 및 예외 위임 검증 |
+| `BoardControllerTest` | Web 슬라이스 (MockMvc + MockK) | HTTP 상태 코드, 응답 JSON, Location 헤더, `GlobalExceptionHandler` 동작 검증 |
+| `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL 컨테이너에 `save`/`findById`/`findAll`/`deleteById`가 정상 반영되는지 검증 |
+| `HexagonalBackApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
 
-### BoardTest — Domain 불변성 & 검증
+> Kotest 기본 isolation mode(`SingleInstance`)에서는 스펙 인스턴스가 한 번만 생성되므로, `Given` 블록마다 mock/fixture를 **새로** 만들어야 테스트 간 호출 기록이 섞이지 않습니다 (`ServiceFixture`, `ControllerFixture` 참고).
 
-```
-Board.update()
- ├── [Given] 유효한 Board
- │    ├── [When] 유효한 값으로 업데이트 → [Then] 변경된 필드를 가진 새 Board 반환
- │    ├── [When] 업데이트 후 원본 확인   → [Then] 원본 Board 불변 상태 유지
- │    └── [When] 업데이트 후 id 확인    → [Then] id, createdAt 보존
- └── [Given] 유효하지 않은 입력
-      ├── [When] 빈 제목              → [Then] BoardValidationException
-      └── [When] 공백만 있는 제목     → [Then] BoardValidationException
-```
+### 통합 테스트와 Testcontainers
 
-### CreateBoardCommandTest — 자가 검증 Command
+`BoardPersistenceAdapterTest`와 `HexagonalBackApplicationTests`는 `PostgresTestContainer` 싱글톤을 공유합니다.
 
-```
-CreateBoardCommand 생성
- ├── [Given] 유효한 입력  → [Then] 예외 없이 생성, 필드 정상 저장
- ├── [Given] 빈 제목      → [Then] IllegalArgumentException
- ├── [Given] 공백 제목    → [Then] IllegalArgumentException
- ├── [Given] 9자 내용     → [Then] IllegalArgumentException
- └── [Given] 정확히 10자  → [Then] 예외 없이 생성
-```
+1. 테스트 실행 시 `postgres:16-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`와는 무관합니다).
+2. 컨테이너 기동 시 `src/main/resources/sql/board.sql`을 `initScript`로 실행해 스키마를 구성합니다.
+3. `@DynamicPropertySource`가 컨테이너의 실제 JDBC URL/계정 정보를 `spring.datasource.*`에 런타임으로 주입합니다.
+4. JVM(Gradle 테스트 프로세스) 종료 시 Testcontainers의 Ryuk이 컨테이너를 자동으로 정리합니다.
 
-### BoardServiceTest — UseCase 흐름 검증
-
-```
-BoardService (BoardRepositoryPort: Mock)
- ├── createBoard()  → save() 호출, 반환된 Board 전달
- ├── getBoard()
- │    ├── [존재하는 ID]     → Board 반환
- │    └── [존재하지 않는 ID] → BoardNotFoundException
- ├── getAllBoards()
- │    ├── [Board 있음]  → 전체 목록 반환
- │    └── [Board 없음]  → 빈 목록 반환
- ├── updateBoard()
- │    ├── [존재하는 Board]  → save() 호출, 변경된 Board 반환
- │    └── [존재하지 않는 ID] → BoardNotFoundException, save() 미호출
- └── deleteBoard()   → deleteById() 위임 확인
-```
-
-### BoardControllerTest — HTTP 계층 검증
-
-```
-MockMvc (standaloneSetup + GlobalExceptionHandler)
- ├── POST /api/boards       → 201 Created, Location: /api/boards/{id}, 응답 JSON
- ├── GET  /api/boards/{id}
- │    ├── [존재]    → 200 OK, Board JSON
- │    └── [미존재]  → 404 Not Found, { "message": "..." }
- ├── GET  /api/boards
- │    ├── [목록 있음] → 200 OK, Array JSON
- │    └── [목록 없음] → 200 OK, []
- ├── PUT  /api/boards/{id}  → 200 OK, 수정된 Board JSON
- └── DELETE /api/boards/{id} → 204 No Content, deleteBoard() 호출 검증
-```
+즉 별도 설정 없이 `./gradlew test`만 실행해도 PostgreSQL이 자동으로 뜨고 내려갑니다. **Docker가 실행 중이어야** 합니다.
 
 ### 테스트 실행
 
@@ -160,12 +126,31 @@ MockMvc (standaloneSetup + GlobalExceptionHandler)
 ./gradlew test --tests "*.CreateBoardCommandTest"
 ./gradlew test --tests "*.BoardServiceTest"
 ./gradlew test --tests "*.BoardControllerTest"
+./gradlew test --tests "*.BoardPersistenceAdapterTest"
 ```
+
+## ✅ Lint (ktlint)
+
+[ktlint](https://github.com/JLLeitschuh/ktlint-gradle)의 표준 룰셋(standard, 실험적 룰 제외)을 사용합니다. 헥사고날 패키지 네이밍(`adapter.in`, `application.port.in`)이 코틀린 예약어 `in`을 포함해 `package-name` 룰만 `.editorconfig`에서 비활성화했습니다.
+
+```bash
+# 스타일 검사
+./gradlew ktlintCheck
+
+# 자동 수정
+./gradlew ktlintFormat
+
+# commit 전 자동으로 ktlintCheck를 수행하는 git pre-commit hook 등록 (최초 1회)
+./gradlew addKtlintCheckGitPreCommitHook
+```
+
+린트로 인해 빌드가 실패하면 `build/reports/ktlint`에서 원인을 확인하고, 자동 수정이 안 되는 항목(예: wildcard import)은 직접 수정합니다.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 * JDK 21+
+* Docker (로컬 실행용 PostgreSQL 및 테스트용 Testcontainers에 필요)
 * Gradle
 
 ### Run
@@ -177,9 +162,14 @@ git clone <repository-url>
 # Build
 ./gradlew clean build
 
+# 로컬 실행용 PostgreSQL 기동 (application.yml: localhost:5432/hexagonal, hexagonal/hexagonal1234)
+# 직접 PostgreSQL을 띄우거나 docker run으로 대체 가능
+
 # Run
 ./gradlew bootRun
 ```
+
+`bootRun`은 `src/main/resources/application.yml`에 고정된 `jdbc:postgresql://localhost:5432/hexagonal`로 접속하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다. 스키마는 `src/main/resources/sql/board.sql` 기준이며 `ddl-auto: update`로 Hibernate가 보정합니다.
 
 ---
 
