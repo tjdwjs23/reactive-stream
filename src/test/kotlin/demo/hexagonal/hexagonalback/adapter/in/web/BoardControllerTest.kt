@@ -6,70 +6,50 @@ import demo.hexagonal.hexagonalback.application.port.`in`.GetBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
 import demo.hexagonal.hexagonalback.domain.exception.BoardNotFoundException
 import demo.hexagonal.hexagonalback.domain.model.Board
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.DisplayName
-import org.junit.jupiter.api.Nested
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.Mock
-import org.mockito.junit.jupiter.MockitoExtension
-import org.mockito.kotlin.any
-import org.mockito.kotlin.verify
-import org.mockito.kotlin.whenever
+import io.kotest.core.spec.style.BehaviorSpec
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 
-@ExtendWith(MockitoExtension::class)
-@DisplayName("BoardController")
-class BoardControllerTest {
+class BoardControllerTest : BehaviorSpec({
 
-    @Mock private lateinit var createBoardUseCase: CreateBoardUseCase
-    @Mock private lateinit var getBoardUseCase: GetBoardUseCase
-    @Mock private lateinit var updateBoardUseCase: UpdateBoardUseCase
-    @Mock private lateinit var deleteBoardUseCase: DeleteBoardUseCase
+    val createBoardUseCase = mockk<CreateBoardUseCase>()
+    val getBoardUseCase = mockk<GetBoardUseCase>()
+    val updateBoardUseCase = mockk<UpdateBoardUseCase>()
+    val deleteBoardUseCase = mockk<DeleteBoardUseCase>()
 
-    private lateinit var mockMvc: MockMvc
+    val controller = BoardController(
+        createBoardUseCase,
+        getBoardUseCase,
+        updateBoardUseCase,
+        deleteBoardUseCase,
+        BoardWebMapper()
+    )
+    val mockMvc = MockMvcBuilders
+        .standaloneSetup(controller)
+        .setControllerAdvice(GlobalExceptionHandler())
+        .build()
 
-    private val sampleBoard = Board(
+    val sampleBoard = Board(
         id = 1L,
         title = "테스트 제목",
         content = "테스트 내용입니다."
     )
 
-    @BeforeEach
-    fun setUp() {
-        val controller = BoardController(
-            createBoardUseCase,
-            getBoardUseCase,
-            updateBoardUseCase,
-            deleteBoardUseCase,
-            BoardWebMapper()
-        )
-        // GlobalExceptionHandler를 명시적으로 등록해야 standaloneSetup에서 예외 처리가 동작합니다.
-        mockMvc = MockMvcBuilders
-            .standaloneSetup(controller)
-            .setControllerAdvice(GlobalExceptionHandler())
-            .build()
-    }
+    Given("유효한 요청 Body가 주어졌을 때 - POST /api/boards") {
+        every { createBoardUseCase.createBoard(any()) } returns sampleBoard
 
-    @Nested
-    @DisplayName("POST /api/boards")
-    inner class CreateBoard {
-
-        @Nested
-        @DisplayName("Given: 유효한 요청 Body가 주어졌을 때")
-        inner class GivenValidRequest {
-
-            @Test
-            @DisplayName("When: POST 요청을 보내면 / Then: 201 Created와 Location 헤더, 생성된 Board를 반환한다")
-            fun `when valid request then returns 201 with location and board`() {
-                // given
-                whenever(createBoardUseCase.createBoard(any())).thenReturn(sampleBoard)
-
-                // when & then
+        When("POST 요청을 보내면") {
+            Then("201 Created와 Location 헤더, 생성된 Board를 반환한다") {
                 mockMvc.perform(
                     post("/api/boards")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -84,21 +64,11 @@ class BoardControllerTest {
         }
     }
 
-    @Nested
-    @DisplayName("GET /api/boards/{id}")
-    inner class GetBoard {
+    Given("존재하는 ID가 주어졌을 때 - GET /api/boards/{id}") {
+        every { getBoardUseCase.getBoard(1L) } returns sampleBoard
 
-        @Nested
-        @DisplayName("Given: 존재하는 ID가 주어졌을 때")
-        inner class GivenExistingId {
-
-            @Test
-            @DisplayName("When: GET 요청을 보내면 / Then: 200 OK와 해당 Board를 반환한다")
-            fun `when existing id then returns 200 with board`() {
-                // given
-                whenever(getBoardUseCase.getBoard(1L)).thenReturn(sampleBoard)
-
-                // when & then
+        When("GET 요청을 보내면") {
+            Then("200 OK와 해당 Board를 반환한다") {
                 mockMvc.perform(get("/api/boards/1"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.id").value(1))
@@ -106,18 +76,13 @@ class BoardControllerTest {
                     .andExpect(jsonPath("$.content").value("테스트 내용입니다."))
             }
         }
+    }
 
-        @Nested
-        @DisplayName("Given: 존재하지 않는 ID가 주어졌을 때")
-        inner class GivenNonExistingId {
+    Given("존재하지 않는 ID가 주어졌을 때 - GET /api/boards/{id}") {
+        every { getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
 
-            @Test
-            @DisplayName("When: GET 요청을 보내면 / Then: 404 Not Found를 반환한다")
-            fun `when non-existing id then returns 404`() {
-                // given
-                whenever(getBoardUseCase.getBoard(999L)).thenThrow(BoardNotFoundException(999L))
-
-                // when & then
+        When("GET 요청을 보내면") {
+            Then("404 Not Found를 반환한다") {
                 mockMvc.perform(get("/api/boards/999"))
                     .andExpect(status().isNotFound)
                     .andExpect(jsonPath("$.message").value("Board not found with id: 999"))
@@ -125,25 +90,15 @@ class BoardControllerTest {
         }
     }
 
-    @Nested
-    @DisplayName("GET /api/boards")
-    inner class GetAllBoards {
+    Given("Board 목록이 존재할 때 - GET /api/boards") {
+        val boards = listOf(
+            sampleBoard,
+            Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용")
+        )
+        every { getBoardUseCase.getAllBoards() } returns boards
 
-        @Nested
-        @DisplayName("Given: Board 목록이 존재할 때")
-        inner class GivenBoardsExist {
-
-            @Test
-            @DisplayName("When: GET 요청을 보내면 / Then: 200 OK와 Board 목록을 반환한다")
-            fun `when boards exist then returns 200 with list`() {
-                // given
-                val boards = listOf(
-                    sampleBoard,
-                    Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용")
-                )
-                whenever(getBoardUseCase.getAllBoards()).thenReturn(boards)
-
-                // when & then
+        When("GET 요청을 보내면") {
+            Then("200 OK와 Board 목록을 반환한다") {
                 mockMvc.perform(get("/api/boards"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.length()").value(2))
@@ -151,18 +106,13 @@ class BoardControllerTest {
                     .andExpect(jsonPath("$[1].id").value(2))
             }
         }
+    }
 
-        @Nested
-        @DisplayName("Given: Board가 하나도 없을 때")
-        inner class GivenNoBoardsExist {
+    Given("Board가 하나도 없을 때 - GET /api/boards") {
+        every { getBoardUseCase.getAllBoards() } returns emptyList()
 
-            @Test
-            @DisplayName("When: GET 요청을 보내면 / Then: 200 OK와 빈 배열을 반환한다")
-            fun `when no boards then returns 200 with empty list`() {
-                // given
-                whenever(getBoardUseCase.getAllBoards()).thenReturn(emptyList())
-
-                // when & then
+        When("GET 요청을 보내면") {
+            Then("200 OK와 빈 배열을 반환한다") {
                 mockMvc.perform(get("/api/boards"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.length()").value(0))
@@ -170,22 +120,12 @@ class BoardControllerTest {
         }
     }
 
-    @Nested
-    @DisplayName("PUT /api/boards/{id}")
-    inner class UpdateBoard {
+    Given("존재하는 Board와 유효한 요청이 주어졌을 때 - PUT /api/boards/{id}") {
+        val updatedBoard = sampleBoard.copy(title = "수정된 제목", content = "수정된 내용")
+        every { updateBoardUseCase.updateBoard(any()) } returns updatedBoard
 
-        @Nested
-        @DisplayName("Given: 존재하는 Board와 유효한 요청이 주어졌을 때")
-        inner class GivenExistingBoard {
-
-            @Test
-            @DisplayName("When: PUT 요청을 보내면 / Then: 200 OK와 수정된 Board를 반환한다")
-            fun `when existing board then returns 200 with updated board`() {
-                // given
-                val updatedBoard = sampleBoard.copy(title = "수정된 제목", content = "수정된 내용")
-                whenever(updateBoardUseCase.updateBoard(any())).thenReturn(updatedBoard)
-
-                // when & then
+        When("PUT 요청을 보내면") {
+            Then("200 OK와 수정된 Board를 반환한다") {
                 mockMvc.perform(
                     put("/api/boards/1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -198,26 +138,17 @@ class BoardControllerTest {
         }
     }
 
-    @Nested
-    @DisplayName("DELETE /api/boards/{id}")
-    inner class DeleteBoard {
+    Given("유효한 ID가 주어졌을 때 - DELETE /api/boards/{id}") {
+        val id = 1L
+        every { deleteBoardUseCase.deleteBoard(id) } returns Unit
 
-        @Nested
-        @DisplayName("Given: 유효한 ID가 주어졌을 때")
-        inner class GivenValidId {
-
-            @Test
-            @DisplayName("When: DELETE 요청을 보내면 / Then: 204 No Content를 반환한다")
-            fun `when valid id then returns 204`() {
-                // given
-                val id = 1L
-
-                // when & then
+        When("DELETE 요청을 보내면") {
+            Then("204 No Content를 반환한다") {
                 mockMvc.perform(delete("/api/boards/$id"))
                     .andExpect(status().isNoContent)
 
-                verify(deleteBoardUseCase).deleteBoard(id)
+                verify { deleteBoardUseCase.deleteBoard(id) }
             }
         }
     }
-}
+})
