@@ -1,6 +1,7 @@
 package demo.hexagonal.hexagonalback.adapter.out.persistence
 
 import demo.hexagonal.hexagonalback.domain.model.Board
+import demo.hexagonal.hexagonalback.support.PostgresTestContainer
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContainAll
@@ -11,8 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.utility.DockerImageName
 
 @SpringBootTest
 class BoardPersistenceAdapterTest(
@@ -80,17 +79,8 @@ class BoardPersistenceAdapterTest(
     override fun extensions() = listOf(SpringExtension)
 
     companion object {
-        private val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
-                .withInitScript("sql/board.sql")
-                .apply { start() }
-
         @JvmStatic
         @DynamicPropertySource
-        fun registerProperties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url", postgres::getJdbcUrl)
-            registry.add("spring.datasource.username", postgres::getUsername)
-            registry.add("spring.datasource.password", postgres::getPassword)
-        }
+        fun registerProperties(registry: DynamicPropertyRegistry) = PostgresTestContainer.registerProperties(registry)
     }
 }
