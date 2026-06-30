@@ -9,7 +9,7 @@ interface CreateBoardUseCase {
 
 data class CreateBoardCommand(
     val title: String,
-    val content: String
+    val content: String,
 ) {
     init {
         // 입력 모델의 유효성 검증 (Self-Validating)
@@ -21,6 +21,7 @@ data class CreateBoardCommand(
 // 2. 게시글 조회 유즈케이스
 interface GetBoardUseCase {
     fun getBoard(id: Long): Board
+
     fun getAllBoards(): List<Board>
 }
 
@@ -35,7 +36,7 @@ interface UpdateBoardUseCase {
 data class UpdateBoardCommand(
     val id: Long,
     val title: String,
-    val content: String
+    val content: String,
 )
 
 // 4. 게시글 삭제 유즈케이스

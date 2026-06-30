@@ -7,9 +7,8 @@ import org.springframework.stereotype.Repository
 @Repository // 스프링 빈으로 등록
 class BoardPersistenceAdapter(
     private val boardJpaRepository: BoardJpaRepository,
-    private val boardMapper: BoardMapper
+    private val boardMapper: BoardMapper,
 ) : BoardRepositoryPort {
-
     override fun save(board: Board): Board {
         // 1. 도메인을 엔티티로 변환
         val entity = boardMapper.toEntity(board)
@@ -19,16 +18,16 @@ class BoardPersistenceAdapter(
         return boardMapper.toDomain(savedEntity)
     }
 
-    override fun findById(id: Long): Board? {
-        return boardJpaRepository.findById(id)
+    override fun findById(id: Long): Board? =
+        boardJpaRepository
+            .findById(id)
             .map { boardMapper.toDomain(it) }
             .orElse(null)
-    }
 
-    override fun findAll(): List<Board> {
-        return boardJpaRepository.findAll()
+    override fun findAll(): List<Board> =
+        boardJpaRepository
+            .findAll()
             .map { boardMapper.toDomain(it) }
-    }
 
     override fun deleteById(id: Long) {
         boardJpaRepository.deleteById(id)
