@@ -7,7 +7,6 @@ import org.testcontainers.utility.DockerImageName
 object PostgresTestContainer {
     private val container: PostgreSQLContainer<*> =
         PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
-            .withInitScript("sql/board.sql")
             .apply { start() }
 
     fun registerProperties(registry: DynamicPropertyRegistry) {

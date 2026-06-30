@@ -9,10 +9,12 @@
 * **Language**: Kotlin (JDK 21)
 * **Framework**: Spring Boot 4.0.1
 * **Persistence**: Spring Data JPA (Hibernate), PostgreSQL
+* **Migration**: Flyway
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters)
 * **Test**: Kotest (BehaviorSpec), MockK, Testcontainers
 * **Lint**: ktlint
+* **CI**: GitHub Actions
 
 ## 📂 Project Structure
 
@@ -109,8 +111,8 @@ src/test
 `BoardPersistenceAdapterTest`와 `HexagonalBackApplicationTests`는 `PostgresTestContainer` 싱글톤을 공유합니다.
 
 1. 테스트 실행 시 `postgres:16-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`와는 무관합니다).
-2. 컨테이너 기동 시 `src/main/resources/sql/board.sql`을 `initScript`로 실행해 스키마를 구성합니다.
-3. `@DynamicPropertySource`가 컨테이너의 실제 JDBC URL/계정 정보를 `spring.datasource.*`에 런타임으로 주입합니다.
+2. `@DynamicPropertySource`가 컨테이너의 실제 JDBC URL/계정 정보를 `spring.datasource.*`에 런타임으로 주입합니다.
+3. ApplicationContext가 뜨면서 Flyway가 `src/main/resources/db/migration`의 마이그레이션을 그 컨테이너에 자동으로 적용해 스키마를 구성합니다.
 4. JVM(Gradle 테스트 프로세스) 종료 시 Testcontainers의 Ryuk이 컨테이너를 자동으로 정리합니다.
 
 즉 별도 설정 없이 `./gradlew test`만 실행해도 PostgreSQL이 자동으로 뜨고 내려갑니다. **Docker가 실행 중이어야** 합니다.
@@ -169,7 +171,11 @@ git clone <repository-url>
 ./gradlew bootRun
 ```
 
-`bootRun`은 `src/main/resources/application.yml`에 고정된 `jdbc:postgresql://localhost:5432/hexagonal`로 접속하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다. 스키마는 `src/main/resources/sql/board.sql` 기준이며 `ddl-auto: update`로 Hibernate가 보정합니다.
+`bootRun`은 `src/main/resources/application.yml`에 고정된 `jdbc:postgresql://localhost:5432/hexagonal`로 접속하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다. 애플리케이션 기동 시 Flyway가 `src/main/resources/db/migration`의 마이그레이션을 자동으로 적용해 스키마를 구성하며(`ddl-auto: validate`로 Hibernate는 그 스키마와 엔티티 매핑이 일치하는지만 검증), 새 변경은 `Vn__설명.sql` 형식의 새 마이그레이션 파일을 추가하는 방식으로 관리합니다.
+
+## 🔄 CI
+
+`main` 브랜치 push/PR마다 [GitHub Actions](.github/workflows/ci.yml)가 JDK 21 환경에서 `ktlintCheck`와 `test`(Testcontainers 기반 통합 테스트 포함)를 자동 실행합니다.
 
 ---
 
