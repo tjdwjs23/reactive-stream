@@ -11,6 +11,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -20,24 +21,27 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 
-class BoardControllerTest : BehaviorSpec({
-
+private class ControllerFixture {
     val createBoardUseCase = mockk<CreateBoardUseCase>()
     val getBoardUseCase = mockk<GetBoardUseCase>()
     val updateBoardUseCase = mockk<UpdateBoardUseCase>()
     val deleteBoardUseCase = mockk<DeleteBoardUseCase>()
 
-    val controller = BoardController(
-        createBoardUseCase,
-        getBoardUseCase,
-        updateBoardUseCase,
-        deleteBoardUseCase,
-        BoardWebMapper()
-    )
-    val mockMvc = MockMvcBuilders
-        .standaloneSetup(controller)
+    val mockMvc: MockMvc = MockMvcBuilders
+        .standaloneSetup(
+            BoardController(
+                createBoardUseCase,
+                getBoardUseCase,
+                updateBoardUseCase,
+                deleteBoardUseCase,
+                BoardWebMapper()
+            )
+        )
         .setControllerAdvice(GlobalExceptionHandler())
         .build()
+}
+
+class BoardControllerTest : BehaviorSpec({
 
     val sampleBoard = Board(
         id = 1L,
@@ -46,11 +50,12 @@ class BoardControllerTest : BehaviorSpec({
     )
 
     Given("유효한 요청 Body가 주어졌을 때 - POST /api/boards") {
-        every { createBoardUseCase.createBoard(any()) } returns sampleBoard
+        val fixture = ControllerFixture()
+        every { fixture.createBoardUseCase.createBoard(any()) } returns sampleBoard
 
         When("POST 요청을 보내면") {
             Then("201 Created와 Location 헤더, 생성된 Board를 반환한다") {
-                mockMvc.perform(
+                fixture.mockMvc.perform(
                     post("/api/boards")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""{"title":"테스트 제목","content":"테스트 내용입니다."}""")
@@ -65,11 +70,12 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("존재하는 ID가 주어졌을 때 - GET /api/boards/{id}") {
-        every { getBoardUseCase.getBoard(1L) } returns sampleBoard
+        val fixture = ControllerFixture()
+        every { fixture.getBoardUseCase.getBoard(1L) } returns sampleBoard
 
         When("GET 요청을 보내면") {
             Then("200 OK와 해당 Board를 반환한다") {
-                mockMvc.perform(get("/api/boards/1"))
+                fixture.mockMvc.perform(get("/api/boards/1"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.id").value(1))
                     .andExpect(jsonPath("$.title").value("테스트 제목"))
@@ -79,11 +85,12 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("존재하지 않는 ID가 주어졌을 때 - GET /api/boards/{id}") {
-        every { getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
+        val fixture = ControllerFixture()
+        every { fixture.getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
 
         When("GET 요청을 보내면") {
             Then("404 Not Found를 반환한다") {
-                mockMvc.perform(get("/api/boards/999"))
+                fixture.mockMvc.perform(get("/api/boards/999"))
                     .andExpect(status().isNotFound)
                     .andExpect(jsonPath("$.message").value("Board not found with id: 999"))
             }
@@ -91,15 +98,16 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("Board 목록이 존재할 때 - GET /api/boards") {
+        val fixture = ControllerFixture()
         val boards = listOf(
             sampleBoard,
             Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용")
         )
-        every { getBoardUseCase.getAllBoards() } returns boards
+        every { fixture.getBoardUseCase.getAllBoards() } returns boards
 
         When("GET 요청을 보내면") {
             Then("200 OK와 Board 목록을 반환한다") {
-                mockMvc.perform(get("/api/boards"))
+                fixture.mockMvc.perform(get("/api/boards"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.length()").value(2))
                     .andExpect(jsonPath("$[0].id").value(1))
@@ -109,11 +117,12 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("Board가 하나도 없을 때 - GET /api/boards") {
-        every { getBoardUseCase.getAllBoards() } returns emptyList()
+        val fixture = ControllerFixture()
+        every { fixture.getBoardUseCase.getAllBoards() } returns emptyList()
 
         When("GET 요청을 보내면") {
             Then("200 OK와 빈 배열을 반환한다") {
-                mockMvc.perform(get("/api/boards"))
+                fixture.mockMvc.perform(get("/api/boards"))
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.length()").value(0))
             }
@@ -121,12 +130,13 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("존재하는 Board와 유효한 요청이 주어졌을 때 - PUT /api/boards/{id}") {
+        val fixture = ControllerFixture()
         val updatedBoard = sampleBoard.copy(title = "수정된 제목", content = "수정된 내용")
-        every { updateBoardUseCase.updateBoard(any()) } returns updatedBoard
+        every { fixture.updateBoardUseCase.updateBoard(any()) } returns updatedBoard
 
         When("PUT 요청을 보내면") {
             Then("200 OK와 수정된 Board를 반환한다") {
-                mockMvc.perform(
+                fixture.mockMvc.perform(
                     put("/api/boards/1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""{"title":"수정된 제목","content":"수정된 내용"}""")
@@ -139,15 +149,16 @@ class BoardControllerTest : BehaviorSpec({
     }
 
     Given("유효한 ID가 주어졌을 때 - DELETE /api/boards/{id}") {
+        val fixture = ControllerFixture()
         val id = 1L
-        every { deleteBoardUseCase.deleteBoard(id) } returns Unit
+        every { fixture.deleteBoardUseCase.deleteBoard(id) } returns Unit
 
         When("DELETE 요청을 보내면") {
             Then("204 No Content를 반환한다") {
-                mockMvc.perform(delete("/api/boards/$id"))
+                fixture.mockMvc.perform(delete("/api/boards/$id"))
                     .andExpect(status().isNoContent)
 
-                verify { deleteBoardUseCase.deleteBoard(id) }
+                verify { fixture.deleteBoardUseCase.deleteBoard(id) }
             }
         }
     }

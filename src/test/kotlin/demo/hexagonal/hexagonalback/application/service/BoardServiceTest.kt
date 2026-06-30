@@ -19,10 +19,9 @@ import java.time.LocalDateTime
 
 class BoardServiceTest : BehaviorSpec({
 
-    val boardRepositoryPort = mockk<BoardRepositoryPort>()
-    val boardService = BoardService(boardRepositoryPort)
-
     Given("유효한 CreateBoardCommand가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val command = CreateBoardCommand(title = "제목", content = "10자 이상의 유효한 내용입니다.")
         val savedBoard = Board(id = 1L, title = "제목", content = "10자 이상의 유효한 내용입니다.")
         every { boardRepositoryPort.save(any()) } returns savedBoard
@@ -39,6 +38,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("존재하는 ID가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val board = Board(id = 1L, title = "제목", content = "내용")
         every { boardRepositoryPort.findById(1L) } returns board
 
@@ -53,6 +54,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("존재하지 않는 ID가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         every { boardRepositoryPort.findById(999L) } returns null
 
         When("getBoard를 호출하면") {
@@ -65,6 +68,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("Board 목록이 존재할 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val boards = listOf(
             Board(id = 1L, title = "제목1", content = "내용1"),
             Board(id = 2L, title = "제목2", content = "내용2")
@@ -82,6 +87,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("Board가 하나도 없을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         every { boardRepositoryPort.findAll() } returns emptyList()
 
         When("getAllBoards를 호출하면") {
@@ -94,6 +101,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("존재하는 Board와 유효한 Command가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val existingBoard = Board(id = 1L, title = "원래 제목", content = "원래 내용", createdAt = LocalDateTime.now())
         val command = UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용")
         val updatedBoard = existingBoard.update(command.title, command.content)
@@ -112,6 +121,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("존재하지 않는 ID의 Command가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val command = UpdateBoardCommand(id = 999L, title = "새 제목", content = "새 내용")
         every { boardRepositoryPort.findById(999L) } returns null
 
@@ -126,6 +137,8 @@ class BoardServiceTest : BehaviorSpec({
     }
 
     Given("유효한 ID가 주어졌을 때") {
+        val boardRepositoryPort = mockk<BoardRepositoryPort>()
+        val boardService = BoardService(boardRepositoryPort)
         val id = 1L
         every { boardRepositoryPort.deleteById(id) } returns Unit
 
