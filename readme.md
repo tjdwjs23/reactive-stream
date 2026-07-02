@@ -13,6 +13,8 @@
 * **Concurrency**: **Kotlin Coroutines** (`suspend` / `Flow`), `kotlinx-coroutines-reactor` 브리지
 * **Persistence**: **Spring Data R2DBC** (`CoroutineCrudRepository`), PostgreSQL — **JDBC 미사용**
 * **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
+* **Observability**: Spring Boot Actuator + **Micrometer Prometheus** (health/metrics/prometheus, HTTP 요청 지연 히스토그램), Reactor↔코루틴 컨텍스트 자동 전파
+* **API Docs**: **springdoc-openapi (WebFlux)** — Swagger UI (`/swagger-ui.html`), OpenAPI JSON (`/v3/api-docs`)
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters)
 * **Test**: Kotest (BehaviorSpec), MockK, WebTestClient, Testcontainers
@@ -32,6 +34,8 @@ demo.hexagonal.hexagonalback
 │   └── 📂 out                 # Driven Adapter (요청을 내보내는 곳)
 │       └── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper, Schema Initializer
 │
+├── 📂 config                  # [Infra] 횡단 관심사 설정 (관측성, OpenAPI 문서)
+│
 ├── 📂 application             # [App] 도메인과 어댑터를 연결하는 오케스트레이션
 │   ├── 📂 port                # 인터페이스 (Port) 정의
 │   │   ├── 📂 in              # UseCase Interface (Input Port, suspend/Flow), Self-Validating Command
@@ -47,9 +51,9 @@ demo.hexagonal.hexagonalback
 
 포트/어댑터/서비스 전 계층에 걸쳐 다음 규칙을 일관되게 적용합니다.
 
-* **단건 I/O는 `suspend fun`**, **다건 조회는 `Flow<T>`** 로 반환합니다. 포트 경계에서 `List`로 전체를 메모리에 올리지 않습니다.
+* **단건 I/O는 `suspend fun`**, **대용량 스트리밍 조회는 `Flow<T>`** 로 반환합니다. 포트 경계에서 `List`로 전체를 메모리에 올리지 않습니다.
 * `BoardService`의 `@Transactional`은 R2DBC가 자동 구성하는 **`ReactiveTransactionManager`** 위에서 동작하며, `suspend` 함수에도 그대로 적용됩니다.
-* `Flow`는 지연 스트림이므로 **컨트롤러 경계에서 `toList`로 수집**해 `SuccessResponse<List<..>>`로 통일합니다(필요 시 스트리밍 응답으로 전환 가능).
+* **목록 조회는 키셋(seek) 페이지네이션**으로, 한 페이지(`size`)만 읽어 `suspend` 함수 안에서 즉시 소비합니다. 요청당 메모리/지연이 일정하며, `@Transactional(readOnly)`가 실제 읽기를 정확히 감쌉니다. (배치처럼 전체를 흘려보내야 하는 경로만 `Flow`를 유지합니다.)
 * **블로킹 세계의 구동 어댑터**(예: `suspend`를 지원하지 않는 `@Scheduled` 배치 트리거)는 어댑터 내부에서 `runBlocking`으로 코루틴 세계에 연결합니다. 블로킹 경계를 어댑터 안으로 가둡니다.
 
 ## 📐 Architecture Principles
@@ -68,7 +72,7 @@ demo.hexagonal.hexagonalback
 
 ### 3. 포트와 어댑터 (Ports and Adapters)
 * **In-Port (UseCase)**: 클라이언트가 애플리케이션에 무엇을 요청할 수 있는지 정의합니다.
-* **Out-Port (Repository / Batch Query Port)**: 애플리케이션이 데이터를 저장/조회하기 위해 무엇이 필요한지 정의합니다. 일반 CRUD용 `BoardRepositoryPort`와 대용량 배치용 `BoardBatchQueryPort`를 **ISP로 분리**해, `findAll()`이 배치 경로로 새어 들어오지 않게 합니다.
+* **Out-Port (Repository / Batch Query Port)**: 애플리케이션이 데이터를 저장/조회하기 위해 무엇이 필요한지 정의합니다. 일반 CRUD용 `BoardRepositoryPort`와 대용량 배치용 `BoardBatchQueryPort`를 **ISP로 분리**해, `CoroutineCrudRepository`가 기본 제공하는 "전체를 List로 올리는" `findAll()` 같은 조회가 포트 경계로 새어 들어오지 않게 합니다(각 포트는 키셋 페이지네이션/스트리밍만 노출).
 
 ## 📝 API Specification
 
@@ -77,10 +81,22 @@ demo.hexagonal.hexagonalback
 | Method | URI | Description |
 | :--- | :--- | :--- |
 | `POST` | `/api/boards` | 게시글 생성 |
-| `GET` | `/api/boards` | 전체 게시글 조회 |
+| `GET` | `/api/boards?cursor={id}&size={n}` | 게시글 목록 (키셋 페이지네이션, id 내림차순) |
 | `GET` | `/api/boards/{id}` | 특정 게시글 단건 조회 |
 | `PUT` | `/api/boards/{id}` | 게시글 수정 |
 | `DELETE` | `/api/boards/{id}` | 게시글 삭제 |
+
+> 목록은 **키셋(seek) 페이지네이션**입니다. `cursor`는 마지막으로 본 게시글 id(생략 시 최신부터), `size`는 페이지 크기(1~100, 기본 20)입니다. 응답 `BoardPageResponse`는 `items`, `nextCursor`, `hasNext`를 담으며, `hasNext`가 `true`면 `nextCursor`를 다음 요청의 `cursor`로 넘겨 다음 페이지를 조회합니다. (내부적으로 `size+1`건을 조회해 `hasNext`를 판정합니다.)
+
+### 관측성 · 문서 (Operational Endpoints)
+
+| Method | URI | Description |
+| :--- | :--- | :--- |
+| `GET` | `/actuator/health` | 애플리케이션/의존성 상태 (r2dbc 헬스 포함) |
+| `GET` | `/actuator/metrics` | 애플리케이션 메트릭 |
+| `GET` | `/actuator/prometheus` | Prometheus 스크레이프 엔드포인트 (HTTP 요청 지연 히스토그램 포함) |
+| `GET` | `/swagger-ui.html` | Swagger UI (API 문서 뷰어) |
+| `GET` | `/v3/api-docs` | OpenAPI 3 문서 (JSON) |
 
 ## 🗑 Batch: Stale Board Archiving
 
@@ -88,7 +104,7 @@ demo.hexagonal.hexagonalback
 
 * **스트리밍 조회**: `BoardBatchQueryPort.findStaleBoards()`가 **키셋(seek) 페이지네이션**으로 한 페이지씩 `Flow`로 흘려보냅니다. OFFSET 방식과 달리 뒤쪽 페이지에서도 성능이 일정하고, 전체를 메모리에 올리지 않습니다.
 * **백프레셔 + 동시성**: `coroutineScope` 안에서 바운드 `Channel`을 두고, 생산자(페이지 스트림)와 N개의 워커(청크 삭제)를 팬아웃합니다. 소비자가 밀리면 `send`가 suspend되어 생산자가 다음 페이지를 읽지 않습니다.
-* **도메인 규칙이 최종 권위**: SQL의 `created_at` 필터는 1차 성능 필터일 뿐, 삭제 대상은 `Board.isStale()`이 다시 확정합니다.
+* **도메인 규칙이 최종 권위**: SQL의 `created_at` 필터는 1차 성능 필터일 뿐, 삭제 대상은 `Board.isStale()`이 다시 확정합니다. (`created_at` 범위 조회가 대용량에서 풀스캔이 되지 않도록 `idx_board_created_at` 인덱스를 둡니다.)
 * **내결함성**: 한 청크 삭제가 실패해도 배치 전체를 멈추지 않고 건너뜁니다.
 * **운영 튜닝**: `board.archiving.*`(cron, retentionDays, chunkSize, concurrency)로 코드 변경 없이 조절합니다. 기본은 비활성(`enabled: false`).
 
@@ -110,7 +126,10 @@ src/test
     │   ├── BoardServiceTest                   # Service 단위 테스트 (MockK, coEvery/coVerify)
     │   └── ArchiveStaleBoardsServiceTest      # 배치 서비스 단위 테스트 (인메모리 Fake Port)
     ├── adapter/in/web/
-    │   └── BoardControllerTest                # Controller 슬라이스 테스트 (WebTestClient + MockK)
+    │   ├── BoardControllerTest                # Controller 슬라이스 테스트 (WebTestClient + MockK)
+    │   ├── ActuatorEndpointTest               # Actuator/Prometheus 구성 검증 (전체 서버, Testcontainers)
+    │   ├── OpenApiDocsTest                    # springdoc OpenAPI 문서 서빙 검증 (전체 서버)
+    │   └── RouteNotFoundTest                  # 미존재 경로가 404 통일 포맷으로 응답하는지 검증
     ├── adapter/out/persistence/
     │   ├── BoardPersistenceAdapterTest        # 영속성 계층 통합 테스트 (Testcontainers)
     │   └── BoardBatchPersistenceAdapterTest   # 배치 영속성 통합 테스트 (키셋 페이지네이션/벌크 삭제)
@@ -124,10 +143,13 @@ src/test
 | :--- | :--- | :--- |
 | `BoardTest` | Domain 단위 | `update()` 후 새 인스턴스 반환, 원본 불변성 보장, 빈 제목 시 `BoardValidationException` 발생 |
 | `CreateBoardCommandTest` | Command 자가 검증 | 빈 제목 / 10자 미만 내용 시 `IllegalArgumentException` 발생, 유효 입력 시 정상 생성 |
-| `BoardServiceTest` | Service 단위 (MockK) | `BoardRepositoryPort`를 Mock(`coEvery`)하여 각 UseCase 메서드의 흐름 및 예외 위임 검증, `Flow` 반환 검증 |
+| `BoardServiceTest` | Service 단위 (MockK) | `BoardRepositoryPort`를 Mock(`coEvery`)하여 각 UseCase 메서드의 흐름 및 예외 위임 검증, 키셋 페이지(`BoardPage`)의 `hasNext`/`nextCursor` 판정 검증 |
 | `ArchiveStaleBoardsServiceTest` | 배치 서비스 단위 (Fake Port) | 스트리밍/청크/동시성/내결함성 흐름을 결정적으로 검증, `isStale` 도메인 규칙이 최종 권위임을 검증 |
-| `BoardControllerTest` | Web 슬라이스 (WebTestClient + MockK) | HTTP 상태 코드, 응답 JSON, Location 헤더, `GlobalExceptionHandler` 동작 검증 |
-| `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findAll`/`deleteById`가 정상 반영되는지 검증 |
+| `BoardControllerTest` | Web 슬라이스 (WebTestClient + MockK) | HTTP 상태 코드, 응답 JSON(페이지 포함), Location 헤더, `GlobalExceptionHandler` 동작 검증 |
+| `RouteNotFoundTest` | Web 통합 (전체 서버) | 매핑되지 않은 경로가 500이 아닌 **404** 통일 실패 포맷으로 응답하는지 검증 |
+| `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc 헬스 포함)와 `/actuator/prometheus` 노출 검증 |
+| `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
+| `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
 | `HexagonalBackApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
 
@@ -203,6 +225,12 @@ docker run --name hexagonal-postgres -e POSTGRES_DB=hexagonal \
 ./gradlew bootRun
 ```
 
+기동 후 확인할 수 있는 엔드포인트:
+
+* **API 문서 (Swagger UI)**: <http://localhost:8080/swagger-ui.html>
+* **헬스 체크**: <http://localhost:8080/actuator/health>
+* **Prometheus 메트릭**: <http://localhost:8080/actuator/prometheus>
+
 `bootRun`은 `src/main/resources/application.yml`에 고정된 접속 정보로 DB에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다.
 
 * **모든 DB 접근**은 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/hexagonal`)로 **논블로킹** 실행됩니다. **JDBC는 어디에서도 사용하지 않습니다.**
@@ -232,7 +260,7 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 * **성공**: `SuccessResponse<T>` — `status = "Success"`, `code = HTTP 상태값`, `result = 데이터`. 컨트롤러는 `SuccessResponse.ok(...)` / `created(res, location)` / `noContent()` 같은 팩토리로 본문·상태 코드·헤더를 함께 통일합니다.
 * **실패**: `FailureResponse` — `status = "Failure"`, `code = 에러의 statusCode`, `result = ErrorCode(code/label/statusCode)`, `message = 상황별 상세 메시지`(없으면 `ErrorCode.label`로 폴백). `error` 필드는 `private`으로 두어 직렬화에서 제외하고 노출은 `result`로만 통일합니다.
 
-에러 코드는 `ErrorCode` 인터페이스로 정의하고 `CommonErrorCode`(공통) / `BoardErrorCode`(도메인)로 모읍니다. `GlobalExceptionHandler`(`@RestControllerAdvice`)가 예외를 `ErrorCode`로 매핑하며, 도메인은 `ErrorCode`를 전혀 알지 못합니다(매핑은 web 어댑터의 책임). WebFlux에서는 입력 바인딩 실패가 대부분 `ServerWebInputException`으로 수렴하므로, 원인(`TypeMismatchException` 여부)을 구분해 파라미터 오류와 바디 오류로 나눕니다.
+에러 코드는 `ErrorCode` 인터페이스로 정의하고 `CommonErrorCode`(공통) / `BoardErrorCode`(도메인)로 모읍니다. `GlobalExceptionHandler`(`@RestControllerAdvice`)가 예외를 `ErrorCode`로 매핑하며, 도메인은 `ErrorCode`를 전혀 알지 못합니다(매핑은 web 어댑터의 책임). WebFlux에서는 입력 바인딩 실패가 대부분 `ServerWebInputException`으로 수렴하므로, 원인(`TypeMismatchException` 여부)을 구분해 파라미터 오류와 바디 오류로 나눕니다. 또한 프레임워크가 던지는 `ResponseStatusException`(존재하지 않는 경로의 `NoResourceFoundException`=404 등)은 그 **HTTP 상태를 보존**해 응답하며, 이때 사전 정의되지 않은 상태 코드는 `DynamicErrorCode`로 감쌉니다(포괄 `Exception` 핸들러가 이를 500으로 뭉개지 않도록 더 구체적인 핸들러가 먼저 가로챕니다).
 
 | 예외 | ErrorCode | HTTP Status | result.code |
 | :--- | :--- | :--- | :--- |
@@ -241,6 +269,7 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 | `IllegalArgumentException` (Command 자가 검증) | `CommonErrorCode.ValidationError` | 400 | `VALIDATION_ERROR` |
 | `ServerWebInputException` (PathVariable 타입 불일치) | `CommonErrorCode.InvalidParameter` | 400 | `INVALID_PARAMETER` |
 | `ServerWebInputException` (잘못된/빈 요청 Body) | `CommonErrorCode.InvalidRequestBody` | 400 | `INVALID_REQUEST_BODY` |
+| `ResponseStatusException` (예: 미존재 경로 `NoResourceFoundException`) | `DynamicErrorCode` (상태 보존) | 예외의 상태값 (예: 404) | 예: `NOT_FOUND` |
 | 그 외 모든 예외 | `CommonErrorCode.InternalServerError` | 500 | `INTERNAL_SERVER_ERROR` |
 
 ```json
@@ -255,3 +284,12 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
   "message": "Board not found with id: 999"
 }
 ```
+
+#### 5. Keyset(Seek) Pagination
+목록 조회는 `OFFSET` 대신 **"마지막으로 본 id 이후"** 를 조건으로 다음 페이지를 읽습니다. 뒤쪽 페이지에서도 성능이 일정하고, 한 페이지(`size`)만 읽으므로 요청당 메모리/지연이 커지지 않습니다. `hasNext` 판정을 위해 `size+1`건을 조회해 초과분이 있으면 다음 페이지가 있다고 봅니다.
+
+#### 6. Observability
+Actuator + Micrometer Prometheus로 상태·메트릭을 노출합니다. `http.server.requests` 타이머에 지연 히스토그램을 켜 처리량/지연을 관측할 수 있고, `/actuator/health`에는 r2dbc 헬스가 포함됩니다. WebFlux+코루틴 환경에서 `suspend`/`Flow` 경계를 넘어 추적 컨텍스트가 유실되지 않도록 Reactor 자동 컨텍스트 전파(`Hooks.enableAutomaticContextPropagation`)를 켭니다.
+
+#### 7. Self-Documenting API
+springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.
