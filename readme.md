@@ -12,6 +12,7 @@
 * **Framework**: Spring Boot 4.0.1, **Spring WebFlux** (Netty, 논블로킹)
 * **Concurrency**: **Kotlin Coroutines** (`suspend` / `Flow`), `kotlinx-coroutines-reactor` 브리지
 * **Persistence**: **Spring Data R2DBC** (`CoroutineCrudRepository`), PostgreSQL — **JDBC 미사용**
+* **Cache/Counter**: **Reactive Redis (Lettuce)** — 조회수 카운터(INCR + 주기적 DB write-back), 논블로킹
 * **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
 * **Observability**: Spring Boot Actuator + **Micrometer Prometheus** (health/metrics/prometheus, HTTP 요청 지연 히스토그램), Reactor↔코루틴 컨텍스트 자동 전파
 * **API Docs**: **springdoc-openapi (WebFlux)** — Swagger UI (`/swagger-ui.html`), OpenAPI JSON (`/v3/api-docs`)
@@ -30,9 +31,10 @@ demo.reactivestream
 ├── 📂 adapter                 # [Infra] 외부 세계와 소통하는 어댑터
 │   ├── 📂 in                  # Driving Adapter (요청을 받아들이는 곳)
 │   │   ├── 📂 web             # WebFlux Controller(suspend), Web DTO, BaseResponse/ErrorCode, GlobalExceptionHandler
-│   │   └── 📂 batch           # @Scheduled 배치 트리거 (오래된 게시글 아카이브)
+│   │   └── 📂 batch           # @Scheduled 트리거 (오래된 게시글 아카이브, 조회수 플러시)
 │   └── 📂 out                 # Driven Adapter (요청을 내보내는 곳)
-│       └── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper, Schema Initializer
+│       ├── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper, Schema Initializer
+│       └── 📂 redis           # 조회수 카운터 어댑터 (Reactive Redis, 논블로킹)
 │
 ├── 📂 config                  # [Infra] 횡단 관심사 설정 (관측성, OpenAPI 문서)
 │
@@ -82,9 +84,11 @@ demo.reactivestream
 | :--- | :--- | :--- |
 | `POST` | `/api/boards` | 게시글 생성 |
 | `GET` | `/api/boards?cursor={id}&size={n}` | 게시글 목록 (키셋 페이지네이션, id 내림차순) |
-| `GET` | `/api/boards/{id}` | 특정 게시글 단건 조회 |
+| `GET` | `/api/boards/{id}` | 특정 게시글 단건 조회 (조회수 +1) |
 | `PUT` | `/api/boards/{id}` | 게시글 수정 |
 | `DELETE` | `/api/boards/{id}` | 게시글 삭제 |
+
+> 단건 조회 시 조회수(`viewCount`)가 1 증가합니다. DB를 직접 갱신하지 않고 Redis에 델타를 누적한 뒤 주기적으로 DB에 반영하며, 응답의 `viewCount`는 **DB 누적값 + 아직 반영 안 된 델타**로 실시간 값을 보여줍니다. (아래 **👁 View Count** 섹션 참고)
 
 > 목록은 **키셋(seek) 페이지네이션**입니다. `cursor`는 마지막으로 본 게시글 id(생략 시 최신부터), `size`는 페이지 크기(1~100, 기본 20)입니다. 응답 `BoardPageResponse`는 `items`, `nextCursor`, `hasNext`를 담으며, `hasNext`가 `true`면 `nextCursor`를 다음 요청의 `cursor`로 넘겨 다음 페이지를 조회합니다. (내부적으로 `size+1`건을 조회해 `hasNext`를 판정합니다.)
 
@@ -92,7 +96,7 @@ demo.reactivestream
 
 | Method | URI | Description |
 | :--- | :--- | :--- |
-| `GET` | `/actuator/health` | 애플리케이션/의존성 상태 (r2dbc 헬스 포함) |
+| `GET` | `/actuator/health` | 애플리케이션/의존성 상태 (r2dbc·redis 헬스 포함) |
 | `GET` | `/actuator/metrics` | 애플리케이션 메트릭 |
 | `GET` | `/actuator/prometheus` | Prometheus 스크레이프 엔드포인트 (HTTP 요청 지연 히스토그램 포함) |
 | `GET` | `/swagger-ui.html` | Swagger UI (API 문서 뷰어) |
@@ -107,6 +111,18 @@ demo.reactivestream
 * **도메인 규칙이 최종 권위**: SQL의 `created_at` 필터는 1차 성능 필터일 뿐, 삭제 대상은 `Board.isStale()`이 다시 확정합니다. (`created_at` 범위 조회가 대용량에서 풀스캔이 되지 않도록 `idx_board_created_at` 인덱스를 둡니다.)
 * **내결함성**: 한 청크 삭제가 실패해도 배치 전체를 멈추지 않고 건너뜁니다.
 * **운영 튜닝**: `board.archiving.*`(cron, retentionDays, chunkSize, concurrency)로 코드 변경 없이 조절합니다. 기본은 비활성(`enabled: false`).
+
+## 👁 View Count (조회수, Write-Back)
+
+조회가 몰리는 게시글에서 **매 조회마다 DB `UPDATE`를 날리는 부담**을 없애기 위해, 조회수를 **리액티브 Redis에 누적하고 주기적으로 DB에 반영(write-back)** 합니다. 전 구간 논블로킹을 유지하기 위해 블로킹 `RedisTemplate`/Jedis가 아닌 **Lettuce 기반 `ReactiveStringRedisTemplate`** + 코루틴 브리지(`awaitSingle`)를 사용합니다.
+
+* **읽기 경로**: `GET /api/boards/{id}` 시 Redis Hash(`board:views:pending`)에 `HINCRBY`로 원자적 증가. 응답 `viewCount`는 **DB 누적값 + 미반영 델타**로 실시간 값을 돌려줍니다.
+* **원자적 드레인**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷한 뒤 읽고 삭제합니다. `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓이므로 **델타가 유실되지 않습니다**.
+* **write-back**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 드레인한 델타를 게시글별로 `UPDATE board SET view_count = view_count + :delta`로 반영합니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 건 실패가 전체를 막지 않도록 내결함성 처리합니다.
+* **헥사고날 배치**: 조회수 버퍼는 out-port `BoardViewCountPort`(Redis 어댑터)로, DB 반영은 `BoardRepositoryPort.addViewCount`로 분리됩니다. 서비스는 구체 기술(Redis)을 모릅니다.
+* **운영 튜닝**: `board.view-count.*`(flush-enabled, flush-interval-ms)로 플러시 주기를 조절합니다. 주기를 짧게 하면 DB 정합성↑·쓰기 부하↑입니다.
+
+> 학습용 단순화: 드레인 이후 DB 반영 전에 프로세스가 죽으면 그 델타는 유실될 수 있습니다. 실무에선 반영 성공분만 커밋 후 삭제하거나 실패분을 버퍼로 되돌리는 보상 로직을 둡니다.
 
 ## 🧪 Test Strategy
 
@@ -124,7 +140,8 @@ src/test
     │   └── CreateBoardCommandTest             # Command 자가 검증 테스트
     ├── application/service/
     │   ├── BoardServiceTest                   # Service 단위 테스트 (MockK, coEvery/coVerify)
-    │   └── ArchiveStaleBoardsServiceTest      # 배치 서비스 단위 테스트 (인메모리 Fake Port)
+    │   ├── ArchiveStaleBoardsServiceTest      # 배치 서비스 단위 테스트 (인메모리 Fake Port)
+    │   └── FlushBoardViewCountsServiceTest    # 조회수 플러시 서비스 단위 테스트 (MockK)
     ├── adapter/in/web/
     │   ├── BoardControllerTest                # Controller 슬라이스 테스트 (WebTestClient + MockK)
     │   ├── ActuatorEndpointTest               # Actuator/Prometheus 구성 검증 (전체 서버, Testcontainers)
@@ -133,8 +150,12 @@ src/test
     ├── adapter/out/persistence/
     │   ├── BoardPersistenceAdapterTest        # 영속성 계층 통합 테스트 (Testcontainers)
     │   └── BoardBatchPersistenceAdapterTest   # 배치 영속성 통합 테스트 (키셋 페이지네이션/벌크 삭제)
+    ├── adapter/out/redis/
+    │   └── BoardViewCountRedisAdapterTest     # 조회수 버퍼 통합 테스트 (Redis Testcontainers: 증가/드레인)
     └── support/
-        └── PostgresTestContainer              # Postgres 컨테이너 싱글톤 (통합 테스트가 공유)
+        ├── PostgresTestContainer              # Postgres 컨테이너 싱글톤
+        ├── RedisTestContainer                 # Redis 컨테이너 싱글톤
+        └── TestContainers                     # 두 컨테이너 접속 정보를 함께 등록하는 헬퍼
 ```
 
 ### 계층별 테스트 전략
@@ -143,28 +164,30 @@ src/test
 | :--- | :--- | :--- |
 | `BoardTest` | Domain 단위 | `update()` 후 새 인스턴스 반환, 원본 불변성 보장, 빈 제목 시 `BoardValidationException` 발생 |
 | `CreateBoardCommandTest` | Command 자가 검증 | 빈 제목 / 10자 미만 내용 시 `IllegalArgumentException` 발생, 유효 입력 시 정상 생성 |
-| `BoardServiceTest` | Service 단위 (MockK) | `BoardRepositoryPort`를 Mock(`coEvery`)하여 각 UseCase 메서드의 흐름 및 예외 위임 검증, 키셋 페이지(`BoardPage`)의 `hasNext`/`nextCursor` 판정 검증 |
+| `BoardServiceTest` | Service 단위 (MockK) | 각 UseCase 메서드의 흐름·예외 위임, 키셋 페이지(`BoardPage`)의 `hasNext`/`nextCursor` 판정, 단건 조회 시 조회수 증가 및 `DB값+델타` 보정 검증 |
 | `ArchiveStaleBoardsServiceTest` | 배치 서비스 단위 (Fake Port) | 스트리밍/청크/동시성/내결함성 흐름을 결정적으로 검증, `isStale` 도메인 규칙이 최종 권위임을 검증 |
+| `FlushBoardViewCountsServiceTest` | 플러시 서비스 단위 (MockK) | 드레인한 델타를 게시글별로 `addViewCount`로 반영, 빈 델타 시 DB 미접근, 일부 실패 시 나머지 반영 + `failed` 집계 검증 |
 | `BoardControllerTest` | Web 슬라이스 (WebTestClient + MockK) | HTTP 상태 코드, 응답 JSON(페이지 포함), Location 헤더, `GlobalExceptionHandler` 동작 검증 |
 | `RouteNotFoundTest` | Web 통합 (전체 서버) | 매핑되지 않은 경로가 500이 아닌 **404** 통일 실패 포맷으로 응답하는지 검증 |
-| `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc 헬스 포함)와 `/actuator/prometheus` 노출 검증 |
+| `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc·redis 헬스 포함)와 `/actuator/prometheus` 노출 검증 |
 | `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
 | `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
+| `BoardViewCountRedisAdapterTest` | 조회수 버퍼 통합 (Redis Testcontainers) | 반복 `increment`가 델타를 누적하는지, `drainPendingDeltas`가 전체를 반환하고 버퍼를 비우는지 검증 |
 | `ReactiveStreamApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
 
 > Kotest 기본 isolation mode(`SingleInstance`)에서는 스펙 인스턴스가 한 번만 생성되므로, `Given` 블록마다 mock/fixture를 **새로** 만들어야 테스트 간 호출 기록이 섞이지 않습니다 (`ServiceFixture`, `ControllerFixture` 참고).
 
 ### 통합 테스트와 Testcontainers
 
-영속성/컨텍스트 통합 테스트는 `PostgresTestContainer` 싱글톤을 공유합니다.
+영속성/컨텍스트 통합 테스트는 `PostgresTestContainer`·`RedisTestContainer` 싱글톤을 공유하며, `TestContainers.registerAll()`이 두 컨테이너의 접속 정보를 함께 주입합니다(앱 컨텍스트에 R2DBC와 리액티브 Redis가 모두 포함되고 Actuator health가 둘 다 확인하므로).
 
-1. 테스트 실행 시 `postgres:16-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`와는 무관합니다). JDBC 드라이버가 없으므로 컨테이너 readiness는 **로그 메시지 기반 대기 전략**으로 판정합니다.
-2. `@DynamicPropertySource`가 컨테이너의 실제 접속 정보를 애플리케이션용 **`spring.r2dbc.*`(R2DBC URL)** 로만 주입합니다.
+1. 테스트 실행 시 `postgres:16-alpine`·`redis:7-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`/`6379`와는 무관합니다). JDBC 드라이버가 없으므로 Postgres readiness는 **로그 메시지 기반 대기 전략**으로 판정합니다.
+2. `@DynamicPropertySource`가 컨테이너의 실제 접속 정보를 **`spring.r2dbc.*`(R2DBC URL)** 와 **`spring.data.redis.*`** 로 주입합니다.
 3. ApplicationContext가 뜨면서 `ConnectionFactoryInitializer`가 `src/main/resources/db/schema.sql`을 R2DBC로 실행해 스키마를 구성하고, 이후 모든 쿼리도 R2DBC로 실행됩니다.
 4. JVM(Gradle 테스트 프로세스) 종료 시 Testcontainers의 Ryuk이 컨테이너를 자동으로 정리합니다.
 
-즉 별도 설정 없이 `./gradlew test`만 실행해도 PostgreSQL이 자동으로 뜨고 내려갑니다. **Docker가 실행 중이어야** 합니다.
+즉 별도 설정 없이 `./gradlew test`만 실행해도 PostgreSQL·Redis가 자동으로 뜨고 내려갑니다. **Docker가 실행 중이어야** 합니다.
 
 ### 테스트 실행
 
@@ -221,6 +244,9 @@ docker run --name hexagonal-postgres -e POSTGRES_DB=hexagonal \
   -e POSTGRES_USER=hexagonal -e POSTGRES_PASSWORD=hexagonal1234 \
   -p 5432:5432 -d postgres:16-alpine
 
+# 조회수 카운터용 Redis 기동 (application.yml: localhost:6379)
+docker run --name hexagonal-redis -p 6379:6379 -d redis:7-alpine
+
 # Run
 ./gradlew bootRun
 ```
@@ -231,11 +257,12 @@ docker run --name hexagonal-postgres -e POSTGRES_DB=hexagonal \
 * **헬스 체크**: <http://localhost:8080/actuator/health>
 * **Prometheus 메트릭**: <http://localhost:8080/actuator/prometheus>
 
-`bootRun`은 `src/main/resources/application.yml`에 고정된 접속 정보로 DB에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다.
+`bootRun`은 `src/main/resources/application.yml`에 고정된 접속 정보로 DB·Redis에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL과 Redis가 떠 있어야 합니다.
 
 * **모든 DB 접근**은 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/hexagonal`)로 **논블로킹** 실행됩니다. **JDBC는 어디에서도 사용하지 않습니다.**
+* **조회수 카운터**는 `spring.data.redis`(`localhost:6379`)의 **리액티브 Redis(Lettuce)** 로 논블로킹 처리됩니다.
 * **스키마 초기화**는 `R2dbcSchemaInitializer`가 등록한 R2DBC `ConnectionFactoryInitializer`가 담당합니다. 애플리케이션 기동 시 `src/main/resources/db/schema.sql`을 R2DBC 커넥션으로 실행합니다.
-* `schema.sql`은 `CREATE TABLE IF NOT EXISTS`로 작성되어 여러 번 실행돼도 안전합니다. 스키마 변경은 이 파일을 수정/추가하는 방식으로 관리합니다.
+* `schema.sql`은 `CREATE TABLE IF NOT EXISTS`와 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`(예: `view_count`)로 작성되어 여러 번 실행돼도 안전하며, 기존 테이블에도 새 컬럼을 멱등적으로 추가합니다. 스키마 변경은 이 파일을 수정/추가하는 방식으로 관리합니다.
 
 ## 🔄 CI
 
@@ -274,7 +301,7 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 
 ```json
 // 성공
-{ "code": 200, "status": "Success", "result": { "id": 1, "title": "..." } }
+{ "code": 200, "status": "Success", "result": { "id": 1, "title": "...", "viewCount": 42 } }
 
 // 실패 (message는 상황별 상세, result는 에러 코드 정의)
 {
@@ -293,3 +320,6 @@ Actuator + Micrometer Prometheus로 상태·메트릭을 노출합니다. `http.
 
 #### 7. Self-Documenting API
 springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.
+
+#### 8. View Count Write-Back (Reactive Redis)
+조회수를 조회마다 DB에 쓰지 않고, 리액티브 Redis에 `HINCRBY`로 누적한 뒤 `@Scheduled`로 주기적으로 DB에 반영(write-back)합니다. 고빈도 쓰기를 Redis가 흡수해 DB 부하를 분리하고, `RENAME`으로 버퍼를 원자적으로 스냅샷해 플러시 중에도 델타가 유실되지 않습니다. Redis 접근도 Lettuce(논블로킹) + 코루틴 브리지로 처리해 엔드투엔드 논블로킹을 유지합니다. (자세한 내용은 위 **👁 View Count** 섹션)
