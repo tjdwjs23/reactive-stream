@@ -1,7 +1,6 @@
 package demo.hexagonal.hexagonalback.application.port.`in`
 
 import demo.hexagonal.hexagonalback.domain.model.Board
-import kotlinx.coroutines.flow.Flow
 
 // 1. 게시글 생성 유즈케이스
 interface CreateBoardUseCase {
@@ -23,8 +22,28 @@ data class CreateBoardCommand(
 interface GetBoardUseCase {
     suspend fun getBoard(id: Long): Board
 
-    fun getAllBoards(): Flow<Board>
+    // 목록은 키셋(seek) 페이지네이션으로 조회합니다. 한 번에 size건만 읽으므로
+    // OFFSET 방식/전체 조회와 달리 데이터가 커져도 요청당 메모리/지연이 일정합니다.
+    suspend fun getBoards(query: BoardPageQuery): BoardPage
 }
+
+// 커서 페이지 요청. cursor가 null이면 첫 페이지(최신)부터, 아니면 그 id보다 과거를 읽습니다.
+data class BoardPageQuery(
+    val cursor: Long? = null,
+    val size: Int = 20,
+) {
+    init {
+        require(size in 1..100) { "size must be between 1 and 100" }
+        require(cursor == null || cursor > 0) { "cursor must be positive" }
+    }
+}
+
+// 커서 페이지 결과. nextCursor는 다음 요청에 그대로 넘길 커서이며, 다음 페이지가 없으면 null입니다.
+data class BoardPage(
+    val items: List<Board>,
+    val nextCursor: Long?,
+    val hasNext: Boolean,
+)
 
 // 3. 게시글 수정 유즈케이스
 interface UpdateBoardUseCase {

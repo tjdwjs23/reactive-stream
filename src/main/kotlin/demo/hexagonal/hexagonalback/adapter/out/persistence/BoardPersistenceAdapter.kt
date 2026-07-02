@@ -23,8 +23,18 @@ class BoardPersistenceAdapter(
     override suspend fun findById(id: Long): Board? =
         boardR2dbcRepository.findById(id)?.let { boardMapper.toDomain(it) }
 
-    // 논블로킹 스트림. 원소가 흘러올 때마다 도메인으로 변환해 흘려보냅니다.
-    override fun findAll(): Flow<Board> = boardR2dbcRepository.findAll().map { boardMapper.toDomain(it) }
+    // 키셋 페이지네이션. cursor 유무에 따라 첫 페이지/다음 페이지 쿼리를 고릅니다.
+    override fun findPage(
+        cursor: Long?,
+        limit: Int,
+    ): Flow<Board> =
+        (
+            if (cursor == null) {
+                boardR2dbcRepository.findFirstPage(limit)
+            } else {
+                boardR2dbcRepository.findPageAfter(cursor, limit)
+            }
+        ).map { boardMapper.toDomain(it) }
 
     override suspend fun deleteById(id: Long) {
         boardR2dbcRepository.deleteById(id)

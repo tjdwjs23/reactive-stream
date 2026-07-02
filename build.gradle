@@ -30,6 +30,12 @@ dependencies {
 
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
 
+    // 관측성: Actuator(health/metrics + r2dbc health), Micrometer Prometheus 레지스트리(처리량/지연 노출)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
+    implementation 'io.micrometer:context-propagation'
+
     // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용(JDBC 드라이버는 사용하지 않음)
     runtimeOnly 'org.postgresql:r2dbc-postgresql'
 

@@ -1,5 +1,7 @@
 package demo.hexagonal.hexagonalback.application.service
 
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPage
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPageQuery
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.DeleteBoardUseCase
@@ -9,7 +11,7 @@ import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.out.BoardRepositoryPort
 import demo.hexagonal.hexagonalback.domain.exception.BoardNotFoundException
 import demo.hexagonal.hexagonalback.domain.model.Board
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.toList
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -41,11 +43,20 @@ class BoardService(
         boardRepositoryPort.findById(id)
             ?: throw BoardNotFoundException(id)
 
-    // 반환하는 것은 cold Flow입니다. 실제 구독(collect)은 어댑터(컨트롤러)에서 일어나므로,
-    // 여기에 @Transactional을 붙여도 트랜잭션은 "Flow를 리턴하는 순간" 열렸다 닫혀 실제 읽기를 감싸지 못합니다.
-    // 단일 조회라 경계가 불필요하므로 @Transactional을 두지 않습니다.
-    // (스트림 전체를 하나의 트랜잭션으로 묶어야 한다면 TransactionalOperator로 Flow를 감싸야 합니다.)
-    override fun getAllBoards(): Flow<Board> = boardRepositoryPort.findAll()
+    // 키셋 페이지네이션. 한 페이지(size)만 읽으므로 여기서 collect(toList)해도 요청당 메모리가 일정합니다.
+    // suspend 함수 내부에서 즉시 소비하므로 @Transactional(readOnly)가 실제 읽기를 정확히 감쌉니다.
+    // hasNext 판정을 위해 size+1건을 조회해, 초과분이 있으면 다음 페이지가 있다고 봅니다.
+    @Transactional(readOnly = true)
+    override suspend fun getBoards(query: BoardPageQuery): BoardPage {
+        val rows = boardRepositoryPort.findPage(query.cursor, query.size + 1).toList()
+        val hasNext = rows.size > query.size
+        val items = if (hasNext) rows.take(query.size) else rows
+        return BoardPage(
+            items = items,
+            nextCursor = if (hasNext) items.last().id else null,
+            hasNext = hasNext,
+        )
+    }
 
     override suspend fun updateBoard(command: UpdateBoardCommand): Board {
         // 1. 기존 게시글 조회

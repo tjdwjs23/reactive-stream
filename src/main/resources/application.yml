@@ -10,6 +10,22 @@ spring:
     username: hexagonal
     password: hexagonal1234
 
+# 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램.
+# - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
+# - /actuator/metrics, /actuator/prometheus : 처리량/지연 등 메트릭 (http.server.requests 타이머)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
 # 오래된 게시글 일괄 아카이브 배치 설정 (murray의 jobParameters에 해당하는 튜닝 노브)
 board:
   archiving:

@@ -1,5 +1,6 @@
 package demo.hexagonal.hexagonalback.adapter.`in`.web
 
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPage
 import demo.hexagonal.hexagonalback.domain.model.Board
 import org.springframework.stereotype.Component
 
@@ -11,5 +12,12 @@ class BoardWebMapper {
             title = board.title,
             content = board.content,
             createdAt = board.createdAt,
+        )
+
+    fun toPageResponse(page: BoardPage): BoardPageResponse =
+        BoardPageResponse(
+            items = page.items.map { toResponse(it) },
+            nextCursor = page.nextCursor,
+            hasNext = page.hasNext,
         )
 }

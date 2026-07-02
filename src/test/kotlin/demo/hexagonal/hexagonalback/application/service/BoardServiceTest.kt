@@ -1,5 +1,6 @@
 package demo.hexagonal.hexagonalback.application.service
 
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPageQuery
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.out.BoardRepositoryPort
@@ -17,7 +18,6 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.toList
 import java.time.LocalDateTime
 
 private class ServiceFixture {
@@ -73,34 +73,59 @@ class BoardServiceTest :
             }
         }
 
-        Given("Board 목록이 존재할 때") {
+        Given("다음 페이지가 있을 만큼 Board가 많을 때") {
             val fixture = ServiceFixture()
-            val boards =
+            // size=2 요청 → 서비스는 hasNext 판정을 위해 size+1(=3)건을 id 내림차순으로 조회한다
+            val rows =
                 listOf(
-                    Board(id = 1L, title = "제목1", content = "내용1"),
-                    Board(id = 2L, title = "제목2", content = "내용2"),
+                    Board(id = 5L, title = "제목5", content = "내용5"),
+                    Board(id = 4L, title = "제목4", content = "내용4"),
+                    Board(id = 3L, title = "제목3", content = "내용3"),
                 )
-            every { fixture.boardRepositoryPort.findAll() } returns boards.asFlow()
+            every { fixture.boardRepositoryPort.findPage(null, 3) } returns rows.asFlow()
 
-            When("getAllBoards를 호출하면") {
-                val result = fixture.boardService.getAllBoards().toList()
+            When("getBoards(cursor=null, size=2)를 호출하면") {
+                val page = fixture.boardService.getBoards(BoardPageQuery(cursor = null, size = 2))
 
-                Then("전체 Board 목록을 반환한다") {
-                    result shouldHaveSize 2
-                    result.map { it.id } should containExactly(1L, 2L)
+                Then("size만큼만 담고 다음 페이지 커서(마지막 항목 id)를 준다") {
+                    page.items.map { it.id } should containExactly(5L, 4L)
+                    page.hasNext shouldBe true
+                    page.nextCursor shouldBe 4L
+                }
+            }
+        }
+
+        Given("남은 Board가 size 이하일 때") {
+            val fixture = ServiceFixture()
+            val rows =
+                listOf(
+                    Board(id = 2L, title = "제목2", content = "내용2"),
+                    Board(id = 1L, title = "제목1", content = "내용1"),
+                )
+            every { fixture.boardRepositoryPort.findPage(10L, 3) } returns rows.asFlow()
+
+            When("getBoards(cursor=10, size=2)를 호출하면") {
+                val page = fixture.boardService.getBoards(BoardPageQuery(cursor = 10L, size = 2))
+
+                Then("전부 담고 다음 페이지가 없다") {
+                    page.items shouldHaveSize 2
+                    page.hasNext shouldBe false
+                    page.nextCursor shouldBe null
                 }
             }
         }
 
         Given("Board가 하나도 없을 때") {
             val fixture = ServiceFixture()
-            every { fixture.boardRepositoryPort.findAll() } returns emptyList<Board>().asFlow()
+            every { fixture.boardRepositoryPort.findPage(null, 3) } returns emptyList<Board>().asFlow()
 
-            When("getAllBoards를 호출하면") {
-                val result = fixture.boardService.getAllBoards().toList()
+            When("getBoards를 호출하면") {
+                val page = fixture.boardService.getBoards(BoardPageQuery(cursor = null, size = 2))
 
-                Then("빈 목록을 반환한다") {
-                    result.shouldBeEmpty()
+                Then("빈 페이지를 반환한다") {
+                    page.items.shouldBeEmpty()
+                    page.hasNext shouldBe false
+                    page.nextCursor shouldBe null
                 }
             }
         }

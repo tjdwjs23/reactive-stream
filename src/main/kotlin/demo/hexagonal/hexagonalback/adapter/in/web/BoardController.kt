@@ -1,13 +1,12 @@
 package demo.hexagonal.hexagonalback.adapter.`in`.web
 
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPageQuery
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.DeleteBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.GetBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.toList
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -16,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.net.URI
 
@@ -45,16 +45,14 @@ class BoardController(
     ): ResponseEntity<SuccessResponse<BoardResponse>> =
         SuccessResponse.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
 
-    // Flow<Board>를 컨트롤러 경계에서 toList로 수집해 SuccessResponse<List<..>>로 통일합니다.
-    // (스트리밍 응답이 필요하면 Flow<BoardResponse>를 그대로 반환하도록 바꿀 수 있습니다.)
+    // 키셋 페이지네이션: ?cursor=<마지막 id>&size=<페이지 크기>. cursor 생략 시 최신부터.
     @GetMapping
-    suspend fun getAllBoards(): ResponseEntity<SuccessResponse<List<BoardResponse>>> {
-        val responses =
-            getBoardUseCase
-                .getAllBoards()
-                .map { boardWebMapper.toResponse(it) }
-                .toList()
-        return SuccessResponse.ok(responses)
+    suspend fun getBoards(
+        @RequestParam(required = false) cursor: Long?,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<SuccessResponse<BoardPageResponse>> {
+        val page = getBoardUseCase.getBoards(BoardPageQuery(cursor = cursor, size = size))
+        return SuccessResponse.ok(boardWebMapper.toPageResponse(page))
     }
 
     @PutMapping("/{id}")

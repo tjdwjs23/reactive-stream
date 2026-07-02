@@ -4,7 +4,7 @@ import demo.hexagonal.hexagonalback.domain.model.Board
 import demo.hexagonal.hexagonalback.support.PostgresTestContainer
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
-import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -52,15 +52,33 @@ class BoardPersistenceAdapterTest(
             }
         }
 
-        Given("여러 Board가 저장되어 있을 때") {
-            boardPersistenceAdapter.save(Board(title = "목록1", content = "내용1"))
-            boardPersistenceAdapter.save(Board(title = "목록2", content = "내용2"))
+        Given("여러 Board가 저장되어 있을 때 - 키셋 페이지네이션") {
+            val ids =
+                (1..5).map {
+                    boardPersistenceAdapter.save(Board(title = "page-$it", content = "내용")).id!!
+                }
+            val idSet = ids.toSet()
 
-            When("findAll을 호출하면") {
-                val all = boardPersistenceAdapter.findAll().toList()
+            When("cursor를 따라가며 pageSize=2로 findPage를 반복 조회하면") {
+                // 다른 스펙이 넣은 데이터와 컨테이너를 공유하므로, 우리 id만 모아 검증합니다.
+                val collected = mutableListOf<Long>()
+                var maxPageSize = 0
+                var cursor: Long? = null
+                var guard = 0
+                while (guard++ < 10_000) {
+                    val page = boardPersistenceAdapter.findPage(cursor, 2).toList()
+                    if (page.isEmpty()) break
+                    maxPageSize = maxOf(maxPageSize, page.size)
+                    page.forEach { if (it.id in idSet) collected.add(it.id!!) }
+                    cursor = page.last().id
+                }
 
-                Then("저장된 Board를 모두 포함한 목록을 반환한다") {
-                    all.map { it.title } shouldContainAll listOf("목록1", "목록2")
+                Then("우리 id가 id 내림차순으로 모두 반환된다") {
+                    collected shouldContainExactly ids.sortedDescending()
+                }
+
+                Then("각 페이지는 pageSize를 넘지 않는다") {
+                    (maxPageSize <= 2) shouldBe true
                 }
             }
         }

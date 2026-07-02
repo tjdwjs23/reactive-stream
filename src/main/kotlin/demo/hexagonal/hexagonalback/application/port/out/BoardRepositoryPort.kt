@@ -11,7 +11,12 @@ interface BoardRepositoryPort {
 
     suspend fun findById(id: Long): Board?
 
-    fun findAll(): Flow<Board>
+    // 키셋 페이지네이션 조회: cursor(마지막으로 본 id) 이전(과거) 데이터를 id 내림차순으로 최대 limit건.
+    // cursor가 null이면 최신부터. hasNext 판정을 위해 호출 측이 limit을 size+1로 넘길 수 있습니다.
+    fun findPage(
+        cursor: Long?,
+        limit: Int,
+    ): Flow<Board>
 
     suspend fun deleteById(id: Long)
 }

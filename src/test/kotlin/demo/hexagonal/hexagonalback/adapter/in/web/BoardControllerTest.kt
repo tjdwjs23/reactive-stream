@@ -1,5 +1,6 @@
 package demo.hexagonal.hexagonalback.adapter.`in`.web
 
+import demo.hexagonal.hexagonalback.application.port.`in`.BoardPage
 import demo.hexagonal.hexagonalback.application.port.`in`.CreateBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.DeleteBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.GetBoardUseCase
@@ -9,10 +10,7 @@ import demo.hexagonal.hexagonalback.domain.model.Board
 import io.kotest.core.spec.style.BehaviorSpec
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flowOf
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 
@@ -152,30 +150,35 @@ class BoardControllerTest :
             }
         }
 
-        Given("Board 목록이 존재할 때 - GET /api/boards") {
+        Given("다음 페이지가 있는 Board 목록이 존재할 때 - GET /api/boards") {
             val fixture = ControllerFixture()
-            every { fixture.getBoardUseCase.getAllBoards() } returns
-                flowOf(
-                    sampleBoard,
-                    Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용"),
+            coEvery { fixture.getBoardUseCase.getBoards(any()) } returns
+                BoardPage(
+                    items = listOf(sampleBoard, Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용")),
+                    nextCursor = 2L,
+                    hasNext = true,
                 )
 
             When("GET 요청을 보내면") {
-                Then("200 OK와 Board 목록을 통일 포맷으로 반환한다") {
+                Then("200 OK와 페이지(items/nextCursor/hasNext)를 통일 포맷으로 반환한다") {
                     fixture.client
                         .get()
-                        .uri("/api/boards")
+                        .uri("/api/boards?size=2")
                         .exchange()
                         .expectStatus()
                         .isOk
                         .expectBody()
                         .jsonPath("$.status")
                         .isEqualTo("Success")
-                        .jsonPath("$.result.length()")
+                        .jsonPath("$.result.items.length()")
                         .isEqualTo(2)
-                        .jsonPath("$.result[0].id")
+                        .jsonPath("$.result.items[0].id")
                         .isEqualTo(1)
-                        .jsonPath("$.result[1].id")
+                        .jsonPath("$.result.items[1].id")
+                        .isEqualTo(2)
+                        .jsonPath("$.result.hasNext")
+                        .isEqualTo(true)
+                        .jsonPath("$.result.nextCursor")
                         .isEqualTo(2)
                 }
             }
@@ -183,10 +186,11 @@ class BoardControllerTest :
 
         Given("Board가 하나도 없을 때 - GET /api/boards") {
             val fixture = ControllerFixture()
-            every { fixture.getBoardUseCase.getAllBoards() } returns emptyFlow()
+            coEvery { fixture.getBoardUseCase.getBoards(any()) } returns
+                BoardPage(items = emptyList(), nextCursor = null, hasNext = false)
 
             When("GET 요청을 보내면") {
-                Then("200 OK와 빈 배열을 반환한다") {
+                Then("200 OK와 빈 페이지를 반환한다") {
                     fixture.client
                         .get()
                         .uri("/api/boards")
@@ -194,8 +198,10 @@ class BoardControllerTest :
                         .expectStatus()
                         .isOk
                         .expectBody()
-                        .jsonPath("$.result.length()")
+                        .jsonPath("$.result.items.length()")
                         .isEqualTo(0)
+                        .jsonPath("$.result.hasNext")
+                        .isEqualTo(false)
                 }
             }
         }
