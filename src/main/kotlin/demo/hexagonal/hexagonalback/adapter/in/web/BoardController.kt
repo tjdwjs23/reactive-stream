@@ -33,46 +33,44 @@ class BoardController(
     @PostMapping
     suspend fun createBoard(
         @RequestBody request: CreateBoardRequest,
-    ): ResponseEntity<ApiResponse<BoardResponse>> {
+    ): ResponseEntity<SuccessResponse<BoardResponse>> {
         val command = CreateBoardCommand(title = request.title, content = request.content)
         val response = boardWebMapper.toResponse(createBoardUseCase.createBoard(command))
-        return ResponseEntity.created(URI.create("/api/boards/${response.id}")).body(ApiResponse.success(response))
+        return SuccessResponse.created(response, URI.create("/api/boards/${response.id}"))
     }
 
     @GetMapping("/{id}")
     suspend fun getBoard(
         @PathVariable id: Long,
-    ): ResponseEntity<ApiResponse<BoardResponse>> =
-        ResponseEntity.ok(ApiResponse.success(boardWebMapper.toResponse(getBoardUseCase.getBoard(id))))
+    ): ResponseEntity<SuccessResponse<BoardResponse>> =
+        SuccessResponse.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
 
-    // Flow<Board>를 컨트롤러 경계에서 toList로 수집해 기존 ApiResponse<List<..>> 계약을 유지합니다.
+    // Flow<Board>를 컨트롤러 경계에서 toList로 수집해 SuccessResponse<List<..>>로 통일합니다.
     // (스트리밍 응답이 필요하면 Flow<BoardResponse>를 그대로 반환하도록 바꿀 수 있습니다.)
     @GetMapping
-    suspend fun getAllBoards(): ResponseEntity<ApiResponse<List<BoardResponse>>> {
+    suspend fun getAllBoards(): ResponseEntity<SuccessResponse<List<BoardResponse>>> {
         val responses =
             getBoardUseCase
                 .getAllBoards()
                 .map { boardWebMapper.toResponse(it) }
                 .toList()
-        return ResponseEntity.ok(ApiResponse.success(responses))
+        return SuccessResponse.ok(responses)
     }
 
     @PutMapping("/{id}")
     suspend fun updateBoard(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest,
-    ): ResponseEntity<ApiResponse<BoardResponse>> {
+    ): ResponseEntity<SuccessResponse<BoardResponse>> {
         val command = UpdateBoardCommand(id = id, title = request.title, content = request.content)
-        return ResponseEntity.ok(
-            ApiResponse.success(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command))),
-        )
+        return SuccessResponse.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
     }
 
     @DeleteMapping("/{id}")
     suspend fun deleteBoard(
         @PathVariable id: Long,
-    ): ResponseEntity<Void> {
+    ): ResponseEntity<SuccessResponse<Unit>> {
         deleteBoardUseCase.deleteBoard(id)
-        return ResponseEntity.noContent().build()
+        return SuccessResponse.noContent()
     }
 }

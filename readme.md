@@ -27,7 +27,7 @@
 demo.hexagonal.hexagonalback
 ├── 📂 adapter                 # [Infra] 외부 세계와 소통하는 어댑터
 │   ├── 📂 in                  # Driving Adapter (요청을 받아들이는 곳)
-│   │   ├── 📂 web             # WebFlux Controller(suspend), Web DTO, ApiResponse, GlobalExceptionHandler
+│   │   ├── 📂 web             # WebFlux Controller(suspend), Web DTO, BaseResponse/ErrorCode, GlobalExceptionHandler
 │   │   └── 📂 batch           # @Scheduled 배치 트리거 (오래된 게시글 아카이브)
 │   └── 📂 out                 # Driven Adapter (요청을 내보내는 곳)
 │       └── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper, Schema Initializer
@@ -49,7 +49,7 @@ demo.hexagonal.hexagonalback
 
 * **단건 I/O는 `suspend fun`**, **다건 조회는 `Flow<T>`** 로 반환합니다. 포트 경계에서 `List`로 전체를 메모리에 올리지 않습니다.
 * `BoardService`의 `@Transactional`은 R2DBC가 자동 구성하는 **`ReactiveTransactionManager`** 위에서 동작하며, `suspend` 함수에도 그대로 적용됩니다.
-* `Flow`는 지연 스트림이므로 **컨트롤러 경계에서 `toList`로 수집**해 기존 `ApiResponse<List<..>>` 계약을 유지합니다(필요 시 스트리밍 응답으로 전환 가능).
+* `Flow`는 지연 스트림이므로 **컨트롤러 경계에서 `toList`로 수집**해 `SuccessResponse<List<..>>`로 통일합니다(필요 시 스트리밍 응답으로 전환 가능).
 * **블로킹 세계의 구동 어댑터**(예: `suspend`를 지원하지 않는 `@Scheduled` 배치 트리거)는 어댑터 내부에서 `runBlocking`으로 코루틴 세계에 연결합니다. 블로킹 경계를 어댑터 안으로 가둡니다.
 
 ## 📐 Architecture Principles
@@ -226,24 +226,32 @@ HTTP 요청 수신부터 DB 왕복까지 전 구간이 `suspend`로 이어져 I/
 #### 3. Isolation of Persistence
 DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain Model)은 영향을 받지 않습니다. `BoardPersistenceAdapter`가 중간에서 `Mapper`를 이용해 두 객체 간의 변환을 담당합니다. 실제로 이 프로젝트는 JPA → R2DBC로 영속성 기술을 통째로 교체했지만 도메인은 변경되지 않았습니다.
 
-#### 4. Common Response Envelope & Global Exception Handling
-모든 응답은 `ApiResponse<T>`(`success`, `data`, `error`)로 감싸 클라이언트가 일관된 형태로 파싱하도록 합니다. `GlobalExceptionHandler`(`@RestControllerAdvice`)가 도메인 예외부터 잘못된 요청, 예상치 못한 예외까지 한 곳에서 매핑합니다.
+#### 4. Unified Response Format & Global Exception Handling
+성공/실패 모든 응답을 `BaseResponse<T>`(`code`, `status`, `result`) 하나로 통일합니다.
 
-WebFlux에서는 입력 바인딩 실패가 대부분 `ServerWebInputException`으로 수렴하므로, 원인(`TypeMismatchException` 여부)을 구분해 파라미터 오류와 바디 오류로 매핑합니다.
+* **성공**: `SuccessResponse<T>` — `status = "Success"`, `code = HTTP 상태값`, `result = 데이터`. 컨트롤러는 `SuccessResponse.ok(...)` / `created(res, location)` / `noContent()` 같은 팩토리로 본문·상태 코드·헤더를 함께 통일합니다.
+* **실패**: `FailureResponse` — `status = "Failure"`, `code = 에러의 statusCode`, `result = ErrorCode(code/label/statusCode)`, `message = 상황별 상세 메시지`(없으면 `ErrorCode.label`로 폴백). `error` 필드는 `private`으로 두어 직렬화에서 제외하고 노출은 `result`로만 통일합니다.
 
-| 예외 | HTTP Status | error.code |
-| :--- | :--- | :--- |
-| `BoardNotFoundException` | 404 | `BOARD_NOT_FOUND` |
-| `BoardValidationException` | 400 | `VALIDATION_ERROR` |
-| `IllegalArgumentException` (Command 자가 검증) | 400 | `VALIDATION_ERROR` |
-| `ServerWebInputException` (PathVariable 타입 불일치) | 400 | `INVALID_PARAMETER` |
-| `ServerWebInputException` (잘못된/빈 요청 Body) | 400 | `INVALID_REQUEST_BODY` |
-| 그 외 모든 예외 | 500 | `INTERNAL_SERVER_ERROR` |
+에러 코드는 `ErrorCode` 인터페이스로 정의하고 `CommonErrorCode`(공통) / `BoardErrorCode`(도메인)로 모읍니다. `GlobalExceptionHandler`(`@RestControllerAdvice`)가 예외를 `ErrorCode`로 매핑하며, 도메인은 `ErrorCode`를 전혀 알지 못합니다(매핑은 web 어댑터의 책임). WebFlux에서는 입력 바인딩 실패가 대부분 `ServerWebInputException`으로 수렴하므로, 원인(`TypeMismatchException` 여부)을 구분해 파라미터 오류와 바디 오류로 나눕니다.
+
+| 예외 | ErrorCode | HTTP Status | result.code |
+| :--- | :--- | :--- | :--- |
+| `BoardNotFoundException` | `BoardErrorCode.NotFound` | 404 | `BOARD_NOT_FOUND` |
+| `BoardValidationException` | `CommonErrorCode.ValidationError` | 400 | `VALIDATION_ERROR` |
+| `IllegalArgumentException` (Command 자가 검증) | `CommonErrorCode.ValidationError` | 400 | `VALIDATION_ERROR` |
+| `ServerWebInputException` (PathVariable 타입 불일치) | `CommonErrorCode.InvalidParameter` | 400 | `INVALID_PARAMETER` |
+| `ServerWebInputException` (잘못된/빈 요청 Body) | `CommonErrorCode.InvalidRequestBody` | 400 | `INVALID_REQUEST_BODY` |
+| 그 외 모든 예외 | `CommonErrorCode.InternalServerError` | 500 | `INTERNAL_SERVER_ERROR` |
 
 ```json
 // 성공
-{ "success": true, "data": { "id": 1, "title": "..." }, "error": null }
+{ "code": 200, "status": "Success", "result": { "id": 1, "title": "..." } }
 
-// 실패
-{ "success": false, "data": null, "error": { "code": "BOARD_NOT_FOUND", "message": "Board not found with id: 999" } }
+// 실패 (message는 상황별 상세, result는 에러 코드 정의)
+{
+  "code": 404,
+  "status": "Failure",
+  "result": { "code": "BOARD_NOT_FOUND", "label": "게시글을 찾을 수 없습니다.", "statusCode": 404 },
+  "message": "Board not found with id: 999"
+}
 ```

@@ -52,7 +52,7 @@ class BoardControllerTest :
             coEvery { fixture.createBoardUseCase.createBoard(any()) } returns sampleBoard
 
             When("POST 요청을 보내면") {
-                Then("201 Created와 Location 헤더, 생성된 Board를 반환한다") {
+                Then("201 Created와 Location 헤더, 생성된 Board를 통일 포맷으로 반환한다") {
                     fixture.client
                         .post()
                         .uri("/api/boards")
@@ -64,13 +64,15 @@ class BoardControllerTest :
                         .expectHeader()
                         .valueEquals("Location", "/api/boards/1")
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(true)
-                        .jsonPath("$.data.id")
+                        .jsonPath("$.code")
+                        .isEqualTo(201)
+                        .jsonPath("$.status")
+                        .isEqualTo("Success")
+                        .jsonPath("$.result.id")
                         .isEqualTo(1)
-                        .jsonPath("$.data.title")
+                        .jsonPath("$.result.title")
                         .isEqualTo("테스트 제목")
-                        .jsonPath("$.data.content")
+                        .jsonPath("$.result.content")
                         .isEqualTo("테스트 내용입니다.")
                 }
             }
@@ -81,7 +83,7 @@ class BoardControllerTest :
             coEvery { fixture.getBoardUseCase.getBoard(1L) } returns sampleBoard
 
             When("GET 요청을 보내면") {
-                Then("200 OK와 해당 Board를 반환한다") {
+                Then("200 OK와 해당 Board를 통일 포맷으로 반환한다") {
                     fixture.client
                         .get()
                         .uri("/api/boards/1")
@@ -89,13 +91,15 @@ class BoardControllerTest :
                         .expectStatus()
                         .isOk
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(true)
-                        .jsonPath("$.data.id")
+                        .jsonPath("$.code")
+                        .isEqualTo(200)
+                        .jsonPath("$.status")
+                        .isEqualTo("Success")
+                        .jsonPath("$.result.id")
                         .isEqualTo(1)
-                        .jsonPath("$.data.title")
+                        .jsonPath("$.result.title")
                         .isEqualTo("테스트 제목")
-                        .jsonPath("$.data.content")
+                        .jsonPath("$.result.content")
                         .isEqualTo("테스트 내용입니다.")
                 }
             }
@@ -106,7 +110,7 @@ class BoardControllerTest :
             coEvery { fixture.getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
 
             When("GET 요청을 보내면") {
-                Then("404 Not Found와 에러 코드/메시지를 반환한다") {
+                Then("404 Not Found와 에러 코드/동적 메시지를 반환한다") {
                     fixture.client
                         .get()
                         .uri("/api/boards/999")
@@ -114,11 +118,15 @@ class BoardControllerTest :
                         .expectStatus()
                         .isNotFound
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(false)
-                        .jsonPath("$.error.code")
+                        .jsonPath("$.code")
+                        .isEqualTo(404)
+                        .jsonPath("$.status")
+                        .isEqualTo("Failure")
+                        .jsonPath("$.result.code")
                         .isEqualTo("BOARD_NOT_FOUND")
-                        .jsonPath("$.error.message")
+                        .jsonPath("$.result.statusCode")
+                        .isEqualTo(404)
+                        .jsonPath("$.message")
                         .isEqualTo("Board not found with id: 999")
                 }
             }
@@ -136,9 +144,9 @@ class BoardControllerTest :
                         .expectStatus()
                         .isBadRequest
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(false)
-                        .jsonPath("$.error.code")
+                        .jsonPath("$.status")
+                        .isEqualTo("Failure")
+                        .jsonPath("$.result.code")
                         .isEqualTo("INVALID_PARAMETER")
                 }
             }
@@ -153,7 +161,7 @@ class BoardControllerTest :
                 )
 
             When("GET 요청을 보내면") {
-                Then("200 OK와 Board 목록을 반환한다") {
+                Then("200 OK와 Board 목록을 통일 포맷으로 반환한다") {
                     fixture.client
                         .get()
                         .uri("/api/boards")
@@ -161,13 +169,13 @@ class BoardControllerTest :
                         .expectStatus()
                         .isOk
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(true)
-                        .jsonPath("$.data.length()")
+                        .jsonPath("$.status")
+                        .isEqualTo("Success")
+                        .jsonPath("$.result.length()")
                         .isEqualTo(2)
-                        .jsonPath("$.data[0].id")
+                        .jsonPath("$.result[0].id")
                         .isEqualTo(1)
-                        .jsonPath("$.data[1].id")
+                        .jsonPath("$.result[1].id")
                         .isEqualTo(2)
                 }
             }
@@ -186,7 +194,7 @@ class BoardControllerTest :
                         .expectStatus()
                         .isOk
                         .expectBody()
-                        .jsonPath("$.data.length()")
+                        .jsonPath("$.result.length()")
                         .isEqualTo(0)
                 }
             }
@@ -198,7 +206,7 @@ class BoardControllerTest :
             coEvery { fixture.updateBoardUseCase.updateBoard(any()) } returns updatedBoard
 
             When("PUT 요청을 보내면") {
-                Then("200 OK와 수정된 Board를 반환한다") {
+                Then("200 OK와 수정된 Board를 통일 포맷으로 반환한다") {
                     fixture.client
                         .put()
                         .uri("/api/boards/1")
@@ -208,9 +216,11 @@ class BoardControllerTest :
                         .expectStatus()
                         .isOk
                         .expectBody()
-                        .jsonPath("$.data.title")
+                        .jsonPath("$.status")
+                        .isEqualTo("Success")
+                        .jsonPath("$.result.title")
                         .isEqualTo("수정된 제목")
-                        .jsonPath("$.data.content")
+                        .jsonPath("$.result.content")
                         .isEqualTo("수정된 내용")
                 }
             }
@@ -230,9 +240,9 @@ class BoardControllerTest :
                         .expectStatus()
                         .isBadRequest
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(false)
-                        .jsonPath("$.error.code")
+                        .jsonPath("$.status")
+                        .isEqualTo("Failure")
+                        .jsonPath("$.result.code")
                         .isEqualTo("VALIDATION_ERROR")
                 }
             }
@@ -247,9 +257,9 @@ class BoardControllerTest :
                         .expectStatus()
                         .isBadRequest
                         .expectBody()
-                        .jsonPath("$.success")
-                        .isEqualTo(false)
-                        .jsonPath("$.error.code")
+                        .jsonPath("$.status")
+                        .isEqualTo("Failure")
+                        .jsonPath("$.result.code")
                         .isEqualTo("INVALID_REQUEST_BODY")
                 }
             }
