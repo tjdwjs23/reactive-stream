@@ -21,9 +21,14 @@ interface BoardRepositoryPort {
     suspend fun deleteById(id: Long)
 
     // 조회수 write-back: 특정 게시글의 view_count에 delta를 더합니다. 반환값은 영향받은 행 수.
-    // (Redis에 누적된 조회 델타를 플러시할 때 사용)
+    // (단건 경로. 대량 플러시는 addViewCountsBatch를 사용합니다.)
     suspend fun addViewCount(
         boardId: Long,
         delta: Long,
     ): Int
+
+    // 조회수 write-back(배치): 여러 게시글의 view_count 델타를 단일 UPDATE로 한꺼번에 반영합니다.
+    // 건별 왕복(addViewCount N회) 대신 DB 라운드트립을 1회로 줄여, 플러시 대상이 많을수록 큰 이득입니다.
+    // 반환값은 영향받은 행 수(존재하지 않는 id는 반영되지 않으므로 deltas.size보다 작을 수 있음).
+    suspend fun addViewCountsBatch(deltas: Map<Long, Long>): Int
 }

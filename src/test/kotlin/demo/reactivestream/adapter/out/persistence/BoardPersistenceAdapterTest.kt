@@ -83,6 +83,21 @@ class BoardPersistenceAdapterTest(
             }
         }
 
+        Given("여러 Board가 저장되어 있을 때 - 조회수 배치 write-back") {
+            val a = boardPersistenceAdapter.save(Board(title = "배치A", content = "내용")).id!!
+            val b = boardPersistenceAdapter.save(Board(title = "배치B", content = "내용")).id!!
+
+            When("addViewCountsBatch로 여러 게시글 델타를 한 번에 반영하면") {
+                val updated = boardPersistenceAdapter.addViewCountsBatch(mapOf(a to 7L, b to 3L, -1L to 99L))
+
+                Then("존재하는 게시글의 view_count만 델타만큼 증가한다") {
+                    updated shouldBe 2 // 존재하지 않는 -1L은 반영되지 않음
+                    boardPersistenceAdapter.findById(a)?.viewCount shouldBe 7L
+                    boardPersistenceAdapter.findById(b)?.viewCount shouldBe 3L
+                }
+            }
+        }
+
         Given("저장된 Board가 존재할 때") {
             val saved = boardPersistenceAdapter.save(Board(title = "삭제될 제목", content = "삭제될 내용"))
 
