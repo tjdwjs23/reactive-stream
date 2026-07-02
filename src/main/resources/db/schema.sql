@@ -7,3 +7,7 @@ CREATE TABLE IF NOT EXISTS board
     content    TEXT         NOT NULL,
     created_at TIMESTAMP    NOT NULL
 );
+
+-- 아카이브 배치의 키셋 조회(WHERE created_at < :before ... ORDER BY id)에서 created_at 범위 필터가
+-- 대용량일 때 풀스캔이 되지 않도록 인덱스를 둡니다. 목록 API는 PK(id)만 쓰므로 별도 인덱스가 필요 없습니다.
+CREATE INDEX IF NOT EXISTS idx_board_created_at ON board (created_at);

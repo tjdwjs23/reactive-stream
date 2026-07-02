@@ -3,9 +3,11 @@ package demo.hexagonal.hexagonalback.adapter.`in`.web
 import demo.hexagonal.hexagonalback.domain.exception.BoardNotFoundException
 import demo.hexagonal.hexagonalback.domain.exception.BoardValidationException
 import org.springframework.beans.TypeMismatchException
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.server.ServerWebInputException
 
 @RestControllerAdvice
@@ -34,6 +36,22 @@ class GlobalExceptionHandler {
         } else {
             failure(CommonErrorCode.InvalidRequestBody)
         }
+
+    // 프레임워크가 던지는 상태 예외(존재하지 않는 경로의 NoResourceFoundException=404,
+    // 405/415 등)는 그 HTTP 상태를 보존해 통일 포맷으로 응답합니다.
+    // (아래 handleException(Exception)이 이를 500으로 뭉개지 않도록 더 구체적인 핸들러로 가로챕니다.)
+    // ServerWebInputException(400)은 위의 전용 핸들러가 먼저 처리하므로 여기 오지 않습니다.
+    @ExceptionHandler(ResponseStatusException::class)
+    fun handleResponseStatusException(e: ResponseStatusException): ResponseEntity<FailureResponse> {
+        val status = HttpStatus.resolve(e.statusCode.value())
+        val errorCode =
+            DynamicErrorCode(
+                code = status?.name ?: "HTTP_${e.statusCode.value()}",
+                label = status?.reasonPhrase ?: "요청을 처리할 수 없습니다.",
+                statusCode = e.statusCode.value(),
+            )
+        return failure(errorCode)
+    }
 
     // 예상하지 못한 예외 - 내부 구현 정보 노출 방지를 위해 메시지를 고정값(label)으로 응답
     @ExceptionHandler(Exception::class)

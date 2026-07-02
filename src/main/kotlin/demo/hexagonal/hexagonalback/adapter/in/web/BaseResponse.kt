@@ -34,20 +34,6 @@ data class SuccessResponse<T>(
             ResponseEntity
                 .status(HttpStatus.NO_CONTENT)
                 .body(SuccessResponse(code = HttpStatus.NO_CONTENT.value(), result = null))
-
-        fun <T> accepted(): ResponseEntity<SuccessResponse<T>> =
-            ResponseEntity
-                .status(HttpStatus.ACCEPTED)
-                .body(SuccessResponse(code = HttpStatus.ACCEPTED.value(), result = null))
-
-        fun <T> okWithHeaders(
-            res: T,
-            vararg headers: Pair<String, String>,
-        ): ResponseEntity<SuccessResponse<T>> {
-            val builder = ResponseEntity.ok()
-            headers.forEach { (key, value) -> builder.header(key, value) }
-            return builder.body(SuccessResponse(code = HttpStatus.OK.value(), result = res))
-        }
     }
 }
 

@@ -1,4 +1,3 @@
-// adapter/out/persistence/BoardR2dbcEntity.kt
 package demo.hexagonal.hexagonalback.adapter.out.persistence
 
 import org.springframework.data.annotation.Id

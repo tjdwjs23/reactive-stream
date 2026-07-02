@@ -39,6 +39,14 @@ object CommonErrorCode {
     }
 }
 
+// 프레임워크가 던지는 ResponseStatusException(404/405/415 등)처럼 사전 정의되지 않은 상태 코드를
+// 통일 포맷으로 감쌀 때 사용합니다. 미리 object로 나열할 수 없는 동적 상태 코드를 담습니다.
+data class DynamicErrorCode(
+    override val code: String,
+    override val label: String,
+    override val statusCode: Int,
+) : ErrorCode
+
 // 게시판 도메인 전용 에러 코드 모음.
 object BoardErrorCode {
     object NotFound : ErrorCode {
