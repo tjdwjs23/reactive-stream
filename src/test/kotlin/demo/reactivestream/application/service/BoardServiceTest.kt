@@ -79,6 +79,23 @@ class BoardServiceTest :
             }
         }
 
+        Given("Redis(조회수 버퍼)가 장애일 때") {
+            val fixture = ServiceFixture()
+            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 42L)
+            coEvery { fixture.boardRepositoryPort.findById(1L) } returns board
+            coEvery { fixture.boardViewCountPort.increment(1L) } throws RuntimeException("redis down")
+
+            When("getBoard를 호출하면") {
+                val result = fixture.boardService.getBoard(1L)
+
+                Then("조회는 실패하지 않고, 미반영 델타 없이 DB 누적값으로 응답한다") {
+                    result.id shouldBe 1L
+                    result.viewCount shouldBe 42L // 델타 0으로 강등(best-effort)
+                    coVerify { fixture.boardViewCountPort.increment(1L) }
+                }
+            }
+        }
+
         Given("다음 페이지가 있을 만큼 Board가 많을 때") {
             val fixture = ServiceFixture()
             // size=2 요청 → 서비스는 hasNext 판정을 위해 size+1(=3)건을 id 내림차순으로 조회한다

@@ -12,7 +12,12 @@ import demo.reactivestream.application.port.out.BoardRepositoryPort
 import demo.reactivestream.application.port.out.BoardViewCountPort
 import demo.reactivestream.domain.exception.BoardNotFoundException
 import demo.reactivestream.domain.model.Board
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.withTimeout
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -25,10 +30,14 @@ import org.springframework.transaction.annotation.Transactional
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort,
     private val boardViewCountPort: BoardViewCountPort,
+    // 조회수 증가(Redis)에 허용하는 시간 예산. Redis가 느리거나 죽어도 조회 지연이 여기서 상한선을 가집니다.
+    @Value("\${board.view-count.increment-timeout-ms:200}") private val incrementTimeoutMs: Long = 200,
 ) : CreateBoardUseCase,
     GetBoardUseCase,
     UpdateBoardUseCase,
     DeleteBoardUseCase {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     override suspend fun createBoard(command: CreateBoardCommand): Board {
         // 도메인 객체 생성
         val newBoard =
@@ -48,9 +57,31 @@ class BoardService(
         val board =
             boardRepositoryPort.findById(id)
                 ?: throw BoardNotFoundException(id)
-        val pendingDelta = boardViewCountPort.increment(id)
+        // 조회수 집계는 부가 기능(best-effort)입니다. Redis 장애가 핵심 조회 경로를 막지 않도록,
+        // 증가 실패/지연 시엔 델타 0으로 강등해 DB 누적값으로 정상 응답합니다.
+        val pendingDelta = incrementViewCountSafely(id)
         return board.copy(viewCount = board.viewCount + pendingDelta)
     }
+
+    // 조회수 증가를 시간 예산 안에서 시도하고, 실패하면 0을 돌려줍니다(조회 자체는 성공).
+    // TimeoutCancellationException은 강등 대상이지만, 그 외 CancellationException(상위 취소)은
+    // 구조적 동시성을 위해 삼키지 않고 다시 던집니다.
+    private suspend fun incrementViewCountSafely(id: Long): Long =
+        try {
+            withTimeout(incrementTimeoutMs) { boardViewCountPort.increment(id) }
+        } catch (e: TimeoutCancellationException) {
+            log.warn(
+                "view count increment timed out (boardId={}, budget={}ms); serving DB value",
+                id,
+                incrementTimeoutMs,
+            )
+            0L
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("view count increment failed (boardId={}); serving DB value. cause={}", id, e.toString())
+            0L
+        }
 
     // 키셋 페이지네이션. 한 페이지(size)만 읽으므로 여기서 collect(toList)해도 요청당 메모리가 일정합니다.
     // suspend 함수 내부에서 즉시 소비하므로 @Transactional(readOnly)가 실제 읽기를 정확히 감쌉니다.
