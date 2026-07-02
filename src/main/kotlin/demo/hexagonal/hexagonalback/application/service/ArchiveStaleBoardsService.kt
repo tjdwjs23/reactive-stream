@@ -5,6 +5,7 @@ import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsComm
 import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsUseCase
 import demo.hexagonal.hexagonalback.application.port.out.BoardBatchQueryPort
 import demo.hexagonal.hexagonalback.domain.model.Board
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
@@ -101,11 +102,15 @@ class ArchiveStaleBoardsService(
         if (targetIds.isEmpty()) return
 
         // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다(murray의 skipPolicy).
-        runCatching { boardBatchQueryPort.deleteByIds(targetIds) }
-            .onSuccess { deleted.addAndGet(it) }
-            .onFailure { e ->
-                failedChunks.incrementAndGet()
-                log.error("Failed to delete chunk (size={}). Skip and continue.", targetIds.size, e)
-            }
+        // 단, CancellationException은 코루틴 취소 신호이므로 삼키지 않고 다시 던져 구조적 동시성을 지킵니다.
+        // (runCatching은 취소 예외까지 잡아버리므로 여기서는 명시적 try/catch를 씁니다.)
+        try {
+            deleted.addAndGet(boardBatchQueryPort.deleteByIds(targetIds))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failedChunks.incrementAndGet()
+            log.error("Failed to delete chunk (size={}). Skip and continue.", targetIds.size, e)
+        }
     }
 }

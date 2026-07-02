@@ -41,9 +41,10 @@ class BoardService(
         boardRepositoryPort.findById(id)
             ?: throw BoardNotFoundException(id)
 
-    // Flow는 지연 스트림이라 트랜잭션 경계 안에서 즉시 소비되지 않습니다.
-    // 실제 구독(collect)은 어댑터(컨트롤러)에서 일어나므로 여기서는 그대로 흘려보냅니다.
-    @Transactional(readOnly = true)
+    // 반환하는 것은 cold Flow입니다. 실제 구독(collect)은 어댑터(컨트롤러)에서 일어나므로,
+    // 여기에 @Transactional을 붙여도 트랜잭션은 "Flow를 리턴하는 순간" 열렸다 닫혀 실제 읽기를 감싸지 못합니다.
+    // 단일 조회라 경계가 불필요하므로 @Transactional을 두지 않습니다.
+    // (스트림 전체를 하나의 트랜잭션으로 묶어야 한다면 TransactionalOperator로 Flow를 감싸야 합니다.)
     override fun getAllBoards(): Flow<Board> = boardRepositoryPort.findAll()
 
     override suspend fun updateBoard(command: UpdateBoardCommand): Board {

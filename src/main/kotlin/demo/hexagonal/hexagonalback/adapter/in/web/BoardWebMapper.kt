@@ -12,6 +12,4 @@ class BoardWebMapper {
             content = board.content,
             createdAt = board.createdAt,
         )
-
-    fun toResponseList(boards: List<Board>): List<BoardResponse> = boards.map { toResponse(it) }
 }
