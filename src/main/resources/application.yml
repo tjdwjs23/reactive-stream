@@ -1,6 +1,6 @@
 spring:
   application:
-    name: hexagonal-back
+    name: reactive-stream
 
   # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
   # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가

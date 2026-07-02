@@ -1,0 +1,65 @@
+package demo.reactivestream.application.port.`in`
+
+import demo.reactivestream.domain.model.Board
+
+// 1. 게시글 생성 유즈케이스
+interface CreateBoardUseCase {
+    suspend fun createBoard(command: CreateBoardCommand): Board
+}
+
+data class CreateBoardCommand(
+    val title: String,
+    val content: String,
+) {
+    init {
+        // 입력 모델의 유효성 검증 (Self-Validating)
+        require(title.isNotBlank()) { "Title must not be blank" }
+        require(content.length >= 10) { "Content must be at least 10 characters" }
+    }
+}
+
+// 2. 게시글 조회 유즈케이스
+interface GetBoardUseCase {
+    suspend fun getBoard(id: Long): Board
+
+    // 목록은 키셋(seek) 페이지네이션으로 조회합니다. 한 번에 size건만 읽으므로
+    // OFFSET 방식/전체 조회와 달리 데이터가 커져도 요청당 메모리/지연이 일정합니다.
+    suspend fun getBoards(query: BoardPageQuery): BoardPage
+}
+
+// 커서 페이지 요청. cursor가 null이면 첫 페이지(최신)부터, 아니면 그 id보다 과거를 읽습니다.
+data class BoardPageQuery(
+    val cursor: Long? = null,
+    val size: Int = 20,
+) {
+    init {
+        require(size in 1..100) { "size must be between 1 and 100" }
+        require(cursor == null || cursor > 0) { "cursor must be positive" }
+    }
+}
+
+// 커서 페이지 결과. nextCursor는 다음 요청에 그대로 넘길 커서이며, 다음 페이지가 없으면 null입니다.
+data class BoardPage(
+    val items: List<Board>,
+    val nextCursor: Long?,
+    val hasNext: Boolean,
+)
+
+// 3. 게시글 수정 유즈케이스
+interface UpdateBoardUseCase {
+    suspend fun updateBoard(command: UpdateBoardCommand): Board
+}
+
+// CreateBoardCommand와 달리 init 블록 검증이 없습니다.
+// 수정 시 제목 공백 여부는 Board.update()가 도메인 규칙으로 검증하며,
+// 내용 최소 길이는 최초 생성 시에만 강제합니다 (수정은 기존 내용을 줄이는 것을 허용).
+data class UpdateBoardCommand(
+    val id: Long,
+    val title: String,
+    val content: String,
+)
+
+// 4. 게시글 삭제 유즈케이스
+interface DeleteBoardUseCase {
+    suspend fun deleteBoard(id: Long)
+}

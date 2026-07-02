@@ -1,4 +1,4 @@
-# ⬢ Hexagonal Architecture Board API
+# 🌊 Reactive Stream — Board API
 
 > **Strict Hexagonal Architecture (Ports and Adapters)** implementation using **Kotlin** & **Spring Boot 4**, on a fully **non-blocking reactive stack**: **Spring WebFlux + Kotlin Coroutines + Spring Data R2DBC**.
 
@@ -26,7 +26,7 @@
 패키지 구조는 기술적인 계층이 아닌 **아키텍처의 의도**를 명확히 드러내도록 구성되었습니다.
 
 ```text
-demo.hexagonal.hexagonalback
+demo.reactivestream
 ├── 📂 adapter                 # [Infra] 외부 세계와 소통하는 어댑터
 │   ├── 📂 in                  # Driving Adapter (요청을 받아들이는 곳)
 │   │   ├── 📂 web             # WebFlux Controller(suspend), Web DTO, BaseResponse/ErrorCode, GlobalExceptionHandler
@@ -116,8 +116,8 @@ demo.hexagonal.hexagonalback
 
 ```text
 src/test
-└── demo.hexagonal.hexagonalback
-    ├── HexagonalBackApplicationTests          # 전체 ApplicationContext 로딩 검증 (Testcontainers)
+└── demo.reactivestream
+    ├── ReactiveStreamApplicationTests          # 전체 ApplicationContext 로딩 검증 (Testcontainers)
     ├── domain/model/
     │   └── BoardTest                          # Domain 단위 테스트
     ├── application/port/in/
@@ -151,7 +151,7 @@ src/test
 | `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
 | `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
-| `HexagonalBackApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
+| `ReactiveStreamApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
 
 > Kotest 기본 isolation mode(`SingleInstance`)에서는 스펙 인스턴스가 한 번만 생성되므로, `Given` 블록마다 mock/fixture를 **새로** 만들어야 테스트 간 호출 기록이 섞이지 않습니다 (`ServiceFixture`, `ControllerFixture` 참고).
 
