@@ -39,4 +39,9 @@ class BoardPersistenceAdapter(
     override suspend fun deleteById(id: Long) {
         boardR2dbcRepository.deleteById(id)
     }
+
+    override suspend fun addViewCount(
+        boardId: Long,
+        delta: Long,
+    ): Int = boardR2dbcRepository.addViewCount(boardId, delta)
 }

@@ -10,6 +10,12 @@ spring:
     username: hexagonal
     password: hexagonal1234
 
+  # 조회수 카운터용 Redis(리액티브 Lettuce). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
 # 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램.
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
 # - /actuator/metrics, /actuator/prometheus : 처리량/지연 등 메트릭 (http.server.requests 타이머)
@@ -34,3 +40,8 @@ board:
     retention-days: 365       # 365일 지난 게시글이 대상
     chunk-size: 500           # 한 번에 삭제할 청크 크기 = 스트리밍 페이지 크기
     concurrency: 4            # 동시 처리 워커 수 = 바운드 채널 용량(백프레셔 상한)
+
+  # 조회수 write-back 플러시: Redis에 쌓인 델타를 주기적으로 DB에 반영
+  view-count:
+    flush-enabled: true       # 끄면 스케줄 플러시를 건너뜀(델타는 Redis에 계속 누적)
+    flush-interval-ms: 30000  # 플러시 주기(ms). 짧을수록 DB 정합성↑, 쓰기 부하↑

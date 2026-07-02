@@ -1,6 +1,6 @@
 package demo.reactivestream.adapter.`in`.web
 
-import demo.reactivestream.support.PostgresTestContainer
+import demo.reactivestream.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.springframework.beans.factory.annotation.Value
@@ -42,6 +42,6 @@ class RouteNotFoundTest(
     companion object {
         @JvmStatic
         @DynamicPropertySource
-        fun registerProperties(registry: DynamicPropertyRegistry) = PostgresTestContainer.registerProperties(registry)
+        fun registerProperties(registry: DynamicPropertyRegistry) = TestContainers.registerAll(registry)
     }
 }

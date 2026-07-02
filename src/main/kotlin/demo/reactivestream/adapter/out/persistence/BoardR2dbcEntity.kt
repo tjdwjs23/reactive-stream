@@ -14,4 +14,5 @@ class BoardR2dbcEntity(
     val title: String,
     val content: String,
     val createdAt: LocalDateTime = LocalDateTime.now(),
+    val viewCount: Long = 0,
 )

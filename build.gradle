@@ -30,6 +30,9 @@ dependencies {
 
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
 
+    // 조회수 카운터: 리액티브 Redis(Lettuce, 논블로킹). 블로킹 RedisTemplate/Jedis는 쓰지 않습니다.
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
+
     // 관측성: Actuator(health/metrics + r2dbc health), Micrometer Prometheus 레지스트리(처리량/지연 노출)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'

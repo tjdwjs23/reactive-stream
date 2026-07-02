@@ -19,4 +19,11 @@ interface BoardRepositoryPort {
     ): Flow<Board>
 
     suspend fun deleteById(id: Long)
+
+    // 조회수 write-back: 특정 게시글의 view_count에 delta를 더합니다. 반환값은 영향받은 행 수.
+    // (Redis에 누적된 조회 델타를 플러시할 때 사용)
+    suspend fun addViewCount(
+        boardId: Long,
+        delta: Long,
+    ): Int
 }

@@ -4,6 +4,7 @@ import demo.reactivestream.application.port.`in`.BoardPageQuery
 import demo.reactivestream.application.port.`in`.CreateBoardCommand
 import demo.reactivestream.application.port.`in`.UpdateBoardCommand
 import demo.reactivestream.application.port.out.BoardRepositoryPort
+import demo.reactivestream.application.port.out.BoardViewCountPort
 import demo.reactivestream.domain.exception.BoardNotFoundException
 import demo.reactivestream.domain.model.Board
 import io.kotest.assertions.throwables.shouldThrow
@@ -22,7 +23,8 @@ import java.time.LocalDateTime
 
 private class ServiceFixture {
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
-    val boardService = BoardService(boardRepositoryPort)
+    val boardViewCountPort = mockk<BoardViewCountPort>()
+    val boardService = BoardService(boardRepositoryPort, boardViewCountPort)
 }
 
 class BoardServiceTest :
@@ -47,15 +49,19 @@ class BoardServiceTest :
 
         Given("존재하는 ID가 주어졌을 때") {
             val fixture = ServiceFixture()
-            val board = Board(id = 1L, title = "제목", content = "내용")
+            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 10L)
             coEvery { fixture.boardRepositoryPort.findById(1L) } returns board
+            // 조회 시 Redis 델타 +1, 아직 DB에 반영 안 된 누적 델타(3)를 반환한다고 가정
+            coEvery { fixture.boardViewCountPort.increment(1L) } returns 3L
 
             When("getBoard를 호출하면") {
                 val result = fixture.boardService.getBoard(1L)
 
-                Then("해당 Board를 반환한다") {
+                Then("조회수를 증가시키고, DB 누적값 + 미반영 델타를 조회수로 반환한다") {
                     result.id shouldBe 1L
                     result.title shouldBe "제목"
+                    result.viewCount shouldBe 13L
+                    coVerify { fixture.boardViewCountPort.increment(1L) }
                 }
             }
         }

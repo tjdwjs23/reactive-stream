@@ -1,7 +1,7 @@
 package demo.reactivestream.adapter.out.persistence
 
 import demo.reactivestream.domain.model.Board
-import demo.reactivestream.support.PostgresTestContainer
+import demo.reactivestream.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContainExactly
@@ -92,6 +92,6 @@ class BoardBatchPersistenceAdapterTest(
     companion object {
         @JvmStatic
         @DynamicPropertySource
-        fun registerProperties(registry: DynamicPropertyRegistry) = PostgresTestContainer.registerProperties(registry)
+        fun registerProperties(registry: DynamicPropertyRegistry) = TestContainers.registerAll(registry)
     }
 }

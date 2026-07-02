@@ -1,6 +1,6 @@
 package demo.reactivestream.adapter.`in`.web
 
-import demo.reactivestream.support.PostgresTestContainer
+import demo.reactivestream.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.springframework.beans.factory.annotation.Value
@@ -19,7 +19,7 @@ class ActuatorEndpointTest(
 
         Given("Actuator가 구성되어 있을 때") {
             When("GET /actuator/health") {
-                Then("전체 UP과 r2dbc 헬스가 노출된다") {
+                Then("전체 UP과 r2dbc·redis 헬스가 노출된다") {
                     client
                         .get()
                         .uri("/actuator/health")
@@ -30,6 +30,8 @@ class ActuatorEndpointTest(
                         .jsonPath("$.status")
                         .isEqualTo("UP")
                         .jsonPath("$.components.r2dbc.status")
+                        .isEqualTo("UP")
+                        .jsonPath("$.components.redis.status")
                         .isEqualTo("UP")
                 }
             }
@@ -51,6 +53,6 @@ class ActuatorEndpointTest(
     companion object {
         @JvmStatic
         @DynamicPropertySource
-        fun registerProperties(registry: DynamicPropertyRegistry) = PostgresTestContainer.registerProperties(registry)
+        fun registerProperties(registry: DynamicPropertyRegistry) = TestContainers.registerAll(registry)
     }
 }

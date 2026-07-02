@@ -40,4 +40,12 @@ interface BoardR2dbcRepository : CoroutineCrudRepository<BoardR2dbcEntity, Long>
     @Modifying
     @Query("DELETE FROM board WHERE id IN (:ids)")
     suspend fun deleteByIdIn(ids: List<Long>): Int
+
+    // 조회수 write-back: DB에서 원자적으로 누적(read-modify-write가 아닌 단일 UPDATE).
+    @Modifying
+    @Query("UPDATE board SET view_count = view_count + :delta WHERE id = :id")
+    suspend fun addViewCount(
+        id: Long,
+        delta: Long,
+    ): Int
 }

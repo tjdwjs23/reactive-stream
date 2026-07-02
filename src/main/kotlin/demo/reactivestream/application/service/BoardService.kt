@@ -9,6 +9,7 @@ import demo.reactivestream.application.port.`in`.GetBoardUseCase
 import demo.reactivestream.application.port.`in`.UpdateBoardCommand
 import demo.reactivestream.application.port.`in`.UpdateBoardUseCase
 import demo.reactivestream.application.port.out.BoardRepositoryPort
+import demo.reactivestream.application.port.out.BoardViewCountPort
 import demo.reactivestream.domain.exception.BoardNotFoundException
 import demo.reactivestream.domain.model.Board
 import kotlinx.coroutines.flow.toList
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional
 @Transactional
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort,
+    private val boardViewCountPort: BoardViewCountPort,
 ) : CreateBoardUseCase,
     GetBoardUseCase,
     UpdateBoardUseCase,
@@ -38,10 +40,17 @@ class BoardService(
         return boardRepositoryPort.save(newBoard)
     }
 
+    // 단건 조회는 조회수 1건을 반영합니다. DB에는 즉시 쓰지 않고 Redis에 델타를 누적(INCR)한 뒤,
+    // 응답에는 DB 누적값 + 아직 반영 안 된 델타를 더해 실시간 조회수를 보여줍니다.
+    // (readOnly 트랜잭션은 DB 읽기만 감싸며, Redis 증가는 트랜잭션 밖의 별도 자원 연산입니다.)
     @Transactional(readOnly = true)
-    override suspend fun getBoard(id: Long): Board =
-        boardRepositoryPort.findById(id)
-            ?: throw BoardNotFoundException(id)
+    override suspend fun getBoard(id: Long): Board {
+        val board =
+            boardRepositoryPort.findById(id)
+                ?: throw BoardNotFoundException(id)
+        val pendingDelta = boardViewCountPort.increment(id)
+        return board.copy(viewCount = board.viewCount + pendingDelta)
+    }
 
     // 키셋 페이지네이션. 한 페이지(size)만 읽으므로 여기서 collect(toList)해도 요청당 메모리가 일정합니다.
     // suspend 함수 내부에서 즉시 소비하므로 @Transactional(readOnly)가 실제 읽기를 정확히 감쌉니다.

@@ -12,6 +12,7 @@ class BoardWebMapper {
             title = board.title,
             content = board.content,
             createdAt = board.createdAt,
+            viewCount = board.viewCount,
         )
 
     fun toPageResponse(page: BoardPage): BoardPageResponse =

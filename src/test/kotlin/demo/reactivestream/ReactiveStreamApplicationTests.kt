@@ -1,6 +1,6 @@
 package demo.reactivestream
 
-import demo.reactivestream.support.PostgresTestContainer
+import demo.reactivestream.support.TestContainers
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -15,6 +15,6 @@ class ReactiveStreamApplicationTests {
     companion object {
         @JvmStatic
         @DynamicPropertySource
-        fun registerProperties(registry: DynamicPropertyRegistry) = PostgresTestContainer.registerProperties(registry)
+        fun registerProperties(registry: DynamicPropertyRegistry) = TestContainers.registerAll(registry)
     }
 }

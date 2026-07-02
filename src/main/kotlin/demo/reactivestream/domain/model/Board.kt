@@ -8,6 +8,8 @@ data class Board(
     val title: String,
     val content: String,
     val createdAt: LocalDateTime = LocalDateTime.now(),
+    // 조회수. DB에 누적된 값이며, 조회 응답 시 Redis에 아직 반영 안 된 델타를 더해 실시간 값으로 보정합니다.
+    val viewCount: Long = 0,
 ) {
     fun update(
         title: String,
