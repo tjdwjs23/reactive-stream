@@ -29,13 +29,9 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.9.0'
 
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
-    implementation 'org.springframework.boot:spring-boot-starter-flyway'
-    implementation 'org.flywaydb:flyway-database-postgresql'
 
-    // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용
+    // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용(JDBC 드라이버는 사용하지 않음)
     runtimeOnly 'org.postgresql:r2dbc-postgresql'
-    // JDBC 드라이버: Flyway 마이그레이션 전용(Flyway는 R2DBC를 지원하지 않음)
-    runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'io.projectreactor:reactor-test'

@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test --tests "demo.hexagonal.hexagonalback.HexagonalBackApplicationTests.contextLoads"
 ```
 
-> **Note**: The app uses **R2DBC (non-blocking)** against PostgreSQL. `application.yml` configures `spring.r2dbc.*` for the runtime and `spring.flyway.*` (JDBC) for schema migrations — Flyway does not support R2DBC, so a JDBC URL is kept solely for migrations. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/hexagonal`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers both the r2dbc URL and the flyway JDBC URL.
+> **Note**: The app uses **R2DBC (non-blocking) only — no JDBC anywhere**. `application.yml` configures `spring.r2dbc.*`. Schema is initialized at startup by a **`ConnectionFactoryInitializer`** bean (`adapter/out/persistence/R2dbcSchemaInitializer.kt`) that runs `db/schema.sql` over R2DBC (Flyway was removed because it requires JDBC). `db/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/hexagonal`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers only the r2dbc URL and uses a **log-based wait strategy** (the default readiness probe uses JDBC, which is no longer on the classpath).
 
 ## Architecture
 

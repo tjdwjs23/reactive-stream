@@ -11,8 +11,8 @@
 * **Language**: Kotlin (JDK 21)
 * **Framework**: Spring Boot 4.0.1, **Spring WebFlux** (Netty, 논블로킹)
 * **Concurrency**: **Kotlin Coroutines** (`suspend` / `Flow`), `kotlinx-coroutines-reactor` 브리지
-* **Persistence**: **Spring Data R2DBC** (`CoroutineCrudRepository`), PostgreSQL
-* **Migration**: Flyway (마이그레이션 전용 JDBC 커넥션)
+* **Persistence**: **Spring Data R2DBC** (`CoroutineCrudRepository`), PostgreSQL — **JDBC 미사용**
+* **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters)
 * **Test**: Kotest (BehaviorSpec), MockK, WebTestClient, Testcontainers
@@ -30,7 +30,7 @@ demo.hexagonal.hexagonalback
 │   │   ├── 📂 web             # WebFlux Controller(suspend), Web DTO, ApiResponse, GlobalExceptionHandler
 │   │   └── 📂 batch           # @Scheduled 배치 트리거 (오래된 게시글 아카이브)
 │   └── 📂 out                 # Driven Adapter (요청을 내보내는 곳)
-│       └── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper
+│       └── 📂 persistence     # R2DBC Entity, Coroutine Repository, Mapper, Schema Initializer
 │
 ├── 📂 application             # [App] 도메인과 어댑터를 연결하는 오케스트레이션
 │   ├── 📂 port                # 인터페이스 (Port) 정의
@@ -137,9 +137,9 @@ src/test
 
 영속성/컨텍스트 통합 테스트는 `PostgresTestContainer` 싱글톤을 공유합니다.
 
-1. 테스트 실행 시 `postgres:16-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`와는 무관합니다).
-2. `@DynamicPropertySource`가 컨테이너의 실제 접속 정보를 런타임으로 주입합니다 — 애플리케이션용 **`spring.r2dbc.*`(R2DBC URL)** 와 Flyway 마이그레이션용 **`spring.flyway.*`(JDBC URL)** 를 함께 등록합니다.
-3. ApplicationContext가 뜨면서 Flyway가 `src/main/resources/db/migration`의 마이그레이션을 JDBC로 그 컨테이너에 적용해 스키마를 구성하고, 런타임 쿼리는 R2DBC로 실행됩니다.
+1. 테스트 실행 시 `postgres:16-alpine` 이미지를 받아 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`와는 무관합니다). JDBC 드라이버가 없으므로 컨테이너 readiness는 **로그 메시지 기반 대기 전략**으로 판정합니다.
+2. `@DynamicPropertySource`가 컨테이너의 실제 접속 정보를 애플리케이션용 **`spring.r2dbc.*`(R2DBC URL)** 로만 주입합니다.
+3. ApplicationContext가 뜨면서 `ConnectionFactoryInitializer`가 `src/main/resources/db/schema.sql`을 R2DBC로 실행해 스키마를 구성하고, 이후 모든 쿼리도 R2DBC로 실행됩니다.
 4. JVM(Gradle 테스트 프로세스) 종료 시 Testcontainers의 Ryuk이 컨테이너를 자동으로 정리합니다.
 
 즉 별도 설정 없이 `./gradlew test`만 실행해도 PostgreSQL이 자동으로 뜨고 내려갑니다. **Docker가 실행 중이어야** 합니다.
@@ -205,9 +205,9 @@ docker run --name hexagonal-postgres -e POSTGRES_DB=hexagonal \
 
 `bootRun`은 `src/main/resources/application.yml`에 고정된 접속 정보로 DB에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL이 떠 있어야 합니다.
 
-* **런타임 쿼리**는 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/hexagonal`)로 **논블로킹** 실행됩니다.
-* **스키마 마이그레이션**은 Flyway가 담당합니다. Flyway는 R2DBC를 지원하지 않으므로 마이그레이션 전용 JDBC 접속 정보(`spring.flyway.url` = `jdbc:postgresql://...`)를 별도로 두며, 애플리케이션 기동 시 `src/main/resources/db/migration`의 마이그레이션을 자동 적용합니다.
-* 스키마 변경은 `Vn__설명.sql` 형식의 새 마이그레이션 파일을 추가하는 방식으로 관리합니다.
+* **모든 DB 접근**은 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/hexagonal`)로 **논블로킹** 실행됩니다. **JDBC는 어디에서도 사용하지 않습니다.**
+* **스키마 초기화**는 `R2dbcSchemaInitializer`가 등록한 R2DBC `ConnectionFactoryInitializer`가 담당합니다. 애플리케이션 기동 시 `src/main/resources/db/schema.sql`을 R2DBC 커넥션으로 실행합니다.
+* `schema.sql`은 `CREATE TABLE IF NOT EXISTS`로 작성되어 여러 번 실행돼도 안전합니다. 스키마 변경은 이 파일을 수정/추가하는 방식으로 관리합니다.
 
 ## 🔄 CI
 

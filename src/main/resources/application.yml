@@ -2,20 +2,13 @@ spring:
   application:
     name: hexagonal-back
 
-  # 애플리케이션 런타임 DB 접근은 R2DBC(논블로킹)로 수행합니다.
+  # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
+  # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가
+  # 기동 시 db/schema.sql을 실행하는 방식으로 처리합니다.
   r2dbc:
     url: r2dbc:postgresql://localhost:5432/hexagonal
     username: hexagonal
     password: hexagonal1234
-
-  # Flyway는 R2DBC를 지원하지 않으므로 마이그레이션 전용 JDBC 접속 정보를 별도로 둡니다.
-  # (spring.flyway.url이 설정되면 Flyway가 자체 JDBC 데이터소스로 마이그레이션을 수행합니다.)
-  flyway:
-    enabled: true
-    url: jdbc:postgresql://localhost:5432/hexagonal
-    user: hexagonal
-    password: hexagonal1234
-    locations: classpath:db/migration
 
 # 오래된 게시글 일괄 아카이브 배치 설정 (murray의 jobParameters에 해당하는 튜닝 노브)
 board:
