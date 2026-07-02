@@ -8,7 +8,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 
-private class FlushFixture(chunkSize: Int = 1000) {
+private class FlushFixture(
+    chunkSize: Int = 1000,
+) {
     val boardViewCountPort = mockk<BoardViewCountPort>()
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
     val service = FlushBoardViewCountsService(boardViewCountPort, boardRepositoryPort, chunkSize)
@@ -73,7 +75,8 @@ class FlushBoardViewCountsServiceTest :
             val fixture = FlushFixture(chunkSize = 2)
             coEvery { fixture.boardViewCountPort.drainPendingDeltas() } returns mapOf(1L to 1L, 2L to 1L, 3L to 1L)
             coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 1L, 2L to 1L)) } returns 2
-            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(3L to 1L)) } throws RuntimeException("db down")
+            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(3L to 1L)) } throws
+                RuntimeException("db down")
 
             When("flush를 호출하면") {
                 val result = fixture.service.flush()
