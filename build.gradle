@@ -36,6 +36,10 @@ dependencies {
     // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
     implementation 'io.micrometer:context-propagation'
 
+    // API 문서 자동화: springdoc-openapi(WebFlux). /swagger-ui.html + /v3/api-docs 제공.
+    // v3.x가 Spring Boot 4 / Spring Framework 7 지원 라인입니다(2.x는 Boot 4에서 동작하지 않음).
+    implementation 'org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3'
+
     // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용(JDBC 드라이버는 사용하지 않음)
     runtimeOnly 'org.postgresql:r2dbc-postgresql'
 

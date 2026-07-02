@@ -7,6 +7,9 @@ import demo.hexagonal.hexagonalback.application.port.`in`.DeleteBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.GetBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -21,6 +24,7 @@ import java.net.URI
 
 // BoardService 전체가 아닌 UseCase 인터페이스를 개별 주입합니다.
 // 컨트롤러가 구현체에 의존하지 않고, 각 핸들러가 어떤 유즈케이스를 사용하는지 명시적으로 드러납니다.
+@Tag(name = "Board", description = "게시판 CRUD 및 키셋 페이지네이션 목록 API")
 @RestController
 @RequestMapping("/api/boards")
 class BoardController(
@@ -30,6 +34,7 @@ class BoardController(
     private val deleteBoardUseCase: DeleteBoardUseCase,
     private val boardWebMapper: BoardWebMapper,
 ) {
+    @Operation(summary = "게시글 생성", description = "제목과 내용(10자 이상)으로 게시글을 만들고 201 Created + Location을 반환합니다.")
     @PostMapping
     suspend fun createBoard(
         @RequestBody request: CreateBoardRequest,
@@ -39,6 +44,7 @@ class BoardController(
         return SuccessResponse.created(response, URI.create("/api/boards/${response.id}"))
     }
 
+    @Operation(summary = "게시글 단건 조회", description = "id로 게시글을 조회합니다. 없으면 404를 반환합니다.")
     @GetMapping("/{id}")
     suspend fun getBoard(
         @PathVariable id: Long,
@@ -46,15 +52,20 @@ class BoardController(
         SuccessResponse.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
 
     // 키셋 페이지네이션: ?cursor=<마지막 id>&size=<페이지 크기>. cursor 생략 시 최신부터.
+    @Operation(
+        summary = "게시글 목록(키셋 페이지네이션)",
+        description = "id 내림차순으로 size건을 반환합니다. 다음 페이지는 응답의 nextCursor를 cursor로 다시 넘겨 조회합니다.",
+    )
     @GetMapping
     suspend fun getBoards(
-        @RequestParam(required = false) cursor: Long?,
-        @RequestParam(defaultValue = "20") size: Int,
+        @Parameter(description = "마지막으로 본 게시글 id. 생략 시 최신부터 조회") @RequestParam(required = false) cursor: Long?,
+        @Parameter(description = "페이지 크기(1~100)") @RequestParam(defaultValue = "20") size: Int,
     ): ResponseEntity<SuccessResponse<BoardPageResponse>> {
         val page = getBoardUseCase.getBoards(BoardPageQuery(cursor = cursor, size = size))
         return SuccessResponse.ok(boardWebMapper.toPageResponse(page))
     }
 
+    @Operation(summary = "게시글 수정", description = "제목/내용을 수정합니다. 제목은 공백일 수 없으며, 없는 게시글이면 404입니다.")
     @PutMapping("/{id}")
     suspend fun updateBoard(
         @PathVariable id: Long,
@@ -64,6 +75,7 @@ class BoardController(
         return SuccessResponse.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
     }
 
+    @Operation(summary = "게시글 삭제", description = "id로 게시글을 삭제하고 204 No Content를 반환합니다.")
     @DeleteMapping("/{id}")
     suspend fun deleteBoard(
         @PathVariable id: Long,
