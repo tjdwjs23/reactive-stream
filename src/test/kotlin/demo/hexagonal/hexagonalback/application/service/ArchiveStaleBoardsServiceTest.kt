@@ -1,0 +1,90 @@
+package demo.hexagonal.hexagonalback.application.service
+
+import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsCommand
+import demo.hexagonal.hexagonalback.application.port.out.BoardBatchQueryPort
+import demo.hexagonal.hexagonalback.domain.model.Board
+import io.kotest.core.spec.style.BehaviorSpec
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.shouldBe
+import java.time.LocalDateTime
+import java.util.Collections
+
+// 실제 DB 대신 인메모리 페이크 out-port. 스트리밍/청크/내결함성 흐름을 결정적으로 검증합니다.
+private class FakeBoardBatchQueryPort(
+    private val data: List<Board>,
+    private val failOnId: Long? = null,
+) : BoardBatchQueryPort {
+    // 여러 워커가 동시에 기록하므로 thread-safe 리스트 사용
+    val deletedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+
+    // 페이크는 일부러 "필터 없이 전부" 돌려줍니다.
+    // → 삭제 대상 확정은 서비스가 Board.isStale로 다시 한다는 점(도메인 규칙 권위)을 검증하기 위함.
+    override fun findStaleBoards(
+        before: LocalDateTime,
+        pageSize: Int,
+    ): Sequence<Board> = data.asSequence()
+
+    override fun deleteByIds(ids: List<Long>): Int {
+        if (failOnId != null && ids.contains(failOnId)) {
+            throw IllegalStateException("forced failure on chunk containing id=$failOnId")
+        }
+        deletedIds.addAll(ids)
+        return ids.size
+    }
+}
+
+class ArchiveStaleBoardsServiceTest :
+    BehaviorSpec({
+
+        val now = LocalDateTime.now()
+
+        Given("오래된 게시글과 최신 게시글이 섞여 있을 때") {
+            val stale = (1L..5L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
+            val fresh = (6L..8L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(10)) }
+            val fakePort = FakeBoardBatchQueryPort(stale + fresh)
+            val service = ArchiveStaleBoardsService(fakePort)
+
+            When("보관 기간 365일로 배치를 실행하면") {
+                val result =
+                    service.archiveStaleBoards(
+                        ArchiveStaleBoardsCommand(retentionDays = 365, chunkSize = 2, concurrency = 3),
+                    )
+
+                Then("오래된 게시글만 삭제된다") {
+                    fakePort.deletedIds shouldContainExactlyInAnyOrder listOf(1L, 2L, 3L, 4L, 5L)
+                }
+
+                Then("도메인 규칙(isStale)이 최종 권위라 최신 게시글은 삭제되지 않는다") {
+                    (6L..8L).forEach { fakePort.deletedIds shouldNotContain it }
+                }
+
+                Then("결과 요약이 정확하다") {
+                    result.scanned shouldBe 8
+                    result.deleted shouldBe 5
+                    result.failedChunks shouldBe 0
+                }
+            }
+        }
+
+        Given("특정 청크 삭제가 실패하도록 설정됐을 때") {
+            val stale = (1L..6L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
+            val fakePort = FakeBoardBatchQueryPort(stale, failOnId = 3L)
+            val service = ArchiveStaleBoardsService(fakePort)
+
+            When("배치를 실행하면") {
+                val result =
+                    service.archiveStaleBoards(
+                        ArchiveStaleBoardsCommand(retentionDays = 365, chunkSize = 2, concurrency = 1),
+                    )
+
+                Then("실패한 청크는 건너뛰고 나머지는 계속 삭제한다(내결함성)") {
+                    result.scanned shouldBe 6
+                    result.deleted shouldBe 4
+                    result.failedChunks shouldBe 1
+                    // id 3이 포함된 청크(3,4)만 실패, 나머지(1,2,5,6)는 삭제됨
+                    fakePort.deletedIds shouldContainExactlyInAnyOrder listOf(1L, 2L, 5L, 6L)
+                }
+            }
+        }
+    })

@@ -19,3 +19,12 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+
+# 오래된 게시글 일괄 아카이브 배치 설정 (murray의 jobParameters에 해당하는 튜닝 노브)
+board:
+  archiving:
+    enabled: false            # 운영에서 켤 때만 true
+    cron: "0 0 4 * * *"       # 매일 04:00
+    retention-days: 365       # 365일 지난 게시글이 대상
+    chunk-size: 500           # 한 번에 삭제할 청크 크기 = 스트리밍 페이지 크기
+    concurrency: 4            # 동시 처리 워커 수 = 바운드 채널 용량(백프레셔 상한)

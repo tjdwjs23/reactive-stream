@@ -4,6 +4,7 @@ import demo.hexagonal.hexagonalback.domain.exception.BoardValidationException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.shouldBe
+import java.time.LocalDateTime
 
 class BoardTest :
     BehaviorSpec({
@@ -52,6 +53,26 @@ class BoardTest :
                     shouldThrow<BoardValidationException> {
                         board.update("   ", "새 내용")
                     }
+                }
+            }
+        }
+
+        Given("보관 기간(retentionDays)이 365일일 때") {
+            val now = LocalDateTime.of(2026, 7, 2, 0, 0)
+
+            When("생성일이 365일보다 이전이면") {
+                val board = Board(id = 1L, title = "제목", content = "내용", createdAt = now.minusDays(400))
+
+                Then("아카이브 대상이다") {
+                    board.isStale(now, 365) shouldBe true
+                }
+            }
+
+            When("생성일이 365일 이내면") {
+                val board = Board(id = 2L, title = "제목", content = "내용", createdAt = now.minusDays(10))
+
+                Then("아카이브 대상이 아니다") {
+                    board.isStale(now, 365) shouldBe false
                 }
             }
         }
