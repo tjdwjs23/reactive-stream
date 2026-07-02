@@ -7,6 +7,8 @@ import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
 import java.time.LocalDateTime
 import java.util.Collections
 
@@ -23,9 +25,9 @@ private class FakeBoardBatchQueryPort(
     override fun findStaleBoards(
         before: LocalDateTime,
         pageSize: Int,
-    ): Sequence<Board> = data.asSequence()
+    ): Flow<Board> = data.asFlow()
 
-    override fun deleteByIds(ids: List<Long>): Int {
+    override suspend fun deleteByIds(ids: List<Long>): Int {
         if (failOnId != null && ids.contains(failOnId)) {
             throw IllegalStateException("forced failure on chunk containing id=$failOnId")
         }

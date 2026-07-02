@@ -5,11 +5,11 @@ import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsComm
 import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsUseCase
 import demo.hexagonal.hexagonalback.application.port.out.BoardBatchQueryPort
 import demo.hexagonal.hexagonalback.domain.model.Board
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
@@ -29,7 +29,7 @@ class ArchiveStaleBoardsService(
 ) : ArchiveStaleBoardsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override fun archiveStaleBoards(command: ArchiveStaleBoardsCommand): ArchiveResult {
+    override suspend fun archiveStaleBoards(command: ArchiveStaleBoardsCommand): ArchiveResult {
         val now = LocalDateTime.now()
         val threshold = now.minusDays(command.retentionDays)
 
@@ -37,7 +37,9 @@ class ArchiveStaleBoardsService(
         val deleted = AtomicInteger()
         val failedChunks = AtomicInteger()
 
-        runBlocking(Dispatchers.IO) {
+        // 호출자의 코루틴 컨텍스트(디스패처)를 그대로 상속합니다. R2DBC는 논블로킹이라
+        // Dispatchers.IO로 스레드를 따로 잡을 필요가 없습니다.
+        coroutineScope {
             // 바운드 채널이 곧 백프레셔 장치입니다(murray의 바운드 큐 + WaitPolicy와 같은 의도).
             // 소비자(워커)가 밀리면 send가 suspend되어 생산자가 DB 페이지를 더 읽지 않습니다.
             // 덕분에 "생산자가 소비자보다 빨라 메모리가 폭증"하는 상황이 원천 차단됩니다.
@@ -45,10 +47,18 @@ class ArchiveStaleBoardsService(
 
             val producer =
                 launch {
+                    // Flow에는 chunked가 없으므로 흐르는 원소를 chunkSize만큼 모아 청크로 전송합니다.
+                    val buffer = ArrayList<Board>(command.chunkSize)
                     boardBatchQueryPort
                         .findStaleBoards(threshold, command.chunkSize)
-                        .chunked(command.chunkSize)
-                        .forEach { chunk -> channel.send(chunk) }
+                        .collect { board ->
+                            buffer.add(board)
+                            if (buffer.size >= command.chunkSize) {
+                                channel.send(ArrayList(buffer))
+                                buffer.clear()
+                            }
+                        }
+                    if (buffer.isNotEmpty()) channel.send(ArrayList(buffer))
                     channel.close()
                 }
 
@@ -72,7 +82,7 @@ class ArchiveStaleBoardsService(
         ).also { log.info("archiveStaleBoards finished: {}", it) }
     }
 
-    private fun processChunk(
+    private suspend fun processChunk(
         chunk: List<Board>,
         now: LocalDateTime,
         retentionDays: Long,

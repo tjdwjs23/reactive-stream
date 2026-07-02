@@ -1,10 +1,11 @@
 package demo.hexagonal.hexagonalback.application.port.`in`
 
 import demo.hexagonal.hexagonalback.domain.model.Board
+import kotlinx.coroutines.flow.Flow
 
 // 1. 게시글 생성 유즈케이스
 interface CreateBoardUseCase {
-    fun createBoard(command: CreateBoardCommand): Board
+    suspend fun createBoard(command: CreateBoardCommand): Board
 }
 
 data class CreateBoardCommand(
@@ -20,14 +21,14 @@ data class CreateBoardCommand(
 
 // 2. 게시글 조회 유즈케이스
 interface GetBoardUseCase {
-    fun getBoard(id: Long): Board
+    suspend fun getBoard(id: Long): Board
 
-    fun getAllBoards(): List<Board>
+    fun getAllBoards(): Flow<Board>
 }
 
 // 3. 게시글 수정 유즈케이스
 interface UpdateBoardUseCase {
-    fun updateBoard(command: UpdateBoardCommand): Board
+    suspend fun updateBoard(command: UpdateBoardCommand): Board
 }
 
 // CreateBoardCommand와 달리 init 블록 검증이 없습니다.
@@ -41,5 +42,5 @@ data class UpdateBoardCommand(
 
 // 4. 게시글 삭제 유즈케이스
 interface DeleteBoardUseCase {
-    fun deleteBoard(id: Long)
+    suspend fun deleteBoard(id: Long)
 }

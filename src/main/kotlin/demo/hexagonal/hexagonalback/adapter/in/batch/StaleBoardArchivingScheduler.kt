@@ -2,6 +2,7 @@ package demo.hexagonal.hexagonalback.adapter.`in`.batch
 
 import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.ArchiveStaleBoardsUseCase
+import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -31,7 +32,9 @@ class StaleBoardArchivingScheduler(
             )
 
         log.info("Stale board archiving started: {}", command)
-        val result = archiveStaleBoardsUseCase.archiveStaleBoards(command)
+        // @Scheduled는 suspend 함수를 직접 호출할 수 없으므로, 구동 어댑터에서 스케줄러 스레드를
+        // runBlocking으로 코루틴 세계에 연결합니다(블로킹 경계를 어댑터 안으로 가둠).
+        val result = runBlocking { archiveStaleBoardsUseCase.archiveStaleBoards(command) }
         log.info("Stale board archiving done: {}", result)
     }
 }

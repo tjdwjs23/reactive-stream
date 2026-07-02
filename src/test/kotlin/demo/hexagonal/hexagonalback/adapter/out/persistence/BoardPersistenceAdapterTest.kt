@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.flow.toList
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -56,7 +57,7 @@ class BoardPersistenceAdapterTest(
             boardPersistenceAdapter.save(Board(title = "목록2", content = "내용2"))
 
             When("findAll을 호출하면") {
-                val all = boardPersistenceAdapter.findAll()
+                val all = boardPersistenceAdapter.findAll().toList()
 
                 Then("저장된 Board를 모두 포함한 목록을 반환한다") {
                     all.map { it.title } shouldContainAll listOf("목록1", "목록2")

@@ -6,6 +6,8 @@ import demo.hexagonal.hexagonalback.application.port.`in`.DeleteBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.GetBoardUseCase
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardCommand
 import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.toList
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -29,7 +31,7 @@ class BoardController(
     private val boardWebMapper: BoardWebMapper,
 ) {
     @PostMapping
-    fun createBoard(
+    suspend fun createBoard(
         @RequestBody request: CreateBoardRequest,
     ): ResponseEntity<ApiResponse<BoardResponse>> {
         val command = CreateBoardCommand(title = request.title, content = request.content)
@@ -38,17 +40,25 @@ class BoardController(
     }
 
     @GetMapping("/{id}")
-    fun getBoard(
+    suspend fun getBoard(
         @PathVariable id: Long,
     ): ResponseEntity<ApiResponse<BoardResponse>> =
         ResponseEntity.ok(ApiResponse.success(boardWebMapper.toResponse(getBoardUseCase.getBoard(id))))
 
+    // Flow<Board>를 컨트롤러 경계에서 toList로 수집해 기존 ApiResponse<List<..>> 계약을 유지합니다.
+    // (스트리밍 응답이 필요하면 Flow<BoardResponse>를 그대로 반환하도록 바꿀 수 있습니다.)
     @GetMapping
-    fun getAllBoards(): ResponseEntity<ApiResponse<List<BoardResponse>>> =
-        ResponseEntity.ok(ApiResponse.success(boardWebMapper.toResponseList(getBoardUseCase.getAllBoards())))
+    suspend fun getAllBoards(): ResponseEntity<ApiResponse<List<BoardResponse>>> {
+        val responses =
+            getBoardUseCase
+                .getAllBoards()
+                .map { boardWebMapper.toResponse(it) }
+                .toList()
+        return ResponseEntity.ok(ApiResponse.success(responses))
+    }
 
     @PutMapping("/{id}")
-    fun updateBoard(
+    suspend fun updateBoard(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest,
     ): ResponseEntity<ApiResponse<BoardResponse>> {
@@ -59,7 +69,7 @@ class BoardController(
     }
 
     @DeleteMapping("/{id}")
-    fun deleteBoard(
+    suspend fun deleteBoard(
         @PathVariable id: Long,
     ): ResponseEntity<Void> {
         deleteBoardUseCase.deleteBoard(id)

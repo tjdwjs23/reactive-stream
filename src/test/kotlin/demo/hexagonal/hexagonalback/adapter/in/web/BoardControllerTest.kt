@@ -7,19 +7,14 @@ import demo.hexagonal.hexagonalback.application.port.`in`.UpdateBoardUseCase
 import demo.hexagonal.hexagonalback.domain.exception.BoardNotFoundException
 import demo.hexagonal.hexagonalback.domain.model.Board
 import io.kotest.core.spec.style.BehaviorSpec
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.test.web.reactive.server.WebTestClient
 
 private class ControllerFixture {
     val createBoardUseCase = mockk<CreateBoardUseCase>()
@@ -27,9 +22,10 @@ private class ControllerFixture {
     val updateBoardUseCase = mockk<UpdateBoardUseCase>()
     val deleteBoardUseCase = mockk<DeleteBoardUseCase>()
 
-    val mockMvc: MockMvc =
-        MockMvcBuilders
-            .standaloneSetup(
+    // WebFlux 컨트롤러(suspend 핸들러)는 MockMvc가 아닌 WebTestClient로 검증합니다.
+    val client: WebTestClient =
+        WebTestClient
+            .bindToController(
                 BoardController(
                     createBoardUseCase,
                     getBoardUseCase,
@@ -37,7 +33,7 @@ private class ControllerFixture {
                     deleteBoardUseCase,
                     BoardWebMapper(),
                 ),
-            ).setControllerAdvice(GlobalExceptionHandler())
+            ).controllerAdvice(GlobalExceptionHandler())
             .build()
 }
 
@@ -53,54 +49,77 @@ class BoardControllerTest :
 
         Given("유효한 요청 Body가 주어졌을 때 - POST /api/boards") {
             val fixture = ControllerFixture()
-            every { fixture.createBoardUseCase.createBoard(any()) } returns sampleBoard
+            coEvery { fixture.createBoardUseCase.createBoard(any()) } returns sampleBoard
 
             When("POST 요청을 보내면") {
                 Then("201 Created와 Location 헤더, 생성된 Board를 반환한다") {
-                    fixture.mockMvc
-                        .perform(
-                            post("/api/boards")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content("""{"title":"테스트 제목","content":"테스트 내용입니다."}"""),
-                        ).andExpect(status().isCreated)
-                        .andExpect(header().string("Location", "/api/boards/1"))
-                        .andExpect(jsonPath("$.success").value(true))
-                        .andExpect(jsonPath("$.data.id").value(1))
-                        .andExpect(jsonPath("$.data.title").value("테스트 제목"))
-                        .andExpect(jsonPath("$.data.content").value("테스트 내용입니다."))
+                    fixture.client
+                        .post()
+                        .uri("/api/boards")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"title":"테스트 제목","content":"테스트 내용입니다."}""")
+                        .exchange()
+                        .expectStatus()
+                        .isCreated
+                        .expectHeader()
+                        .valueEquals("Location", "/api/boards/1")
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(true)
+                        .jsonPath("$.data.id")
+                        .isEqualTo(1)
+                        .jsonPath("$.data.title")
+                        .isEqualTo("테스트 제목")
+                        .jsonPath("$.data.content")
+                        .isEqualTo("테스트 내용입니다.")
                 }
             }
         }
 
         Given("존재하는 ID가 주어졌을 때 - GET /api/boards/{id}") {
             val fixture = ControllerFixture()
-            every { fixture.getBoardUseCase.getBoard(1L) } returns sampleBoard
+            coEvery { fixture.getBoardUseCase.getBoard(1L) } returns sampleBoard
 
             When("GET 요청을 보내면") {
                 Then("200 OK와 해당 Board를 반환한다") {
-                    fixture.mockMvc
-                        .perform(get("/api/boards/1"))
-                        .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.success").value(true))
-                        .andExpect(jsonPath("$.data.id").value(1))
-                        .andExpect(jsonPath("$.data.title").value("테스트 제목"))
-                        .andExpect(jsonPath("$.data.content").value("테스트 내용입니다."))
+                    fixture.client
+                        .get()
+                        .uri("/api/boards/1")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(true)
+                        .jsonPath("$.data.id")
+                        .isEqualTo(1)
+                        .jsonPath("$.data.title")
+                        .isEqualTo("테스트 제목")
+                        .jsonPath("$.data.content")
+                        .isEqualTo("테스트 내용입니다.")
                 }
             }
         }
 
         Given("존재하지 않는 ID가 주어졌을 때 - GET /api/boards/{id}") {
             val fixture = ControllerFixture()
-            every { fixture.getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
+            coEvery { fixture.getBoardUseCase.getBoard(999L) } throws BoardNotFoundException(999L)
 
             When("GET 요청을 보내면") {
                 Then("404 Not Found와 에러 코드/메시지를 반환한다") {
-                    fixture.mockMvc
-                        .perform(get("/api/boards/999"))
-                        .andExpect(status().isNotFound)
-                        .andExpect(jsonPath("$.success").value(false))
-                        .andExpect(jsonPath("$.error.code").value("BOARD_NOT_FOUND"))
-                        .andExpect(jsonPath("$.error.message").value("Board not found with id: 999"))
+                    fixture.client
+                        .get()
+                        .uri("/api/boards/999")
+                        .exchange()
+                        .expectStatus()
+                        .isNotFound
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(false)
+                        .jsonPath("$.error.code")
+                        .isEqualTo("BOARD_NOT_FOUND")
+                        .jsonPath("$.error.message")
+                        .isEqualTo("Board not found with id: 999")
                 }
             }
         }
@@ -110,47 +129,65 @@ class BoardControllerTest :
 
             When("GET 요청을 보내면") {
                 Then("400 Bad Request와 에러 코드를 반환한다") {
-                    fixture.mockMvc
-                        .perform(get("/api/boards/abc"))
-                        .andExpect(status().isBadRequest)
-                        .andExpect(jsonPath("$.success").value(false))
-                        .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"))
+                    fixture.client
+                        .get()
+                        .uri("/api/boards/abc")
+                        .exchange()
+                        .expectStatus()
+                        .isBadRequest
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(false)
+                        .jsonPath("$.error.code")
+                        .isEqualTo("INVALID_PARAMETER")
                 }
             }
         }
 
         Given("Board 목록이 존재할 때 - GET /api/boards") {
             val fixture = ControllerFixture()
-            val boards =
-                listOf(
+            every { fixture.getBoardUseCase.getAllBoards() } returns
+                flowOf(
                     sampleBoard,
                     Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용"),
                 )
-            every { fixture.getBoardUseCase.getAllBoards() } returns boards
 
             When("GET 요청을 보내면") {
                 Then("200 OK와 Board 목록을 반환한다") {
-                    fixture.mockMvc
-                        .perform(get("/api/boards"))
-                        .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.success").value(true))
-                        .andExpect(jsonPath("$.data.length()").value(2))
-                        .andExpect(jsonPath("$.data[0].id").value(1))
-                        .andExpect(jsonPath("$.data[1].id").value(2))
+                    fixture.client
+                        .get()
+                        .uri("/api/boards")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(true)
+                        .jsonPath("$.data.length()")
+                        .isEqualTo(2)
+                        .jsonPath("$.data[0].id")
+                        .isEqualTo(1)
+                        .jsonPath("$.data[1].id")
+                        .isEqualTo(2)
                 }
             }
         }
 
         Given("Board가 하나도 없을 때 - GET /api/boards") {
             val fixture = ControllerFixture()
-            every { fixture.getBoardUseCase.getAllBoards() } returns emptyList()
+            every { fixture.getBoardUseCase.getAllBoards() } returns emptyFlow()
 
             When("GET 요청을 보내면") {
                 Then("200 OK와 빈 배열을 반환한다") {
-                    fixture.mockMvc
-                        .perform(get("/api/boards"))
-                        .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.data.length()").value(0))
+                    fixture.client
+                        .get()
+                        .uri("/api/boards")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .expectBody()
+                        .jsonPath("$.data.length()")
+                        .isEqualTo(0)
                 }
             }
         }
@@ -158,18 +195,23 @@ class BoardControllerTest :
         Given("존재하는 Board와 유효한 요청이 주어졌을 때 - PUT /api/boards/{id}") {
             val fixture = ControllerFixture()
             val updatedBoard = sampleBoard.copy(title = "수정된 제목", content = "수정된 내용")
-            every { fixture.updateBoardUseCase.updateBoard(any()) } returns updatedBoard
+            coEvery { fixture.updateBoardUseCase.updateBoard(any()) } returns updatedBoard
 
             When("PUT 요청을 보내면") {
                 Then("200 OK와 수정된 Board를 반환한다") {
-                    fixture.mockMvc
-                        .perform(
-                            put("/api/boards/1")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content("""{"title":"수정된 제목","content":"수정된 내용"}"""),
-                        ).andExpect(status().isOk)
-                        .andExpect(jsonPath("$.data.title").value("수정된 제목"))
-                        .andExpect(jsonPath("$.data.content").value("수정된 내용"))
+                    fixture.client
+                        .put()
+                        .uri("/api/boards/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"title":"수정된 제목","content":"수정된 내용"}""")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .expectBody()
+                        .jsonPath("$.data.title")
+                        .isEqualTo("수정된 제목")
+                        .jsonPath("$.data.content")
+                        .isEqualTo("수정된 내용")
                 }
             }
         }
@@ -179,27 +221,36 @@ class BoardControllerTest :
 
             When("내용이 10자 미만인 요청을 보내면") {
                 Then("400 Bad Request와 에러 코드를 반환한다") {
-                    fixture.mockMvc
-                        .perform(
-                            post("/api/boards")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content("""{"title":"제목","content":"짧음"}"""),
-                        ).andExpect(status().isBadRequest)
-                        .andExpect(jsonPath("$.success").value(false))
-                        .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                    fixture.client
+                        .post()
+                        .uri("/api/boards")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"title":"제목","content":"짧음"}""")
+                        .exchange()
+                        .expectStatus()
+                        .isBadRequest
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(false)
+                        .jsonPath("$.error.code")
+                        .isEqualTo("VALIDATION_ERROR")
                 }
             }
 
             When("Body 자체가 비어 있는 요청을 보내면") {
                 Then("400 Bad Request와 에러 코드를 반환한다") {
-                    fixture.mockMvc
-                        .perform(
-                            post("/api/boards")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(""),
-                        ).andExpect(status().isBadRequest)
-                        .andExpect(jsonPath("$.success").value(false))
-                        .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST_BODY"))
+                    fixture.client
+                        .post()
+                        .uri("/api/boards")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .exchange()
+                        .expectStatus()
+                        .isBadRequest
+                        .expectBody()
+                        .jsonPath("$.success")
+                        .isEqualTo(false)
+                        .jsonPath("$.error.code")
+                        .isEqualTo("INVALID_REQUEST_BODY")
                 }
             }
         }
@@ -207,15 +258,18 @@ class BoardControllerTest :
         Given("유효한 ID가 주어졌을 때 - DELETE /api/boards/{id}") {
             val fixture = ControllerFixture()
             val id = 1L
-            every { fixture.deleteBoardUseCase.deleteBoard(id) } returns Unit
+            coEvery { fixture.deleteBoardUseCase.deleteBoard(id) } returns Unit
 
             When("DELETE 요청을 보내면") {
                 Then("204 No Content를 반환한다") {
-                    fixture.mockMvc
-                        .perform(delete("/api/boards/$id"))
-                        .andExpect(status().isNoContent)
+                    fixture.client
+                        .delete()
+                        .uri("/api/boards/$id")
+                        .exchange()
+                        .expectStatus()
+                        .isNoContent
 
-                    verify { fixture.deleteBoardUseCase.deleteBoard(id) }
+                    coVerify { fixture.deleteBoardUseCase.deleteBoard(id) }
                 }
             }
         }

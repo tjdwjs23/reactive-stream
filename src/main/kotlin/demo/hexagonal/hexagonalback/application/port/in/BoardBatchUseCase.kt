@@ -2,7 +2,7 @@ package demo.hexagonal.hexagonalback.application.port.`in`
 
 // 오래된 게시글을 일괄 아카이브(여기서는 삭제)하는 배치 유즈케이스입니다.
 interface ArchiveStaleBoardsUseCase {
-    fun archiveStaleBoards(command: ArchiveStaleBoardsCommand): ArchiveResult
+    suspend fun archiveStaleBoards(command: ArchiveStaleBoardsCommand): ArchiveResult
 }
 
 // 자가검증 커맨드(CreateBoardCommand와 동일한 컨벤션).

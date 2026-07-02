@@ -12,9 +12,12 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.toList
 import java.time.LocalDateTime
 
 private class ServiceFixture {
@@ -29,7 +32,7 @@ class BoardServiceTest :
             val fixture = ServiceFixture()
             val command = CreateBoardCommand(title = "제목", content = "10자 이상의 유효한 내용입니다.")
             val savedBoard = Board(id = 1L, title = "제목", content = "10자 이상의 유효한 내용입니다.")
-            every { fixture.boardRepositoryPort.save(any()) } returns savedBoard
+            coEvery { fixture.boardRepositoryPort.save(any()) } returns savedBoard
 
             When("createBoard를 호출하면") {
                 val result = fixture.boardService.createBoard(command)
@@ -37,7 +40,7 @@ class BoardServiceTest :
                 Then("저장 후 Board를 반환한다") {
                     result.id shouldBe 1L
                     result.title shouldBe "제목"
-                    verify { fixture.boardRepositoryPort.save(any()) }
+                    coVerify { fixture.boardRepositoryPort.save(any()) }
                 }
             }
         }
@@ -45,7 +48,7 @@ class BoardServiceTest :
         Given("존재하는 ID가 주어졌을 때") {
             val fixture = ServiceFixture()
             val board = Board(id = 1L, title = "제목", content = "내용")
-            every { fixture.boardRepositoryPort.findById(1L) } returns board
+            coEvery { fixture.boardRepositoryPort.findById(1L) } returns board
 
             When("getBoard를 호출하면") {
                 val result = fixture.boardService.getBoard(1L)
@@ -59,7 +62,7 @@ class BoardServiceTest :
 
         Given("존재하지 않는 ID가 주어졌을 때") {
             val fixture = ServiceFixture()
-            every { fixture.boardRepositoryPort.findById(999L) } returns null
+            coEvery { fixture.boardRepositoryPort.findById(999L) } returns null
 
             When("getBoard를 호출하면") {
                 Then("BoardNotFoundException을 던진다") {
@@ -77,10 +80,10 @@ class BoardServiceTest :
                     Board(id = 1L, title = "제목1", content = "내용1"),
                     Board(id = 2L, title = "제목2", content = "내용2"),
                 )
-            every { fixture.boardRepositoryPort.findAll() } returns boards
+            every { fixture.boardRepositoryPort.findAll() } returns boards.asFlow()
 
             When("getAllBoards를 호출하면") {
-                val result = fixture.boardService.getAllBoards()
+                val result = fixture.boardService.getAllBoards().toList()
 
                 Then("전체 Board 목록을 반환한다") {
                     result shouldHaveSize 2
@@ -91,10 +94,10 @@ class BoardServiceTest :
 
         Given("Board가 하나도 없을 때") {
             val fixture = ServiceFixture()
-            every { fixture.boardRepositoryPort.findAll() } returns emptyList()
+            every { fixture.boardRepositoryPort.findAll() } returns emptyList<Board>().asFlow()
 
             When("getAllBoards를 호출하면") {
-                val result = fixture.boardService.getAllBoards()
+                val result = fixture.boardService.getAllBoards().toList()
 
                 Then("빈 목록을 반환한다") {
                     result.shouldBeEmpty()
@@ -107,8 +110,8 @@ class BoardServiceTest :
             val existingBoard = Board(id = 1L, title = "원래 제목", content = "원래 내용", createdAt = LocalDateTime.now())
             val command = UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용")
             val updatedBoard = existingBoard.update(command.title, command.content)
-            every { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
-            every { fixture.boardRepositoryPort.save(any()) } returns updatedBoard
+            coEvery { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
+            coEvery { fixture.boardRepositoryPort.save(any()) } returns updatedBoard
 
             When("updateBoard를 호출하면") {
                 val result = fixture.boardService.updateBoard(command)
@@ -116,7 +119,7 @@ class BoardServiceTest :
                 Then("변경된 Board를 저장하고 반환한다") {
                     result.title shouldBe "새 제목"
                     result.content shouldBe "새 내용"
-                    verify { fixture.boardRepositoryPort.save(any()) }
+                    coVerify { fixture.boardRepositoryPort.save(any()) }
                 }
             }
         }
@@ -124,14 +127,14 @@ class BoardServiceTest :
         Given("존재하지 않는 ID의 Command가 주어졌을 때") {
             val fixture = ServiceFixture()
             val command = UpdateBoardCommand(id = 999L, title = "새 제목", content = "새 내용")
-            every { fixture.boardRepositoryPort.findById(999L) } returns null
+            coEvery { fixture.boardRepositoryPort.findById(999L) } returns null
 
             When("updateBoard를 호출하면") {
                 Then("BoardNotFoundException을 던지고 저장하지 않는다") {
                     shouldThrow<BoardNotFoundException> {
                         fixture.boardService.updateBoard(command)
                     }
-                    verify(exactly = 0) { fixture.boardRepositoryPort.save(any()) }
+                    coVerify(exactly = 0) { fixture.boardRepositoryPort.save(any()) }
                 }
             }
         }
@@ -139,13 +142,13 @@ class BoardServiceTest :
         Given("유효한 ID가 주어졌을 때") {
             val fixture = ServiceFixture()
             val id = 1L
-            every { fixture.boardRepositoryPort.deleteById(id) } returns Unit
+            coEvery { fixture.boardRepositoryPort.deleteById(id) } returns Unit
 
             When("deleteBoard를 호출하면") {
                 fixture.boardService.deleteBoard(id)
 
                 Then("Repository의 deleteById를 호출한다") {
-                    verify { fixture.boardRepositoryPort.deleteById(id) }
+                    coVerify { fixture.boardRepositoryPort.deleteById(id) }
                 }
             }
         }
