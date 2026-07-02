@@ -88,7 +88,7 @@ demo.reactivestream
 | `PUT` | `/api/boards/{id}` | 게시글 수정 |
 | `DELETE` | `/api/boards/{id}` | 게시글 삭제 |
 
-> 단건 조회 시 조회수(`viewCount`)가 1 증가합니다. DB를 직접 갱신하지 않고 Redis에 델타를 누적한 뒤 주기적으로 DB에 반영하며, 응답의 `viewCount`는 **DB 누적값 + 아직 반영 안 된 델타**로 실시간 값을 보여줍니다. (아래 **👁 View Count** 섹션 참고)
+> 단건 조회 시 조회수(`viewCount`)가 1 증가합니다. DB를 직접 갱신하지 않고 Redis에 델타를 누적한 뒤 주기적으로 DB에 반영하며, 응답의 `viewCount`는 **DB 누적값 + 아직 반영 안 된 델타**로 실시간 값을 보여줍니다. **Redis가 장애여도 조회는 실패하지 않고 DB 누적값으로 200을 반환**합니다(조회수 집계는 best-effort). (아래 **👁 View Count** 섹션 참고)
 
 > 목록은 **키셋(seek) 페이지네이션**입니다. `cursor`는 마지막으로 본 게시글 id(생략 시 최신부터), `size`는 페이지 크기(1~100, 기본 20)입니다. 응답 `BoardPageResponse`는 `items`, `nextCursor`, `hasNext`를 담으며, `hasNext`가 `true`면 `nextCursor`를 다음 요청의 `cursor`로 넘겨 다음 페이지를 조회합니다. (내부적으로 `size+1`건을 조회해 `hasNext`를 판정합니다.)
 
@@ -101,6 +101,7 @@ demo.reactivestream
 | `GET` | `/actuator/prometheus` | Prometheus 스크레이프 엔드포인트 (HTTP 요청 지연 히스토그램 포함) |
 | `GET` | `/swagger-ui.html` | Swagger UI (API 문서 뷰어) |
 | `GET` | `/v3/api-docs` | OpenAPI 3 문서 (JSON) |
+| `POST` | `/api/admin/view-counts/flush` | 조회수 델타를 즉시 DB로 write-back (온디맨드 플러시) |
 
 ## 🗑 Batch: Stale Board Archiving
 
@@ -118,9 +119,11 @@ demo.reactivestream
 
 * **읽기 경로**: `GET /api/boards/{id}` 시 Redis Hash(`board:views:pending`)에 `HINCRBY`로 원자적 증가. 응답 `viewCount`는 **DB 누적값 + 미반영 델타**로 실시간 값을 돌려줍니다.
 * **원자적 드레인**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷한 뒤 읽고 삭제합니다. `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓이므로 **델타가 유실되지 않습니다**.
-* **write-back**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 드레인한 델타를 게시글별로 `UPDATE board SET view_count = view_count + :delta`로 반영합니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 건 실패가 전체를 막지 않도록 내결함성 처리합니다.
-* **헥사고날 배치**: 조회수 버퍼는 out-port `BoardViewCountPort`(Redis 어댑터)로, DB 반영은 `BoardRepositoryPort.addViewCount`로 분리됩니다. 서비스는 구체 기술(Redis)을 모릅니다.
-* **운영 튜닝**: `board.view-count.*`(flush-enabled, flush-interval-ms)로 플러시 주기를 조절합니다. 주기를 짧게 하면 DB 정합성↑·쓰기 부하↑입니다.
+* **write-back(배치)**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 드레인한 델타를 **청크 단위 단일 `UPDATE ... FROM unnest(:ids, :deltas)`** 로 반영합니다(`BoardRepositoryPort.addViewCountsBatch`). 게시글별 순차 `UPDATE` 대비 DB 왕복이 대상 수 `N`에서 `ceil(N/chunkSize)`로 줄어, 플러시 대상이 많을수록 큰 이득입니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 청크 실패가 전체를 막지 않도록 내결함성 처리합니다.
+* **Redis 장애 내성(graceful degradation)**: 조회수 집계는 부가 기능(best-effort)입니다. `getBoard`는 `HINCRBY`를 `withTimeout` 시간 예산 안에서 시도하고, Redis가 죽거나(연결 거부) 느려도(행) **델타 0으로 강등해 DB 누적값으로 정상 조회(200)** 를 반환합니다. 즉 Redis 장애가 핵심 읽기 경로를 막지 않으며, 행 상태에서도 조회 지연이 예산 안에서 상한을 가집니다.
+* **온디맨드 플러시**: `POST /api/admin/view-counts/flush`로 스케줄과 무관하게 즉시 write-back합니다(배포·셧다운 직전 버퍼 비우기, 결정적 부하 테스트에 사용). 스케줄러와 동일한 `FlushBoardViewCountsUseCase`에만 의존합니다.
+* **헥사고날 분리**: 조회수 버퍼는 out-port `BoardViewCountPort`(Redis 어댑터)로, DB 반영은 `BoardRepositoryPort.addViewCountsBatch`로 분리됩니다. 서비스는 구체 기술(Redis)을 모릅니다.
+* **운영 튜닝**: `board.view-count.*`로 코드 변경 없이 조절합니다 — `flush-enabled`, `flush-interval-ms`(주기를 짧게 하면 DB 정합성↑·쓰기 부하↑), `flush-chunk-size`(한 배치 UPDATE에 묶을 게시글 수), `increment-timeout-ms`(조회 시 Redis 증가 시간 예산).
 
 > 학습용 단순화: 드레인 이후 DB 반영 전에 프로세스가 죽으면 그 델타는 유실될 수 있습니다. 실무에선 반영 성공분만 커밋 후 삭제하거나 실패분을 버퍼로 되돌리는 보상 로직을 둡니다.
 
@@ -164,14 +167,14 @@ src/test
 | :--- | :--- | :--- |
 | `BoardTest` | Domain 단위 | `update()` 후 새 인스턴스 반환, 원본 불변성 보장, 빈 제목 시 `BoardValidationException` 발생 |
 | `CreateBoardCommandTest` | Command 자가 검증 | 빈 제목 / 10자 미만 내용 시 `IllegalArgumentException` 발생, 유효 입력 시 정상 생성 |
-| `BoardServiceTest` | Service 단위 (MockK) | 각 UseCase 메서드의 흐름·예외 위임, 키셋 페이지(`BoardPage`)의 `hasNext`/`nextCursor` 판정, 단건 조회 시 조회수 증가 및 `DB값+델타` 보정 검증 |
+| `BoardServiceTest` | Service 단위 (MockK) | 각 UseCase 메서드의 흐름·예외 위임, 키셋 페이지(`BoardPage`)의 `hasNext`/`nextCursor` 판정, 단건 조회 시 조회수 증가 및 `DB값+델타` 보정, **Redis 장애 시 강등(DB값으로 200)** 검증 |
 | `ArchiveStaleBoardsServiceTest` | 배치 서비스 단위 (Fake Port) | 스트리밍/청크/동시성/내결함성 흐름을 결정적으로 검증, `isStale` 도메인 규칙이 최종 권위임을 검증 |
-| `FlushBoardViewCountsServiceTest` | 플러시 서비스 단위 (MockK) | 드레인한 델타를 게시글별로 `addViewCount`로 반영, 빈 델타 시 DB 미접근, 일부 실패 시 나머지 반영 + `failed` 집계 검증 |
+| `FlushBoardViewCountsServiceTest` | 플러시 서비스 단위 (MockK) | 드레인한 델타를 청크 단위 `addViewCountsBatch`로 반영, 청크 크기 초과 시 여러 배치로 분할, 빈 델타 시 DB 미접근, 일부 청크 실패 시 나머지 반영 + `failed` 집계 검증 |
 | `BoardControllerTest` | Web 슬라이스 (WebTestClient + MockK) | HTTP 상태 코드, 응답 JSON(페이지 포함), Location 헤더, `GlobalExceptionHandler` 동작 검증 |
 | `RouteNotFoundTest` | Web 통합 (전체 서버) | 매핑되지 않은 경로가 500이 아닌 **404** 통일 실패 포맷으로 응답하는지 검증 |
 | `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc·redis 헬스 포함)와 `/actuator/prometheus` 노출 검증 |
 | `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
-| `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되는지 검증 |
+| `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되고, `addViewCountsBatch`(`unnest` 배치 UPDATE)가 존재하는 id만 가산하는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
 | `BoardViewCountRedisAdapterTest` | 조회수 버퍼 통합 (Redis Testcontainers) | 반복 `increment`가 델타를 누적하는지, `drainPendingDeltas`가 전체를 반환하고 버퍼를 비우는지 검증 |
 | `ReactiveStreamApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
@@ -201,8 +204,10 @@ src/test
 ./gradlew test --tests "*.BoardServiceTest"
 ./gradlew test --tests "*.ArchiveStaleBoardsServiceTest"
 ./gradlew test --tests "*.BoardControllerTest"
+./gradlew test --tests "*.FlushBoardViewCountsServiceTest"
 ./gradlew test --tests "*.BoardPersistenceAdapterTest"
 ./gradlew test --tests "*.BoardBatchPersistenceAdapterTest"
+./gradlew test --tests "*.BoardViewCountRedisAdapterTest"
 ```
 
 ## ✅ Lint (ktlint)
@@ -322,4 +327,4 @@ Actuator + Micrometer Prometheus로 상태·메트릭을 노출합니다. `http.
 springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.
 
 #### 8. View Count Write-Back (Reactive Redis)
-조회수를 조회마다 DB에 쓰지 않고, 리액티브 Redis에 `HINCRBY`로 누적한 뒤 `@Scheduled`로 주기적으로 DB에 반영(write-back)합니다. 고빈도 쓰기를 Redis가 흡수해 DB 부하를 분리하고, `RENAME`으로 버퍼를 원자적으로 스냅샷해 플러시 중에도 델타가 유실되지 않습니다. Redis 접근도 Lettuce(논블로킹) + 코루틴 브리지로 처리해 엔드투엔드 논블로킹을 유지합니다. (자세한 내용은 위 **👁 View Count** 섹션)
+조회수를 조회마다 DB에 쓰지 않고, 리액티브 Redis에 `HINCRBY`로 누적한 뒤 `@Scheduled`로 주기적으로 DB에 반영(write-back)합니다. 고빈도 쓰기를 Redis가 흡수해 DB 부하를 분리하고, `RENAME`으로 버퍼를 원자적으로 스냅샷해 플러시 중에도 델타가 유실되지 않습니다. write-back은 게시글별 순차 UPDATE가 아니라 **청크 단위 단일 `unnest` 배치 UPDATE**라 대상이 많아도 DB 왕복이 `ceil(N/chunkSize)`로 억제됩니다. 또한 조회수 집계는 **best-effort**라, Redis 장애/지연 시 `withTimeout` 예산 안에서 강등해 조회 자체는 DB 값으로 정상 응답합니다. Redis 접근도 Lettuce(논블로킹) + 코루틴 브리지로 처리해 엔드투엔드 논블로킹을 유지합니다. (자세한 내용은 위 **👁 View Count** 섹션)
