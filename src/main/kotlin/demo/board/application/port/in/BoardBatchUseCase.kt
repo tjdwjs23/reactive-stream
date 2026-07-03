@@ -6,7 +6,7 @@ interface ArchiveStaleBoardsUseCase {
 }
 
 // 자가검증 커맨드(CreateBoardCommand와 동일한 컨벤션).
-// chunkSize/concurrency를 커맨드로 노출해 murray의 jobParameters처럼 런타임 튜닝이 가능합니다.
+// chunkSize/concurrency를 커맨드로 노출해 런타임 튜닝이 가능합니다.
 data class ArchiveStaleBoardsCommand(
     val retentionDays: Long,
     val chunkSize: Int = 500,

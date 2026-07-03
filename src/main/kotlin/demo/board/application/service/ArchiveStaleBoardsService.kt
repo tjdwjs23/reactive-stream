@@ -43,7 +43,7 @@ class ArchiveStaleBoardsService(
         // 호출자의 코루틴 컨텍스트(디스패처)를 그대로 상속합니다. R2DBC는 논블로킹이라
         // Dispatchers.IO로 스레드를 따로 잡을 필요가 없습니다.
         coroutineScope {
-            // 바운드 채널이 곧 백프레셔 장치입니다(murray의 바운드 큐 + WaitPolicy와 같은 의도).
+            // 바운드 채널이 곧 백프레셔 장치입니다
             // 소비자(워커)가 밀리면 send가 suspend되어 생산자가 DB 페이지를 더 읽지 않습니다.
             // 덕분에 "생산자가 소비자보다 빨라 메모리가 폭증"하는 상황이 원천 차단됩니다.
             val channel = Channel<List<Board>>(capacity = command.concurrency)
@@ -124,7 +124,7 @@ class ArchiveStaleBoardsService(
 
         attemptedChunks.incrementAndGet()
 
-        // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다(murray의 skipPolicy).
+        // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다
         // 단, CancellationException은 코루틴 취소 신호이므로 삼키지 않고 다시 던져 구조적 동시성을 지킵니다.
         // (runCatching은 취소 예외까지 잡아버리므로 여기서는 명시적 try/catch를 씁니다.)
         try {
