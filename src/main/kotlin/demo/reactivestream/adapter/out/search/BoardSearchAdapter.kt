@@ -5,6 +5,7 @@ import demo.reactivestream.application.port.out.BoardSearchHit
 import demo.reactivestream.application.port.out.BoardSearchPort
 import demo.reactivestream.domain.model.Board
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirstOrNull
@@ -28,6 +29,16 @@ class BoardSearchAdapter(
     // upsert: 같은 _id(=게시글 id) 문서가 있으면 통째로 덮어씁니다.
     override suspend fun index(board: Board) {
         operations.save(boardDocumentMapper.toDocument(board)).awaitSingle()
+    }
+
+    // 벌크 upsert: saveAll로 한 번에 색인해 건별 왕복을 줄입니다. 반환값은 색인된 문서 수.
+    override suspend fun indexAll(boards: List<Board>): Int {
+        if (boards.isEmpty()) return 0
+        val documents = boards.map { boardDocumentMapper.toDocument(it) }
+        return operations
+            .saveAll(documents, BoardDocument::class.java)
+            .asFlow()
+            .count()
     }
 
     // 색인에서 제거. 문서가 없어도 예외 없이 조용히 완료됩니다.

@@ -3,6 +3,7 @@ package demo.reactivestream.application.service
 import demo.reactivestream.application.port.`in`.ArchiveStaleBoardsCommand
 import demo.reactivestream.application.port.out.BoardBatchQueryPort
 import demo.reactivestream.domain.model.Board
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
@@ -16,6 +17,7 @@ import java.util.Collections
 private class FakeBoardBatchQueryPort(
     private val data: List<Board>,
     private val failOnId: Long? = null,
+    private val failAll: Boolean = false,
 ) : BoardBatchQueryPort {
     // 여러 워커가 동시에 기록하므로 thread-safe 리스트 사용
     val deletedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
@@ -28,8 +30,8 @@ private class FakeBoardBatchQueryPort(
     ): Flow<Board> = data.asFlow()
 
     override suspend fun deleteByIds(ids: List<Long>): Int {
-        if (failOnId != null && ids.contains(failOnId)) {
-            throw IllegalStateException("forced failure on chunk containing id=$failOnId")
+        if (failAll || (failOnId != null && ids.contains(failOnId))) {
+            throw IllegalStateException("forced failure on chunk (ids=$ids)")
         }
         deletedIds.addAll(ids)
         return ids.size
@@ -86,6 +88,23 @@ class ArchiveStaleBoardsServiceTest :
                     result.failedChunks shouldBe 1
                     // id 3이 포함된 청크(3,4)만 실패, 나머지(1,2,5,6)는 삭제됨
                     fakePort.deletedIds shouldContainExactlyInAnyOrder listOf(1L, 2L, 5L, 6L)
+                }
+            }
+        }
+
+        Given("시도한 모든 청크의 삭제가 실패할 때") {
+            val stale = (1L..4L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
+            val fakePort = FakeBoardBatchQueryPort(stale, failAll = true)
+            val service = ArchiveStaleBoardsService(fakePort)
+
+            When("배치를 실행하면") {
+                Then("부분 실패와 달리 예외로 전체 실패를 신호한다(스케줄러가 성공으로 오인하지 않도록)") {
+                    shouldThrow<IllegalStateException> {
+                        service.archiveStaleBoards(
+                            ArchiveStaleBoardsCommand(retentionDays = 365, chunkSize = 2, concurrency = 1),
+                        )
+                    }
+                    fakePort.deletedIds.size shouldBe 0
                 }
             }
         }

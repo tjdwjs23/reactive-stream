@@ -32,8 +32,9 @@ jobs:
       - name: Run ktlint
         run: ./gradlew ktlintCheck
 
-      - name: Run tests
-        run: ./gradlew test
+      # 테스트(Konsist 아키텍처 규칙 포함) 실행 + 커버리지 게이트(koverVerify, 최소 85%)
+      - name: Run tests & coverage
+        run: ./gradlew test koverVerify koverHtmlReport
 
       - name: Upload test report
         if: always()
@@ -41,4 +42,12 @@ jobs:
         with:
           name: test-report
           path: build/reports/tests/test
+          retention-days: 7
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/reports/kover/html
           retention-days: 7

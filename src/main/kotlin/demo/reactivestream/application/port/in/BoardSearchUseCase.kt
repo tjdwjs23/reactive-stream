@@ -23,6 +23,12 @@ data class BoardSearchQuery(
 // 6. 전체 재색인 유즈케이스: DB(정본)를 순회하며 ES 색인을 다시 채웁니다.
 // 인라인 색인이 실패로 누락됐거나 인덱스를 새로 만들었을 때 정합성을 회복하는 용도.
 interface ReindexBoardsUseCase {
-    // 반환값: 재색인된 게시글 수
-    suspend fun reindexAll(): Long
+    suspend fun reindexAll(): ReindexResult
 }
+
+// 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수.
+// 페이지 단위로 벌크 색인하다 실패한 페이지는 건너뛰므로, 실패분을 별도로 노출해 재시도 판단에 씁니다.
+data class ReindexResult(
+    val indexed: Long,
+    val failed: Long,
+)

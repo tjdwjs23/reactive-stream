@@ -5,21 +5,23 @@ spring:
   # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
   # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가
   # 기동 시 db/schema.sql을 실행하는 방식으로 처리합니다.
+  # 접속 정보는 환경변수로 외부화합니다(운영은 Vault/K8s Secret로 주입, 로컬은 아래 기본값 사용).
+  # 비밀번호를 소스에 평문으로 커밋하지 않기 위해 ${ENV:default} 형태를 씁니다.
   r2dbc:
-    url: r2dbc:postgresql://localhost:5432/hexagonal
-    username: hexagonal
-    password: hexagonal1234
+    url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/hexagonal}
+    username: ${SPRING_R2DBC_USERNAME:hexagonal}
+    password: ${SPRING_R2DBC_PASSWORD:hexagonal1234}
 
   # 조회수 카운터용 Redis(리액티브 Lettuce). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
 
   # 한글 전문검색용 Elasticsearch(Nori). WebFlux 클래스패스에서 리액티브 클라이언트가 자동 구성됩니다.
   # docker-compose의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
   elasticsearch:
-    uris: http://localhost:9200
+    uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
 
 # 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램.
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
@@ -39,6 +41,12 @@ management:
 
 # 오래된 게시글 일괄 아카이브 배치 설정 (murray의 jobParameters에 해당하는 튜닝 노브)
 board:
+  # 운영/시험용 admin 엔드포인트(조회수 즉시 플러시, 전체 재색인) 보호용 토큰.
+  # 비워두면 무인증(개발 편의) — 기동 시 경고 로그가 남습니다. 운영에서는 반드시 설정하고,
+  # 호출 시 X-Admin-Token 헤더로 이 값을 전달해야 합니다.
+  admin:
+    token: ${BOARD_ADMIN_TOKEN:}
+
   archiving:
     enabled: false            # 운영에서 켤 때만 true
     cron: "0 0 4 * * *"       # 매일 04:00

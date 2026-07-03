@@ -10,6 +10,10 @@ interface BoardSearchPort {
     // 색인(upsert): 같은 id의 문서가 있으면 덮어씁니다. 생성/수정 시 호출됩니다.
     suspend fun index(board: Board)
 
+    // 벌크 색인(upsert): 여러 건을 한 번의 요청으로 색인합니다. 전체 재색인에서 건별 왕복을 피하려고 씁니다.
+    // 반환값은 색인에 성공한 문서 수.
+    suspend fun indexAll(boards: List<Board>): Int
+
     // 색인에서 제거. 게시글 삭제 시 호출됩니다.
     suspend fun deleteById(id: Long)
 

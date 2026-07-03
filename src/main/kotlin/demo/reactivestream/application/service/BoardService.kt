@@ -23,12 +23,15 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import kotlin.time.Duration.Companion.milliseconds
 
+// 트랜잭션 경계는 "DB 접근"에만 좁게 둡니다. 클래스 레벨 @Transactional을 붙이면
+// ES 색인/Redis 증가 같은 외부 자원 부수효과까지 DB 트랜잭션 안(그리고 커밋 전)에서 실행돼,
+// (1) 트랜잭션이 열린 채 외부 왕복을 기다려 R2DBC 커넥션을 오래 점유하고
+// (2) DB가 롤백돼도 ES에는 이미 반영되는 정합성 위험이 생깁니다.
+// 그래서 쓰기는 단일 문장(R2DBC 자동 커밋)으로 처리하고 색인은 커밋 이후에 베스트에포트로 수행하며,
+// 순수 DB 읽기 목록 조회에만 @Transactional(readOnly = true)를 답니다.
+// (R2DBC 스택에서 Spring이 ReactiveTransactionManager를 자동 구성하고, @Transactional은
+//  코루틴 컨텍스트를 통해 suspend 함수에도 리액티브 트랜잭션으로 전파됩니다.)
 @Service
-// 클래스 레벨 @Transactional이 모든 메서드에 기본 적용됩니다.
-// R2DBC 스택에서는 Spring이 ReactiveTransactionManager를 자동 구성하며, @Transactional은
-// suspend 함수에도 그대로 적용됩니다(코루틴 컨텍스트를 통해 리액티브 트랜잭션이 전파됨).
-// 조회 메서드는 @Transactional(readOnly = true)로 재정의합니다.
-@Transactional
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort,
     private val boardViewCountPort: BoardViewCountPort,
@@ -49,21 +52,21 @@ class BoardService(
                 title = command.title,
                 content = command.content,
             )
-        // 포트를 통해 저장 (ID가 부여된 객체가 반환됨)
+        // 포트를 통해 저장 (단일 INSERT → R2DBC 자동 커밋, ID가 부여된 객체가 반환됨)
         val saved = boardRepositoryPort.save(newBoard)
-        indexSafely(saved) // 검색 색인에 베스트에포트 반영
+        indexSafely(saved) // 저장(커밋) 후 검색 색인에 베스트에포트 반영 — 트랜잭션 밖 부수효과
         return saved
     }
 
     // 단건 조회는 조회수 1건을 반영합니다. DB에는 즉시 쓰지 않고 Redis에 델타를 누적(INCR)한 뒤,
     // 응답에는 DB 누적값 + 아직 반영 안 된 델타를 더해 실시간 조회수를 보여줍니다.
-    // (readOnly 트랜잭션은 DB 읽기만 감싸며, Redis 증가는 트랜잭션 밖의 별도 자원 연산입니다.)
-    @Transactional(readOnly = true)
+    // DB 읽기(단일 SELECT, 자동 커밋)를 먼저 끝내고 Redis 증가는 그 뒤에 수행합니다 —
+    // @Transactional로 메서드 전체를 감싸면 Redis 왕복 동안 DB 커넥션을 붙잡게 되므로 붙이지 않습니다.
     override suspend fun getBoard(id: Long): Board {
         val board =
             boardRepositoryPort.findById(id) // (1) DB에서 확정값 읽기 (SELECT만!)
                 ?: throw BoardNotFoundException(id)
-        val pendingDelta = incrementViewCountSafely(id) // (2) Redis에 +1, 누적 델타 받기
+        val pendingDelta = incrementViewCountSafely(id) // (2) Redis에 +1, 누적 델타 받기 (트랜잭션 밖)
         return board.copy(viewCount = board.viewCount + pendingDelta) // (3) 합쳐서 응답
     }
 
@@ -112,15 +115,15 @@ class BoardService(
         // Board가 data class(immutable)라면 copy로 새 객체를 만듭니다.
         val updatedBoard = existingBoard.update(command.title, command.content)
 
-        // 3. 변경된 객체 저장
+        // 3. 변경된 객체 저장 (단일 UPDATE → 자동 커밋)
         val saved = boardRepositoryPort.save(updatedBoard)
-        indexSafely(saved) // 수정 내용을 검색 색인에 반영(같은 id 문서 덮어쓰기)
+        indexSafely(saved) // 커밋 후 수정 내용을 검색 색인에 반영(같은 id 문서 덮어쓰기) — 트랜잭션 밖 부수효과
         return saved
     }
 
     override suspend fun deleteBoard(id: Long) {
-        boardRepositoryPort.deleteById(id)
-        deleteFromIndexSafely(id) // 검색 색인에서도 제거(베스트에포트)
+        boardRepositoryPort.deleteById(id) // 단일 DELETE → 자동 커밋
+        deleteFromIndexSafely(id) // 커밋 후 검색 색인에서도 제거(베스트에포트) — 트랜잭션 밖 부수효과
     }
 
     // 색인 반영을 베스트에포트로 수행합니다. ES가 느리거나 죽어도 게시글 쓰기(DB)는 이미 성공했으므로

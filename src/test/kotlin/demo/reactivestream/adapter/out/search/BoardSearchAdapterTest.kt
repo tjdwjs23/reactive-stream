@@ -67,6 +67,34 @@ class BoardSearchAdapterTest(
                 }
             }
         }
+
+        Given("여러 게시글을 벌크로 색인할 때 - indexAll") {
+            val bulk =
+                listOf(
+                    Board(id = 9101L, title = "벌크 색인 게시글 하나", content = "재색인 테스트 내용입니다."),
+                    Board(id = 9102L, title = "벌크 색인 게시글 둘", content = "재색인 테스트 내용입니다."),
+                    Board(id = 9103L, title = "벌크 색인 게시글 셋", content = "재색인 테스트 내용입니다."),
+                )
+
+            When("indexAll로 한 번에 색인하면") {
+                val count = boardSearchAdapter.indexAll(bulk)
+                refresh()
+                val ids = boardSearchAdapter.search("벌크", 10).toList().map { it.board.id }
+
+                Then("색인된 문서 수를 반환하고 모두 검색된다") {
+                    count shouldBe 3
+                    ids shouldContain 9101L
+                    ids shouldContain 9102L
+                    ids shouldContain 9103L
+                }
+            }
+
+            When("빈 목록을 indexAll하면") {
+                Then("아무 것도 색인하지 않고 0을 반환한다") {
+                    boardSearchAdapter.indexAll(emptyList()) shouldBe 0
+                }
+            }
+        }
     }) {
     override fun extensions() = listOf(SpringExtension)
 

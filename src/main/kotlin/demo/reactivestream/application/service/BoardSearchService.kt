@@ -2,10 +2,12 @@ package demo.reactivestream.application.service
 
 import demo.reactivestream.application.port.`in`.BoardSearchQuery
 import demo.reactivestream.application.port.`in`.ReindexBoardsUseCase
+import demo.reactivestream.application.port.`in`.ReindexResult
 import demo.reactivestream.application.port.`in`.SearchBoardUseCase
 import demo.reactivestream.application.port.out.BoardRepositoryPort
 import demo.reactivestream.application.port.out.BoardSearchHit
 import demo.reactivestream.application.port.out.BoardSearchPort
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.toList
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -26,19 +28,34 @@ class BoardSearchService(
 
     // DB(정본)를 키셋 페이지네이션으로 순회하며 ES에 다시 색인합니다.
     // 한 번에 REINDEX_PAGE_SIZE건만 메모리에 올리므로 데이터가 커져도 일정한 메모리로 동작합니다.
-    override suspend fun reindexAll(): Long {
+    // - 색인은 페이지 단위 벌크(indexAll)로 수행해 건별 왕복을 없앱니다.
+    // - 한 페이지 색인이 실패해도 전체를 중단하지 않고 그 페이지만 건너뛰며 실패 건수를 집계합니다
+    //   (플러시/아카이브 배치와 같은 내결함성 철학). 단, CancellationException은 다시 던집니다.
+    override suspend fun reindexAll(): ReindexResult {
         var cursor: Long? = null
-        var total = 0L
+        var indexed = 0L
+        var failed = 0L
         while (true) {
             val page = boardRepositoryPort.findPage(cursor, REINDEX_PAGE_SIZE).toList()
             if (page.isEmpty()) break
-            page.forEach { boardSearchPort.index(it) }
-            total += page.size
+            try {
+                indexed += boardSearchPort.indexAll(page)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed += page.size
+                log.error(
+                    "reindex page failed (cursor={}, size={}); skip page. cause={}",
+                    cursor,
+                    page.size,
+                    e.toString(),
+                )
+            }
             cursor = page.last().id
             if (page.size < REINDEX_PAGE_SIZE) break
         }
-        log.info("reindexAll completed: {} boards indexed", total)
-        return total
+        log.info("reindexAll completed: indexed={}, failed={}", indexed, failed)
+        return ReindexResult(indexed = indexed, failed = failed)
     }
 
     companion object {

@@ -37,6 +37,8 @@ class ArchiveStaleBoardsService(
         val scanned = AtomicInteger()
         val deleted = AtomicInteger()
         val failedChunks = AtomicInteger()
+        // 삭제를 실제로 시도한(대상이 있는) 청크 수. "전부 실패"를 판정하는 분모입니다.
+        val attemptedChunks = AtomicInteger()
 
         // 호출자의 코루틴 컨텍스트(디스패처)를 그대로 상속합니다. R2DBC는 논블로킹이라
         // Dispatchers.IO로 스레드를 따로 잡을 필요가 없습니다.
@@ -67,7 +69,15 @@ class ArchiveStaleBoardsService(
                 List(command.concurrency) {
                     launch {
                         for (chunk in channel) {
-                            processChunk(chunk, now, command.retentionDays, scanned, deleted, failedChunks)
+                            processChunk(
+                                chunk,
+                                now,
+                                command.retentionDays,
+                                scanned,
+                                deleted,
+                                failedChunks,
+                                attemptedChunks,
+                            )
                         }
                     }
                 }
@@ -76,11 +86,21 @@ class ArchiveStaleBoardsService(
             workers.joinAll()
         }
 
-        return ArchiveResult(
-            scanned = scanned.get(),
-            deleted = deleted.get(),
-            failedChunks = failedChunks.get(),
-        ).also { log.info("archiveStaleBoards finished: {}", it) }
+        val result =
+            ArchiveResult(
+                scanned = scanned.get(),
+                deleted = deleted.get(),
+                failedChunks = failedChunks.get(),
+            ).also { log.info("archiveStaleBoards finished: {}", it) }
+
+        // 부분 실패는 result.failedChunks로 보고하지만, "시도한 모든 청크가 실패"한 경우는
+        // 예외만 확인하는 스케줄러가 성공으로 오인하지 않도록 예외로 신호합니다(전체 실패 = 잡 실패).
+        val attempted = attemptedChunks.get()
+        if (attempted > 0 && failedChunks.get() == attempted) {
+            throw IllegalStateException("archiveStaleBoards: all $attempted chunk(s) failed to delete")
+        }
+
+        return result
     }
 
     private suspend fun processChunk(
@@ -90,6 +110,7 @@ class ArchiveStaleBoardsService(
         scanned: AtomicInteger,
         deleted: AtomicInteger,
         failedChunks: AtomicInteger,
+        attemptedChunks: AtomicInteger,
     ) {
         scanned.addAndGet(chunk.size)
 
@@ -100,6 +121,8 @@ class ArchiveStaleBoardsService(
                 .filter { it.isStale(now, retentionDays) }
                 .mapNotNull { it.id }
         if (targetIds.isEmpty()) return
+
+        attemptedChunks.incrementAndGet()
 
         // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다(murray의 skipPolicy).
         // 단, CancellationException은 코루틴 취소 신호이므로 삼키지 않고 다시 던져 구조적 동시성을 지킵니다.

@@ -19,7 +19,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Test (single method)
 ./gradlew test --tests "demo.reactivestream.ReactiveStreamApplicationTests.contextLoads"
+
+# Lint (ktlint) — CI 게이트
+./gradlew ktlintCheck
+./gradlew ktlintFormat        # 자동 포맷
+
+# Coverage (Kover) — CI 게이트(최소 라인 85%)
+./gradlew koverVerify         # 기준선 검증
+./gradlew koverHtmlReport     # build/reports/kover/html/index.html
 ```
+
+> **Quality gates**: 아키텍처 규칙은 **Konsist**(`src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 하한 85%로 게이트(`koverVerify`)하며, 부트스트랩(`ReactiveStreamApplication*`)은 집계에서 제외합니다.
 
 > **Note**: The app uses **R2DBC (non-blocking) only — no JDBC anywhere**. `application.yml` configures `spring.r2dbc.*`. Schema is initialized at startup by a **`ConnectionFactoryInitializer`** bean (`adapter/out/persistence/R2dbcSchemaInitializer.kt`) that runs `db/schema.sql` over R2DBC (Flyway was removed because it requires JDBC). `db/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/hexagonal`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers only the r2dbc URL and uses a **log-based wait strategy** (the default readiness probe uses JDBC, which is no longer on the classpath).
 
@@ -29,7 +39,7 @@ This is a **Hexagonal Architecture (Ports and Adapters)** board API in Kotlin + 
 
 **Reactive conventions (apply everywhere):**
 - Single-value operations that touch I/O are `suspend fun`. Multi-value reads return `Flow<T>` (never `List` at the port boundary).
-- `BoardService`'s `@Transactional` runs on Spring's `ReactiveTransactionManager` (auto-configured by R2DBC) and works on `suspend` functions.
+- Transaction boundaries stay **narrow — DB access only**. Spring's `ReactiveTransactionManager` (auto-configured by R2DBC) works on `suspend` functions, but `BoardService` deliberately has **no class-level `@Transactional`**: external side-effects (ES indexing, Redis increment) must run *outside* (and, for writes, *after*) the DB transaction so a rollback can't leave ES ahead of DB and so a Redis round-trip doesn't hold a DB connection. Writes are single-statement (R2DBC autocommit) + best-effort index after; only the pure read `getBoards` keeps `@Transactional(readOnly = true)`.
 - Blocking-world driving adapters (e.g. the `@Scheduled` batch trigger, which can't be `suspend`) bridge into coroutines with `runBlocking` — keep that bridge inside the adapter.
 
 The three concentric layers — with dependency arrows pointing strictly inward:
@@ -52,8 +62,8 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 - **Domain model is immutable** (`data class Board`). Mutations return a new instance via `.copy()` (see `Board.update()`).
 - **Self-validating commands**: `CreateBoardCommand` validates both fields in its `init` block (title not blank, content ≥ 10 chars). `UpdateBoardCommand` does **not** self-validate — title-blank validation lives in `Board.update()` and there is no content-length check on update.
 - **Strict separation of persistence Entity and Domain Model**: `BoardMapper` is the only place where `BoardR2dbcEntity` ↔ `Board` conversion happens. Never put `@Table`/`@Id` on a domain model.
-- `BoardService` is annotated `@Transactional` at the class level (reactive tx manager); read operations override with `@Transactional(readOnly = true)`. `getAllBoards()` returns `Flow<Board>` and is collected at the controller boundary.
-- **Batch (`ArchiveStaleBoardsService`)**: no class-level `@Transactional`; a `coroutineScope` fans out a bounded `Channel` (producer collects the keyset-paginated `Flow`, N workers delete chunks). Deletes commit per-chunk. Domain rule `Board.isStale()` is the final authority over the SQL pre-filter.
+- `BoardService` keeps transactions narrow (no class-level `@Transactional`): writes are single-statement autocommits with ES indexing done *after* the write, `getBoard` reads the DB then increments Redis outside any tx, and only `getBoards` is `@Transactional(readOnly = true)`. `getBoards()` collects a keyset page and returns `BoardPage`.
+- **Batch (`ArchiveStaleBoardsService`)**: no class-level `@Transactional`; a `coroutineScope` fans out a bounded `Channel` (producer collects the keyset-paginated `Flow`, N workers delete chunks). Deletes commit per-chunk. Domain rule `Board.isStale()` is the final authority over the SQL pre-filter. **Partial** chunk failures are reported in `ArchiveResult.failedChunks` (skip-and-continue); a **total** failure (every attempted chunk failed) throws `IllegalStateException` so a scheduler that only watches for exceptions doesn't mistake it for success.
 - `BoardService` implements all four UseCase interfaces; `BoardController` injects them individually by interface, not by the concrete class.
 - Business exceptions (`BoardNotFoundException`, `BoardValidationException`) live in `domain.exception` and extend `RuntimeException`.
 
@@ -67,7 +77,10 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 | `PUT` | `/api/boards/{id}` | `UpdateBoardUseCase` → 200 OK |
 | `DELETE` | `/api/boards/{id}` | `DeleteBoardUseCase` → 204 No Content |
 | `GET` | `/api/boards/search?keyword=&size=` | `SearchBoardUseCase` → 200 OK (한글 전문검색, 관련도순) |
-| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인) |
+| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인, admin 토큰) |
+| `POST` | `/api/admin/view-counts/flush` | `FlushBoardViewCountsUseCase` → 200 OK (조회수 즉시 플러시, admin 토큰) |
+
+> **Admin 엔드포인트 보호**: `/search/reindex`와 `/admin/view-counts/flush`는 쓰기를 유발하는 운영 트리거라 `AdminAccessGuard`로 보호됩니다. `board.admin.token`(env `BOARD_ADMIN_TOKEN`)이 설정돼 있으면 요청은 `X-Admin-Token` 헤더로 그 값을 전달해야 하며 불일치 시 401입니다. 미설정(로컬 기본값)이면 통과하되 기동 시 경고 로그를 남깁니다.
 
 ### Korean full-text search (Elasticsearch + Nori)
 
@@ -77,7 +90,7 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 - **인덱스/분석기**: `boards` 인덱스는 기동 시 `BoardSearchIndexInitializer`(`@EventListener(ApplicationReadyEvent)` + `runBlocking` 브리지)가 멱등 생성합니다. Nori 분석기 정의는 `resources/elasticsearch/board-settings.json`(nori_tokenizer, decompound_mode=mixed + nori_part_of_speech/readingform/lowercase 필터), 필드 매핑은 `board-mappings.json`(title/content를 `korean` 분석기로). `BoardDocument`의 `@Setting`/`@Mapping`이 이 JSON을 가리키며 매핑의 최종 권위입니다.
 - **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match`(title^2, content)로 검색하고, 기본 `_score` 내림차순(관련도순)으로 정렬 + `<em>` 하이라이트를 반환합니다. 다건은 관례대로 `Flow<BoardSearchHit>`.
 - **엔티티 분리**: 도메인 `Board` ↔ `BoardDocument` 변환은 `BoardDocumentMapper`에서만. 도메인 모델에는 ES 애노테이션이 새어 들어가지 않습니다(R2DBC 엔티티 규칙과 동일).
-- **정합성 회복**: 인라인 색인 누락이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
+- **정합성 회복**: 인라인 색인 누락이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. 색인은 **페이지 단위 벌크(`BoardSearchPort.indexAll` → ES `saveAll`)**로 수행하고, 한 페이지가 실패해도 그 페이지만 건너뛰며 실패 건수를 집계합니다. 결과는 `ReindexResult(indexed, failed)`로 반환됩니다(응답 `result.reindexed`/`result.failed`). ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
 
 ### Adding a new feature
 
