@@ -2,6 +2,13 @@ spring:
   application:
     name: reactive
 
+  # @Scheduled 작업 실행 스레드 풀. 기본값은 1이라 아카이브 배치(장시간)와 조회수 플러시(30초 주기)가
+  # 한 스레드를 두고 경합해, 긴 배치가 도는 동안 플러시가 통째로 밀립니다. 두 스케줄이 서로를 막지 않도록 2로 둡니다.
+  task:
+    scheduling:
+      pool:
+        size: 2
+
   # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
   # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가
   # 기동 시 db/schema.sql을 실행하는 방식으로 처리합니다.

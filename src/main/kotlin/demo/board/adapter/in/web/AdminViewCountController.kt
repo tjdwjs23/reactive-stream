@@ -3,6 +3,7 @@ package demo.board.adapter.`in`.web
 import demo.board.application.port.`in`.FlushBoardViewCountsUseCase
 import demo.board.application.port.`in`.FlushViewCountsResult
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
@@ -29,6 +30,7 @@ class AdminViewCountController(
             "Redis에 쌓인 조회수 델타를 지금 즉시 DB로 write-back하고 결과 요약을 반환합니다. " +
                 "운영에서는 X-Admin-Token 헤더로 관리 토큰을 전달해야 합니다.",
     )
+    @SecurityRequirement(name = "admin-token")
     @PostMapping("/flush")
     suspend fun flush(
         @RequestHeader(name = "X-Admin-Token", required = false) adminToken: String?,

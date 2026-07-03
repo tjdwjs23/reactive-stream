@@ -20,6 +20,8 @@ import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import java.time.Clock
+import java.time.LocalDateTime
 import kotlin.time.Duration.Companion.milliseconds
 
 // 트랜잭션 경계는 "DB 접근"에만 좁게 둡니다. 클래스 레벨 @Transactional을 붙이면
@@ -36,6 +38,8 @@ class BoardService(
     private val boardViewCountPort: BoardViewCountPort,
     // 한글 전문검색 색인. 쓰기 경로에서 베스트에포트로 동기화합니다(실패해도 게시글 저장은 성공).
     private val boardSearchPort: BoardSearchPort,
+    // 생성 시각 주입용 시계. 도메인이 벽시계를 직접 읽지 않도록 여기서 now를 만들어 넘깁니다(테스트에서 고정 가능).
+    private val clock: Clock,
     // 조회수 증가(Redis)에 허용하는 시간 예산. Redis가 느리거나 죽어도 조회 지연이 여기서 상한선을 가집니다.
     @Value("\${board.view-count.increment-timeout-ms:200}") private val incrementTimeoutMs: Long = 200,
 ) : CreateBoardUseCase,
@@ -45,11 +49,12 @@ class BoardService(
     private val log = LoggerFactory.getLogger(javaClass)
 
     override suspend fun createBoard(command: CreateBoardCommand): Board {
-        // 도메인 객체 생성
+        // 도메인 객체 생성 (생성 시각은 주입된 Clock에서 만들어 넘깁니다 — 도메인이 벽시계를 직접 읽지 않음)
         val newBoard =
             Board(
                 title = command.title,
                 content = command.content,
+                createdAt = LocalDateTime.now(clock),
             )
         // 포트를 통해 저장 (단일 INSERT → R2DBC 자동 커밋, ID가 부여된 객체가 반환됨)
         val saved = boardRepositoryPort.save(newBoard)

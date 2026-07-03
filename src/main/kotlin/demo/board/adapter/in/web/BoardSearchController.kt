@@ -5,6 +5,7 @@ import demo.board.application.port.`in`.ReindexBoardsUseCase
 import demo.board.application.port.`in`.SearchBoardUseCase
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -46,6 +47,7 @@ class BoardSearchController(
             "DB(정본)를 순회하며 ES 색인을 다시 채웁니다. 인덱스를 새로 만들었거나 인라인 색인 누락을 회복할 때 사용합니다. " +
                 "운영에서는 X-Admin-Token 헤더로 관리 토큰을 전달해야 합니다.",
     )
+    @SecurityRequirement(name = "admin-token")
     @PostMapping("/reindex")
     suspend fun reindex(
         @RequestHeader(name = "X-Admin-Token", required = false) adminToken: String?,

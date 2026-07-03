@@ -2,6 +2,7 @@ package demo.board.application.port.`in`
 
 import demo.board.domain.model.Board
 import demo.board.domain.model.Board.Companion.MAX_TITLE_LENGTH
+import demo.board.domain.model.Board.Companion.MIN_CONTENT_LENGTH
 
 // 1. 게시글 생성 유즈케이스
 interface CreateBoardUseCase {
@@ -18,7 +19,8 @@ data class CreateBoardCommand(
         // DB 스키마의 title VARCHAR(255)와 정합. 초과 시 raw DB 에러(500) 대신 여기서 400으로 거른다.
         // 길이 한도는 도메인(Board)이 단일 소스로 보유한다.
         require(title.length <= MAX_TITLE_LENGTH) { "Title must be at most $MAX_TITLE_LENGTH characters" }
-        require(content.length >= 10) { "Content must be at least 10 characters" }
+        // 내용 최소 길이도 도메인(Board)이 단일 소스로 보유하며, 수정(Board.update)과 같은 값을 공유한다.
+        require(content.length >= MIN_CONTENT_LENGTH) { "Content must be at least $MIN_CONTENT_LENGTH characters" }
     }
 }
 

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.time.LocalDateTime
 
 @SpringBootTest
 class BoardPersistenceAdapterTest(
@@ -21,7 +22,10 @@ class BoardPersistenceAdapterTest(
 
         Given("유효한 Board가 주어졌을 때") {
             When("save를 호출하면") {
-                val saved = boardPersistenceAdapter.save(Board(title = "제목", content = "내용"))
+                val saved =
+                    boardPersistenceAdapter.save(
+                        Board(title = "제목", content = "내용", createdAt = LocalDateTime.now()),
+                    )
 
                 Then("id가 채번된 Board가 저장된다") {
                     saved.id.shouldNotBeNull()
@@ -32,7 +36,10 @@ class BoardPersistenceAdapterTest(
         }
 
         Given("저장된 Board가 존재할 때") {
-            val saved = boardPersistenceAdapter.save(Board(title = "조회용 제목", content = "조회용 내용"))
+            val saved =
+                boardPersistenceAdapter.save(
+                    Board(title = "조회용 제목", content = "조회용 내용", createdAt = LocalDateTime.now()),
+                )
 
             When("findById를 호출하면") {
                 val found = boardPersistenceAdapter.findById(saved.id!!)
@@ -55,7 +62,10 @@ class BoardPersistenceAdapterTest(
         Given("여러 Board가 저장되어 있을 때 - 키셋 페이지네이션") {
             val ids =
                 (1..5).map {
-                    boardPersistenceAdapter.save(Board(title = "page-$it", content = "내용")).id!!
+                    boardPersistenceAdapter
+                        .save(
+                            Board(title = "page-$it", content = "내용", createdAt = LocalDateTime.now()),
+                        ).id!!
                 }
             val idSet = ids.toSet()
 
@@ -84,8 +94,16 @@ class BoardPersistenceAdapterTest(
         }
 
         Given("여러 Board가 저장되어 있을 때 - 조회수 배치 write-back") {
-            val a = boardPersistenceAdapter.save(Board(title = "배치A", content = "내용")).id!!
-            val b = boardPersistenceAdapter.save(Board(title = "배치B", content = "내용")).id!!
+            val a =
+                boardPersistenceAdapter
+                    .save(
+                        Board(title = "배치A", content = "내용", createdAt = LocalDateTime.now()),
+                    ).id!!
+            val b =
+                boardPersistenceAdapter
+                    .save(
+                        Board(title = "배치B", content = "내용", createdAt = LocalDateTime.now()),
+                    ).id!!
 
             When("addViewCountsBatch로 여러 게시글 델타를 한 번에 반영하면") {
                 val updated = boardPersistenceAdapter.addViewCountsBatch(mapOf(a to 7L, b to 3L, -1L to 99L))
@@ -99,7 +117,10 @@ class BoardPersistenceAdapterTest(
         }
 
         Given("저장된 Board가 존재할 때") {
-            val saved = boardPersistenceAdapter.save(Board(title = "삭제될 제목", content = "삭제될 내용"))
+            val saved =
+                boardPersistenceAdapter.save(
+                    Board(title = "삭제될 제목", content = "삭제될 내용", createdAt = LocalDateTime.now()),
+                )
 
             When("deleteById를 호출하면") {
                 boardPersistenceAdapter.deleteById(saved.id!!)

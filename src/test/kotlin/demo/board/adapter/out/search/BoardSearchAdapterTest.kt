@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.time.LocalDateTime
 import io.kotest.matchers.string.shouldContain as stringShouldContain
 
 // 실제 Elasticsearch(+Nori) 컨테이너에 색인/검색을 수행하는 통합 테스트.
@@ -31,8 +32,15 @@ class BoardSearchAdapterTest(
 
         Given("한글 게시글이 색인되어 있을 때") {
             // 다른 테스트와 충돌하지 않도록 고유한 id/검색어를 사용합니다.
-            val mailBoard = Board(id = 9001L, title = "카카오메일 공지사항", content = "스팸 필터 개선 안내입니다.")
-            val contactBoard = Board(id = 9002L, title = "주소록 동기화 안내", content = "연락처 동기화. 메일과는 무관합니다.")
+            val mailBoard =
+                Board(id = 9001L, title = "카카오메일 공지사항", content = "스팸 필터 개선 안내입니다.", createdAt = LocalDateTime.now())
+            val contactBoard =
+                Board(
+                    id = 9002L,
+                    title = "주소록 동기화 안내",
+                    content = "연락처 동기화. 메일과는 무관합니다.",
+                    createdAt = LocalDateTime.now(),
+                )
             boardSearchAdapter.index(mailBoard)
             boardSearchAdapter.index(contactBoard)
             refresh()
@@ -71,9 +79,24 @@ class BoardSearchAdapterTest(
         Given("여러 게시글을 벌크로 색인할 때 - indexAll") {
             val bulk =
                 listOf(
-                    Board(id = 9101L, title = "벌크 색인 게시글 하나", content = "재색인 테스트 내용입니다."),
-                    Board(id = 9102L, title = "벌크 색인 게시글 둘", content = "재색인 테스트 내용입니다."),
-                    Board(id = 9103L, title = "벌크 색인 게시글 셋", content = "재색인 테스트 내용입니다."),
+                    Board(
+                        id = 9101L,
+                        title = "벌크 색인 게시글 하나",
+                        content = "재색인 테스트 내용입니다.",
+                        createdAt = LocalDateTime.now(),
+                    ),
+                    Board(
+                        id = 9102L,
+                        title = "벌크 색인 게시글 둘",
+                        content = "재색인 테스트 내용입니다.",
+                        createdAt = LocalDateTime.now(),
+                    ),
+                    Board(
+                        id = 9103L,
+                        title = "벌크 색인 게시글 셋",
+                        content = "재색인 테스트 내용입니다.",
+                        createdAt = LocalDateTime.now(),
+                    ),
                 )
 
             When("indexAll로 한 번에 색인하면") {

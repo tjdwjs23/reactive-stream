@@ -13,6 +13,10 @@ import java.time.LocalDateTime
 // - @Mapping: title/content를 korean(Nori) 분석기로 매핑하는 정의를 board-mappings.json에서 로드
 // 실제 필드 매핑은 mappingPath JSON이 최종 권위이며, 아래 프로퍼티는 문서 구조 문서화 용도입니다.
 // _id는 게시글 id(Long)를 문자열로 사용합니다.
+//
+// title/content만 전문검색(korean 분석기) 대상입니다. createdAt/viewCount는 검색어 매칭에는 쓰이지 않지만,
+// 검색 히트에서 DB 왕복 없이 도메인 Board를 그대로 복원(BoardDocumentMapper.toDomain)하기 위해 저장합니다.
+// (인기순 정렬 등으로 확장할 때도 이 필드들이 그대로 쓰입니다.)
 @Document(indexName = "boards")
 @Setting(settingPath = "elasticsearch/board-settings.json")
 @Mapping(mappingPath = "elasticsearch/board-mappings.json")

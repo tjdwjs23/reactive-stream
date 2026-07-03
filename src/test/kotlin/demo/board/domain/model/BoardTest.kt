@@ -14,20 +14,21 @@ class BoardTest :
                 Board(
                     id = 1L,
                     title = "원래 제목",
-                    content = "원래 내용",
+                    content = "원래 내용입니다.",
+                    createdAt = LocalDateTime.now(),
                 )
 
             When("유효한 제목과 내용으로 업데이트하면") {
-                val updated = board.update("새 제목", "새 내용")
+                val updated = board.update("새 제목", "새 내용은 열 자 이상입니다")
 
                 Then("변경된 필드를 가진 새 Board를 반환한다") {
                     updated.title shouldBe "새 제목"
-                    updated.content shouldBe "새 내용"
+                    updated.content shouldBe "새 내용은 열 자 이상입니다"
                 }
 
                 Then("원본 Board는 불변 상태를 유지한다") {
                     board.title shouldBe "원래 제목"
-                    board.content shouldBe "원래 내용"
+                    board.content shouldBe "원래 내용입니다."
                 }
 
                 Then("id와 createdAt은 보존된다") {
@@ -38,12 +39,12 @@ class BoardTest :
         }
 
         Given("유효하지 않은 입력값이 주어졌을 때") {
-            val board = Board(id = 1L, title = "제목", content = "내용")
+            val board = Board(id = 1L, title = "제목", content = "내용입니다열자", createdAt = LocalDateTime.now())
 
             When("빈 제목으로 업데이트하면") {
                 Then("BoardValidationException을 던진다") {
                     shouldThrow<BoardValidationException> {
-                        board.update("", "새 내용")
+                        board.update("", "새 내용은 열 자 이상입니다")
                     }
                 }
             }
@@ -51,7 +52,7 @@ class BoardTest :
             When("공백만 있는 제목으로 업데이트하면") {
                 Then("BoardValidationException을 던진다") {
                     shouldThrow<BoardValidationException> {
-                        board.update("   ", "새 내용")
+                        board.update("   ", "새 내용은 열 자 이상입니다")
                     }
                 }
             }
@@ -59,7 +60,15 @@ class BoardTest :
             When("255자를 초과하는 제목으로 업데이트하면") {
                 Then("BoardValidationException을 던진다") {
                     shouldThrow<BoardValidationException> {
-                        board.update("가".repeat(256), "새 내용")
+                        board.update("가".repeat(256), "새 내용은 열 자 이상입니다")
+                    }
+                }
+            }
+
+            When("10자 미만 내용으로 업데이트하면") {
+                Then("BoardValidationException을 던진다(생성·수정 검증 대칭)") {
+                    shouldThrow<BoardValidationException> {
+                        board.update("새 제목", "짧은내용")
                     }
                 }
             }

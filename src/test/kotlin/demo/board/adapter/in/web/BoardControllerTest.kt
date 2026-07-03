@@ -13,6 +13,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.LocalDateTime
 
 private class ControllerFixture {
     val createBoardUseCase = mockk<CreateBoardUseCase>()
@@ -43,6 +44,7 @@ class BoardControllerTest :
                 id = 1L,
                 title = "테스트 제목",
                 content = "테스트 내용입니다.",
+                createdAt = LocalDateTime.now(),
             )
 
         Given("유효한 요청 Body가 주어졌을 때 - POST /api/boards") {
@@ -154,7 +156,11 @@ class BoardControllerTest :
             val fixture = ControllerFixture()
             coEvery { fixture.getBoardUseCase.getBoards(any()) } returns
                 BoardPage(
-                    items = listOf(sampleBoard, Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용")),
+                    items =
+                        listOf(
+                            sampleBoard,
+                            Board(id = 2L, title = "두 번째 제목", content = "두 번째 내용", createdAt = LocalDateTime.now()),
+                        ),
                     nextCursor = 2L,
                     hasNext = true,
                 )

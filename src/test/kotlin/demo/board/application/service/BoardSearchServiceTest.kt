@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
+import java.time.LocalDateTime
 import java.util.Collections
 
 // 실제 DB/ES 대신 인메모리 페이크 out-port로 재색인 순회·벌크·내결함성 흐름을 결정적으로 검증합니다.
@@ -66,7 +67,7 @@ private class FakeBoardSearchPort(
     ): Flow<BoardSearchHit> = searchResult.asFlow()
 }
 
-private fun board(id: Long) = Board(id = id, title = "t$id", content = "c$id 내용입니다.")
+private fun board(id: Long) = Board(id = id, title = "t$id", content = "c$id 내용입니다.", createdAt = LocalDateTime.now())
 
 // REINDEX_PAGE_SIZE(=500)에 맞춘 데이터 크기. 페이지 경계 동작을 실제 상수 그대로 검증합니다.
 private const val PAGE_SIZE = 500

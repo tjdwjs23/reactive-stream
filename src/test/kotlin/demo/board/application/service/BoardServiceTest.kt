@@ -20,6 +20,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.asFlow
+import java.time.Clock
 import java.time.LocalDateTime
 
 private class ServiceFixture {
@@ -28,7 +29,9 @@ private class ServiceFixture {
 
     // 검색 색인은 쓰기 경로의 best-effort 부수효과이므로 relaxed 목으로 둡니다(index/deleteById는 무동작).
     val boardSearchPort = mockk<BoardSearchPort>(relaxed = true)
-    val boardService = BoardService(boardRepositoryPort, boardViewCountPort, boardSearchPort)
+
+    // 생성 시각 주입용 시계. 이 테스트는 createdAt 값 자체를 검증하지 않으므로 시스템 시계로 충분합니다.
+    val boardService = BoardService(boardRepositoryPort, boardViewCountPort, boardSearchPort, Clock.systemDefaultZone())
 }
 
 class BoardServiceTest :
@@ -37,7 +40,8 @@ class BoardServiceTest :
         Given("유효한 CreateBoardCommand가 주어졌을 때") {
             val fixture = ServiceFixture()
             val command = CreateBoardCommand(title = "제목", content = "10자 이상의 유효한 내용입니다.")
-            val savedBoard = Board(id = 1L, title = "제목", content = "10자 이상의 유효한 내용입니다.")
+            val savedBoard =
+                Board(id = 1L, title = "제목", content = "10자 이상의 유효한 내용입니다.", createdAt = LocalDateTime.now())
             coEvery { fixture.boardRepositoryPort.save(any()) } returns savedBoard
 
             When("createBoard를 호출하면") {
@@ -53,7 +57,7 @@ class BoardServiceTest :
 
         Given("존재하는 ID가 주어졌을 때") {
             val fixture = ServiceFixture()
-            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 10L)
+            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 10L, createdAt = LocalDateTime.now())
             coEvery { fixture.boardRepositoryPort.findById(1L) } returns board
             // 조회 시 Redis 델타 +1, 아직 DB에 반영 안 된 누적 델타(3)를 반환한다고 가정
             coEvery { fixture.boardViewCountPort.increment(1L) } returns 3L
@@ -85,7 +89,7 @@ class BoardServiceTest :
 
         Given("Redis(조회수 버퍼)가 장애일 때") {
             val fixture = ServiceFixture()
-            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 42L)
+            val board = Board(id = 1L, title = "제목", content = "내용", viewCount = 42L, createdAt = LocalDateTime.now())
             coEvery { fixture.boardRepositoryPort.findById(1L) } returns board
             coEvery { fixture.boardViewCountPort.increment(1L) } throws RuntimeException("redis down")
 
@@ -105,9 +109,9 @@ class BoardServiceTest :
             // size=2 요청 → 서비스는 hasNext 판정을 위해 size+1(=3)건을 id 내림차순으로 조회한다
             val rows =
                 listOf(
-                    Board(id = 5L, title = "제목5", content = "내용5"),
-                    Board(id = 4L, title = "제목4", content = "내용4"),
-                    Board(id = 3L, title = "제목3", content = "내용3"),
+                    Board(id = 5L, title = "제목5", content = "내용5", createdAt = LocalDateTime.now()),
+                    Board(id = 4L, title = "제목4", content = "내용4", createdAt = LocalDateTime.now()),
+                    Board(id = 3L, title = "제목3", content = "내용3", createdAt = LocalDateTime.now()),
                 )
             every { fixture.boardRepositoryPort.findPage(null, 3) } returns rows.asFlow()
 
@@ -126,8 +130,8 @@ class BoardServiceTest :
             val fixture = ServiceFixture()
             val rows =
                 listOf(
-                    Board(id = 2L, title = "제목2", content = "내용2"),
-                    Board(id = 1L, title = "제목1", content = "내용1"),
+                    Board(id = 2L, title = "제목2", content = "내용2", createdAt = LocalDateTime.now()),
+                    Board(id = 1L, title = "제목1", content = "내용1", createdAt = LocalDateTime.now()),
                 )
             every { fixture.boardRepositoryPort.findPage(10L, 3) } returns rows.asFlow()
 
@@ -159,8 +163,8 @@ class BoardServiceTest :
 
         Given("존재하는 Board와 유효한 Command가 주어졌을 때") {
             val fixture = ServiceFixture()
-            val existingBoard = Board(id = 1L, title = "원래 제목", content = "원래 내용", createdAt = LocalDateTime.now())
-            val command = UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용")
+            val existingBoard = Board(id = 1L, title = "원래 제목", content = "원래 내용입니다.", createdAt = LocalDateTime.now())
+            val command = UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용은 열 자 이상입니다")
             val updatedBoard = existingBoard.update(command.title, command.content)
             coEvery { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
             coEvery { fixture.boardRepositoryPort.save(any()) } returns updatedBoard
@@ -170,7 +174,7 @@ class BoardServiceTest :
 
                 Then("변경된 Board를 저장하고 반환한다") {
                     result.title shouldBe "새 제목"
-                    result.content shouldBe "새 내용"
+                    result.content shouldBe "새 내용은 열 자 이상입니다"
                     coVerify { fixture.boardRepositoryPort.save(any()) }
                 }
             }

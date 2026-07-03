@@ -10,6 +10,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.LocalDateTime
 
 private class SearchControllerFixture(
     adminToken: String = "",
@@ -38,13 +39,19 @@ class BoardSearchControllerTest :
             val hits =
                 listOf(
                     BoardSearchHit(
-                        board = Board(id = 1L, title = "카카오메일 공지", content = "스팸 필터 개선"),
+                        board =
+                            Board(
+                                id = 1L,
+                                title = "카카오메일 공지",
+                                content = "스팸 필터 개선",
+                                createdAt = LocalDateTime.now(),
+                            ),
                         score = 2.0,
                         highlightedTitle = "카카오<em>메일</em> 공지",
                         highlightedContent = null,
                     ),
                     BoardSearchHit(
-                        board = Board(id = 2L, title = "주소록 안내", content = "메일과는 무관"),
+                        board = Board(id = 2L, title = "주소록 안내", content = "메일과는 무관", createdAt = LocalDateTime.now()),
                         score = 1.0,
                         highlightedTitle = null,
                         highlightedContent = "<em>메일</em>과는 무관",

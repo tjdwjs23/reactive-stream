@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import org.springframework.stereotype.Repository
-import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 
 // BoardBatchQueryPort의 구현체. 일반 CRUD용 BoardPersistenceAdapter와 분리해
@@ -34,8 +33,8 @@ class BoardBatchPersistenceAdapter(
             }
         }
 
-    // 청크 단위로 짧게 커밋합니다(배치 전체를 하나의 트랜잭션으로 묶지 않음).
-    // R2DBC에서는 Spring이 구성한 ReactiveTransactionManager를 통해 트랜잭션이 적용됩니다.
-    @Transactional
+    // 단일 DELETE 문(WHERE id IN (:ids))이라 그 자체로 원자적이고 R2DBC 오토커밋으로 짧게 커밋됩니다.
+    // 프로젝트 원칙("단일 오토커밋 문장을 트랜잭션으로 감싸는 건 이득이 없다" — BoardService 참고)에 따라
+    // @Transactional을 붙이지 않습니다. 여러 문장을 원자적으로 묶어야 하는 흐름이 생기면 그때만 좁게 붙입니다.
     override suspend fun deleteByIds(ids: List<Long>): Int = boardR2dbcRepository.deleteByIds(ids)
 }
