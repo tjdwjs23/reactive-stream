@@ -1,20 +1,21 @@
-# 로컬 개발용 통합 스택: PostgreSQL + Redis + Prometheus + Grafana
+# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + Prometheus + Grafana
 #
 # Spring 앱(8080)은 이 compose에 포함하지 않습니다.
 #   - 앱은 호스트에서 ./gradlew bootRun 으로 실행합니다.
 #   - 도커 안의 Prometheus는 host.docker.internal:8080 으로 호스트의 앱을 긁어(scrape)갑니다.
 #
 # 사용법:
-#   docker compose up -d        # 4개 컨테이너 백그라운드 실행
+#   docker compose up -d        # 5개 컨테이너 백그라운드 실행
 #   docker compose ps           # 상태 확인
 #   docker compose down         # 정지 + 컨테이너 삭제(볼륨/데이터는 유지)
 #   docker compose down -v      # 볼륨까지 삭제(완전 초기화)
 #
 # 접속:
-#   PostgreSQL  localhost:5432  (db/user=hexagonal, pw=hexagonal1234)
-#   Redis       localhost:6379
-#   Prometheus  http://localhost:9090
-#   Grafana     http://localhost:3000  (admin / admin)
+#   PostgreSQL     localhost:5432  (db/user=hexagonal, pw=hexagonal1234)
+#   Redis          localhost:6379
+#   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
+#   Prometheus     http://localhost:9090
+#   Grafana        http://localhost:3000  (admin / admin)
 
 services:
   postgres:
@@ -45,6 +46,34 @@ services:
       timeout: 3s
       retries: 5
 
+  elasticsearch:
+    # 공식 이미지 + Nori(analysis-nori) 플러그인을 구운 커스텀 이미지를 빌드해서 사용합니다.
+    # (한글 형태소 분석/전문검색을 위해 Nori가 필수) — docker/elasticsearch/Dockerfile 참고
+    build:
+      context: ./docker/elasticsearch
+    # 버전은 Spring Boot 4의 ES 클라이언트(9.2.x)와 맞춥니다(ES 8은 프로토콜 비호환).
+    image: hexagonal-elasticsearch-nori:9.2.2
+    container_name: hexagonal-elasticsearch
+    environment:
+      # 단일 노드 개발 모드 + 로컬 편의를 위해 보안/HTTPS 비활성화
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      # 로컬 리소스 절약용 힙 크기(운영에서는 절대 이렇게 낮게 두지 말 것)
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   prometheus:
     image: prom/prometheus:latest
     container_name: hexagonal-prometheus
@@ -74,5 +103,6 @@ services:
 
 volumes:
   postgres-data:
+  elasticsearch-data:
   prometheus-data:
   grafana-data:

@@ -66,6 +66,18 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 | `GET` | `/api/boards` | `GetBoardUseCase` → 200 OK |
 | `PUT` | `/api/boards/{id}` | `UpdateBoardUseCase` → 200 OK |
 | `DELETE` | `/api/boards/{id}` | `DeleteBoardUseCase` → 204 No Content |
+| `GET` | `/api/boards/search?keyword=&size=` | `SearchBoardUseCase` → 200 OK (한글 전문검색, 관련도순) |
+| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인) |
+
+### Korean full-text search (Elasticsearch + Nori)
+
+한글 형태소 전문검색은 **별도 out-port(`BoardSearchPort`) + ES 어댑터**로 붙어 있습니다. R2DBC(정본)와 ES(검색 인덱스)는 분리되며, 쓰기 경로에서 **베스트에포트 인라인 색인**으로 동기화합니다(조회수 Redis 패턴과 동일 — 색인 실패는 로그만 남기고 게시글 저장은 성공).
+
+- **버전 제약**: Spring Boot 4는 Elasticsearch **9.2.x 클라이언트**(`spring-data-elasticsearch 6.x` + `elasticsearch-java`)를 번들합니다. ES 8 서버는 프로토콜(호환 미디어 타입)이 맞지 않아 통신이 깨지므로 **서버도 ES 9.2.x**를 써야 합니다. docker-compose는 `docker/elasticsearch/Dockerfile`(공식 이미지 + `analysis-nori` 플러그인)을 빌드해 `hexagonal-elasticsearch-nori:9.2.2`로 띄웁니다.
+- **인덱스/분석기**: `boards` 인덱스는 기동 시 `BoardSearchIndexInitializer`(`@EventListener(ApplicationReadyEvent)` + `runBlocking` 브리지)가 멱등 생성합니다. Nori 분석기 정의는 `resources/elasticsearch/board-settings.json`(nori_tokenizer, decompound_mode=mixed + nori_part_of_speech/readingform/lowercase 필터), 필드 매핑은 `board-mappings.json`(title/content를 `korean` 분석기로). `BoardDocument`의 `@Setting`/`@Mapping`이 이 JSON을 가리키며 매핑의 최종 권위입니다.
+- **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match`(title^2, content)로 검색하고, 기본 `_score` 내림차순(관련도순)으로 정렬 + `<em>` 하이라이트를 반환합니다. 다건은 관례대로 `Flow<BoardSearchHit>`.
+- **엔티티 분리**: 도메인 `Board` ↔ `BoardDocument` 변환은 `BoardDocumentMapper`에서만. 도메인 모델에는 ES 애노테이션이 새어 들어가지 않습니다(R2DBC 엔티티 규칙과 동일).
+- **정합성 회복**: 인라인 색인 누락이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
 
 ### Adding a new feature
 

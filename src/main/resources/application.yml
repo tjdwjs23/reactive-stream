@@ -16,6 +16,11 @@ spring:
       host: localhost
       port: 6379
 
+  # 한글 전문검색용 Elasticsearch(Nori). WebFlux 클래스패스에서 리액티브 클라이언트가 자동 구성됩니다.
+  # docker-compose의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
+  elasticsearch:
+    uris: http://localhost:9200
+
 # 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램.
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
 # - /actuator/metrics, /actuator/prometheus : 처리량/지연 등 메트릭 (http.server.requests 타이머)

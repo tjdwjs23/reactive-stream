@@ -1,6 +1,7 @@
 package demo.reactivestream.adapter.`in`.web
 
 import demo.reactivestream.application.port.`in`.BoardPage
+import demo.reactivestream.application.port.out.BoardSearchHit
 import demo.reactivestream.domain.model.Board
 import org.springframework.stereotype.Component
 
@@ -20,5 +21,23 @@ class BoardWebMapper {
             items = page.items.map { toResponse(it) },
             nextCursor = page.nextCursor,
             hasNext = page.hasNext,
+        )
+
+    fun toSearchResponse(
+        keyword: String,
+        hits: List<BoardSearchHit>,
+    ): BoardSearchResponse =
+        BoardSearchResponse(
+            keyword = keyword,
+            total = hits.size,
+            items =
+                hits.map {
+                    BoardSearchItemResponse(
+                        board = toResponse(it.board),
+                        score = it.score,
+                        highlightedTitle = it.highlightedTitle,
+                        highlightedContent = it.highlightedContent,
+                    )
+                },
         )
 }
