@@ -1,0 +1,18 @@
+# Prometheus 설정: "누구를 얼마나 자주 긁어올지"를 정의합니다.
+global:
+  scrape_interval: 15s      # 기본 수집 주기(별도 지정 없는 job에 적용)
+
+scrape_configs:
+  # 우리 Spring 앱의 메트릭을 긁어오는 job.
+  # 앱은 호스트에서 실행되므로(도커 밖), 컨테이너 안에서 호스트를 가리키는
+  # host.docker.internal 을 타겟으로 씁니다.
+  - job_name: 'hexagonal-app'
+    metrics_path: '/actuator/prometheus'   # Spring Actuator가 노출하는 경로
+    scrape_interval: 5s                     # 이 앱은 5초마다 자주 수집
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+
+  # Prometheus 자기 자신의 상태도 수집(선택).
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
