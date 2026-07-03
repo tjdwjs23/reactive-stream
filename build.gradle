@@ -10,7 +10,7 @@ plugins {
 
 group = 'demo.board'
 version = '0.0.1-SNAPSHOT'
-description = 'hexagonal-board'
+description = 'reactive'
 
 java {
     toolchain {

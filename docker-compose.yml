@@ -11,7 +11,7 @@
 #   docker compose down -v      # 볼륨까지 삭제(완전 초기화)
 #
 # 접속:
-#   PostgreSQL     localhost:5432  (db/user=hexagonal, pw=hexagonal1234)
+#   PostgreSQL     localhost:5432  (db/user=reactive, pw=reactive1234)
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
 #   Prometheus     http://localhost:9090
@@ -20,24 +20,24 @@
 services:
   postgres:
     image: postgres:16
-    container_name: hexagonal-postgres
+    container_name: reactive-postgres
     environment:
-      POSTGRES_DB: hexagonal
-      POSTGRES_USER: hexagonal
-      POSTGRES_PASSWORD: hexagonal1234
+      POSTGRES_DB: reactive
+      POSTGRES_USER: reactive
+      POSTGRES_PASSWORD: reactive1234
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hexagonal -d hexagonal"]
+      test: ["CMD-SHELL", "pg_isready -U reactive -d reactive"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: hexagonal-redis
+    container_name: reactive-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -52,8 +52,8 @@ services:
     build:
       context: ./docker/elasticsearch
     # 버전은 Spring Boot 4의 ES 클라이언트(9.2.x)와 맞춥니다(ES 8은 프로토콜 비호환).
-    image: hexagonal-elasticsearch-nori:9.2.2
-    container_name: hexagonal-elasticsearch
+    image: reactive-elasticsearch-nori:9.2.2
+    container_name: reactive-elasticsearch
     environment:
       # 단일 노드 개발 모드 + 로컬 편의를 위해 보안/HTTPS 비활성화
       discovery.type: single-node
@@ -76,7 +76,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: hexagonal-prometheus
+    container_name: reactive-prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -88,7 +88,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: hexagonal-grafana
+    container_name: reactive-grafana
     ports:
       - "3000:3000"
     environment:
