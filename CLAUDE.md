@@ -15,10 +15,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test
 
 # Test (single class)
-./gradlew test --tests "demo.reactivestream.ReactiveStreamApplicationTests"
+./gradlew test --tests "demo.board.BoardApplicationTests"
 
 # Test (single method)
-./gradlew test --tests "demo.reactivestream.ReactiveStreamApplicationTests.contextLoads"
+./gradlew test --tests "demo.board.BoardApplicationTests.contextLoads"
 
 # Lint (ktlint) — CI 게이트
 ./gradlew ktlintCheck
@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew koverHtmlReport     # build/reports/kover/html/index.html
 ```
 
-> **Quality gates**: 아키텍처 규칙은 **Konsist**(`src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 하한 85%로 게이트(`koverVerify`)하며, 부트스트랩(`ReactiveStreamApplication*`)은 집계에서 제외합니다.
+> **Quality gates**: 아키텍처 규칙은 **Konsist**(`src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 하한 85%로 게이트(`koverVerify`)하며, 부트스트랩(`BoardApplication*`)은 집계에서 제외합니다.
 
 > **Note**: The app uses **R2DBC (non-blocking) only — no JDBC anywhere**. `application.yml` configures `spring.r2dbc.*`. Schema is initialized at startup by a **`ConnectionFactoryInitializer`** bean (`adapter/out/persistence/R2dbcSchemaInitializer.kt`) that runs `db/schema.sql` over R2DBC (Flyway was removed because it requires JDBC). `db/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/hexagonal`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers only the r2dbc URL and uses a **log-based wait strategy** (the default readiness probe uses JDBC, which is no longer on the classpath).
 
@@ -39,7 +39,7 @@ This is a **Hexagonal Architecture (Ports and Adapters)** board API in Kotlin + 
 
 **Reactive conventions (apply everywhere):**
 - Single-value operations that touch I/O are `suspend fun`. Multi-value reads return `Flow<T>` (never `List` at the port boundary).
-- Transaction boundaries stay **narrow — DB access only**. Spring's `ReactiveTransactionManager` (auto-configured by R2DBC) works on `suspend` functions, but `BoardService` deliberately has **no class-level `@Transactional`**: external side-effects (ES indexing, Redis increment) must run *outside* (and, for writes, *after*) the DB transaction so a rollback can't leave ES ahead of DB and so a Redis round-trip doesn't hold a DB connection. Writes are single-statement (R2DBC autocommit) + best-effort index after; only the pure read `getBoards` keeps `@Transactional(readOnly = true)`.
+- Transaction boundaries stay **narrow — DB access only**. Spring's `ReactiveTransactionManager` (auto-configured by R2DBC) works on `suspend` functions, but `BoardService` deliberately has **no class-level `@Transactional`**: external side-effects (ES indexing, Redis increment) must run *outside* (and, for writes, *after*) the DB transaction so a rollback can't leave ES ahead of DB and so a Redis round-trip doesn't hold a DB connection. Writes are single-statement (R2DBC autocommit) + best-effort index after; reads (`getBoard`, `getBoards`) are single SELECTs with **no `@Transactional`** — a read-only tx around one autocommit statement buys nothing.
 - Blocking-world driving adapters (e.g. the `@Scheduled` batch trigger, which can't be `suspend`) bridge into coroutines with `runBlocking` — keep that bridge inside the adapter.
 
 The three concentric layers — with dependency arrows pointing strictly inward:
@@ -60,9 +60,9 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 ### Key patterns
 
 - **Domain model is immutable** (`data class Board`). Mutations return a new instance via `.copy()` (see `Board.update()`).
-- **Self-validating commands**: `CreateBoardCommand` validates both fields in its `init` block (title not blank, content ≥ 10 chars). `UpdateBoardCommand` does **not** self-validate — title-blank validation lives in `Board.update()` and there is no content-length check on update.
+- **Self-validating commands**: `CreateBoardCommand` validates in its `init` block (title not blank, title ≤ 255 chars, content ≥ 10 chars). `UpdateBoardCommand` does **not** self-validate — title blank/length (≤ 255) validation lives in `Board.update()` and there is no content-length check on update. The 255 limit is a domain invariant (`Board.MAX_TITLE_LENGTH`) shared by both paths, matching the DB `VARCHAR(255)` so an over-length title is a 400, not a raw DB 500.
 - **Strict separation of persistence Entity and Domain Model**: `BoardMapper` is the only place where `BoardR2dbcEntity` ↔ `Board` conversion happens. Never put `@Table`/`@Id` on a domain model.
-- `BoardService` keeps transactions narrow (no class-level `@Transactional`): writes are single-statement autocommits with ES indexing done *after* the write, `getBoard` reads the DB then increments Redis outside any tx, and only `getBoards` is `@Transactional(readOnly = true)`. `getBoards()` collects a keyset page and returns `BoardPage`.
+- `BoardService` keeps transactions narrow (no `@Transactional` at all): writes are single-statement autocommits with ES indexing done *after* the write, `getBoard` reads the DB then increments Redis outside any tx, and `getBoards` is a single keyset SELECT with no tx. `getBoards()` collects a keyset page and returns `BoardPage`.
 - **Batch (`ArchiveStaleBoardsService`)**: no class-level `@Transactional`; a `coroutineScope` fans out a bounded `Channel` (producer collects the keyset-paginated `Flow`, N workers delete chunks). Deletes commit per-chunk. Domain rule `Board.isStale()` is the final authority over the SQL pre-filter. **Partial** chunk failures are reported in `ArchiveResult.failedChunks` (skip-and-continue); a **total** failure (every attempted chunk failed) throws `IllegalStateException` so a scheduler that only watches for exceptions doesn't mistake it for success.
 - `BoardService` implements all four UseCase interfaces; `BoardController` injects them individually by interface, not by the concrete class.
 - Business exceptions (`BoardNotFoundException`, `BoardValidationException`) live in `domain.exception` and extend `RuntimeException`.

@@ -1,6 +1,6 @@
 spring:
   application:
-    name: reactive-stream
+    name: hexagonal-board
 
   # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
   # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가
@@ -8,9 +8,9 @@ spring:
   # 접속 정보는 환경변수로 외부화합니다(운영은 Vault/K8s Secret로 주입, 로컬은 아래 기본값 사용).
   # 비밀번호를 소스에 평문으로 커밋하지 않기 위해 ${ENV:default} 형태를 씁니다.
   r2dbc:
-    url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/hexagonal}
-    username: ${SPRING_R2DBC_USERNAME:hexagonal}
-    password: ${SPRING_R2DBC_PASSWORD:hexagonal1234}
+    url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/reactive}
+    username: ${SPRING_R2DBC_USERNAME:reactive}
+    password: ${SPRING_R2DBC_PASSWORD:reactive1234}
 
   # 조회수 카운터용 Redis(리액티브 Lettuce). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
   data:
@@ -39,7 +39,8 @@ management:
       percentiles-histogram:
         http.server.requests: true
 
-# 오래된 게시글 일괄 아카이브 배치 설정 (murray의 jobParameters에 해당하는 튜닝 노브)
+# 오래된 게시글 일괄 아카이브 배치 설정
+
 board:
   # 운영/시험용 admin 엔드포인트(조회수 즉시 플러시, 전체 재색인) 보호용 토큰.
   # 비워두면 무인증(개발 편의) — 기동 시 경고 로그가 남습니다. 운영에서는 반드시 설정하고,

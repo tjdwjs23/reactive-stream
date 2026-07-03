@@ -8,9 +8,9 @@ plugins {
     id 'org.jetbrains.kotlinx.kover' version '0.9.1'
 }
 
-group = 'demo.reactivestream'
+group = 'demo.board'
 version = '0.0.1-SNAPSHOT'
-description = 'reactive-stream'
+description = 'hexagonal-board'
 
 java {
     toolchain {
@@ -94,7 +94,7 @@ kover {
         filters {
             excludes {
                 // 부트스트랩 진입점(main)은 테스트 대상이 아니므로 커버리지 집계에서 제외합니다.
-                classes 'demo.reactivestream.ReactiveStreamApplication*'
+                classes 'demo.board.BoardApplication*'
             }
         }
         // 회귀 방지 게이트. 현재 라인 커버리지(~94%)보다 여유를 둔 하한선(85%)을 강제합니다.
