@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import kotlin.time.Duration.Companion.milliseconds
 
 @Service
 // 클래스 레벨 @Transactional이 모든 메서드에 기본 적용됩니다.
@@ -54,13 +55,10 @@ class BoardService(
     // (readOnly 트랜잭션은 DB 읽기만 감싸며, Redis 증가는 트랜잭션 밖의 별도 자원 연산입니다.)
     @Transactional(readOnly = true)
     override suspend fun getBoard(id: Long): Board {
-        val board =
-            boardRepositoryPort.findById(id)
-                ?: throw BoardNotFoundException(id)
-        // 조회수 집계는 부가 기능(best-effort)입니다. Redis 장애가 핵심 조회 경로를 막지 않도록,
-        // 증가 실패/지연 시엔 델타 0으로 강등해 DB 누적값으로 정상 응답합니다.
-        val pendingDelta = incrementViewCountSafely(id)
-        return board.copy(viewCount = board.viewCount + pendingDelta)
+        val board = boardRepositoryPort.findById(id)   // (1) DB에서 확정값 읽기 (SELECT만!)
+            ?: throw BoardNotFoundException(id)
+        val pendingDelta = incrementViewCountSafely(id) // (2) Redis에 +1, 누적 델타 받기
+        return board.copy(viewCount = board.viewCount + pendingDelta) // (3) 합쳐서 응답
     }
 
     // 조회수 증가를 시간 예산 안에서 시도하고, 실패하면 0을 돌려줍니다(조회 자체는 성공).
@@ -68,7 +66,7 @@ class BoardService(
     // 구조적 동시성을 위해 삼키지 않고 다시 던집니다.
     private suspend fun incrementViewCountSafely(id: Long): Long =
         try {
-            withTimeout(incrementTimeoutMs) { boardViewCountPort.increment(id) }
+            withTimeout(incrementTimeoutMs.milliseconds) { boardViewCountPort.increment(id) }
         } catch (e: TimeoutCancellationException) {
             log.warn(
                 "view count increment timed out (boardId={}, budget={}ms); serving DB value",
