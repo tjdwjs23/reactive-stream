@@ -33,6 +33,10 @@ dependencies {
     // 조회수 카운터: 리액티브 Redis(Lettuce, 논블로킹). 블로킹 RedisTemplate/Jedis는 쓰지 않습니다.
     implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
 
+    // 한글 전문검색: Elasticsearch(Nori 형태소 분석). WebFlux가 클래스패스에 있으므로
+    // 리액티브 클라이언트(ReactiveElasticsearchClient/Operations)가 자동 구성됩니다. 블로킹 클라이언트는 쓰지 않습니다.
+    implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
+
     // 관측성: Actuator(health/metrics + r2dbc health), Micrometer Prometheus 레지스트리(처리량/지연 노출)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
@@ -54,6 +58,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-elasticsearch'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

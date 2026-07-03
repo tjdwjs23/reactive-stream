@@ -19,7 +19,7 @@ class ActuatorEndpointTest(
 
         Given("Actuator가 구성되어 있을 때") {
             When("GET /actuator/health") {
-                Then("전체 UP과 r2dbc·redis 헬스가 노출된다") {
+                Then("전체 UP과 r2dbc·redis·elasticsearch 헬스가 노출된다") {
                     client
                         .get()
                         .uri("/actuator/health")
@@ -32,6 +32,8 @@ class ActuatorEndpointTest(
                         .jsonPath("$.components.r2dbc.status")
                         .isEqualTo("UP")
                         .jsonPath("$.components.redis.status")
+                        .isEqualTo("UP")
+                        .jsonPath("$.components.elasticsearch.status")
                         .isEqualTo("UP")
                 }
             }

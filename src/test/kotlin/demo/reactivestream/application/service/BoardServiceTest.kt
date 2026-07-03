@@ -4,6 +4,7 @@ import demo.reactivestream.application.port.`in`.BoardPageQuery
 import demo.reactivestream.application.port.`in`.CreateBoardCommand
 import demo.reactivestream.application.port.`in`.UpdateBoardCommand
 import demo.reactivestream.application.port.out.BoardRepositoryPort
+import demo.reactivestream.application.port.out.BoardSearchPort
 import demo.reactivestream.application.port.out.BoardViewCountPort
 import demo.reactivestream.domain.exception.BoardNotFoundException
 import demo.reactivestream.domain.model.Board
@@ -24,7 +25,10 @@ import java.time.LocalDateTime
 private class ServiceFixture {
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
     val boardViewCountPort = mockk<BoardViewCountPort>()
-    val boardService = BoardService(boardRepositoryPort, boardViewCountPort)
+
+    // 검색 색인은 쓰기 경로의 best-effort 부수효과이므로 relaxed 목으로 둡니다(index/deleteById는 무동작).
+    val boardSearchPort = mockk<BoardSearchPort>(relaxed = true)
+    val boardService = BoardService(boardRepositoryPort, boardViewCountPort, boardSearchPort)
 }
 
 class BoardServiceTest :

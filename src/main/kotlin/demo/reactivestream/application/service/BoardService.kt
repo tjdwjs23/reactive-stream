@@ -9,6 +9,7 @@ import demo.reactivestream.application.port.`in`.GetBoardUseCase
 import demo.reactivestream.application.port.`in`.UpdateBoardCommand
 import demo.reactivestream.application.port.`in`.UpdateBoardUseCase
 import demo.reactivestream.application.port.out.BoardRepositoryPort
+import demo.reactivestream.application.port.out.BoardSearchPort
 import demo.reactivestream.application.port.out.BoardViewCountPort
 import demo.reactivestream.domain.exception.BoardNotFoundException
 import demo.reactivestream.domain.model.Board
@@ -31,6 +32,8 @@ import kotlin.time.Duration.Companion.milliseconds
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort,
     private val boardViewCountPort: BoardViewCountPort,
+    // 한글 전문검색 색인. 쓰기 경로에서 베스트에포트로 동기화합니다(실패해도 게시글 저장은 성공).
+    private val boardSearchPort: BoardSearchPort,
     // 조회수 증가(Redis)에 허용하는 시간 예산. Redis가 느리거나 죽어도 조회 지연이 여기서 상한선을 가집니다.
     @Value("\${board.view-count.increment-timeout-ms:200}") private val incrementTimeoutMs: Long = 200,
 ) : CreateBoardUseCase,
@@ -47,7 +50,9 @@ class BoardService(
                 content = command.content,
             )
         // 포트를 통해 저장 (ID가 부여된 객체가 반환됨)
-        return boardRepositoryPort.save(newBoard)
+        val saved = boardRepositoryPort.save(newBoard)
+        indexSafely(saved) // 검색 색인에 베스트에포트 반영
+        return saved
     }
 
     // 단건 조회는 조회수 1건을 반영합니다. DB에는 즉시 쓰지 않고 Redis에 델타를 누적(INCR)한 뒤,
@@ -108,10 +113,36 @@ class BoardService(
         val updatedBoard = existingBoard.update(command.title, command.content)
 
         // 3. 변경된 객체 저장
-        return boardRepositoryPort.save(updatedBoard)
+        val saved = boardRepositoryPort.save(updatedBoard)
+        indexSafely(saved) // 수정 내용을 검색 색인에 반영(같은 id 문서 덮어쓰기)
+        return saved
     }
 
     override suspend fun deleteBoard(id: Long) {
         boardRepositoryPort.deleteById(id)
+        deleteFromIndexSafely(id) // 검색 색인에서도 제거(베스트에포트)
+    }
+
+    // 색인 반영을 베스트에포트로 수행합니다. ES가 느리거나 죽어도 게시글 쓰기(DB)는 이미 성공했으므로
+    // 여기서 실패는 로그만 남기고 삼킵니다. 누락분은 재색인(reindexAll)으로 회복할 수 있습니다.
+    // 단, 상위 취소(CancellationException)는 구조적 동시성을 위해 다시 던집니다.
+    private suspend fun indexSafely(board: Board) {
+        try {
+            boardSearchPort.index(board)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("failed to index board (id={}); search may be stale. cause={}", board.id, e.toString())
+        }
+    }
+
+    private suspend fun deleteFromIndexSafely(id: Long) {
+        try {
+            boardSearchPort.deleteById(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("failed to delete board from index (id={}); search may be stale. cause={}", id, e.toString())
+        }
     }
 }

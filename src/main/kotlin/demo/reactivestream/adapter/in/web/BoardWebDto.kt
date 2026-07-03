@@ -26,3 +26,18 @@ data class BoardPageResponse(
     val nextCursor: Long?,
     val hasNext: Boolean,
 )
+
+// 검색 결과 한 건. board(원문) + score(관련도) + 매칭 부분을 <em>로 감싼 하이라이트.
+data class BoardSearchItemResponse(
+    val board: BoardResponse,
+    val score: Double,
+    val highlightedTitle: String?,
+    val highlightedContent: String?,
+)
+
+// 검색 응답. items는 관련도(score) 내림차순으로 정렬돼 있습니다.
+data class BoardSearchResponse(
+    val keyword: String,
+    val total: Int,
+    val items: List<BoardSearchItemResponse>,
+)
