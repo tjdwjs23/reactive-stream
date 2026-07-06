@@ -1,0 +1,62 @@
+# 로컬 개발용 Grafana Mimir(단일 프로세스 모놀리식) 최소 설정. 운영용 아님(운영은 객체 스토리지 + 다중 컴포넌트).
+#
+# 역할: Prometheus 서버를 대체하는 메트릭 저장소. 스스로 스크레이프하지 않고, 앱이 OTLP로 push한 메트릭을 저장한다.
+# - OTLP 수신:  POST /otlp/v1/metrics   (앱 Micrometer OTLP 레지스트리가 여기로 push)
+# - 조회(PromQL): /prometheus/api/v1/... (Grafana Mimir 데이터소스가 Prometheus API로 질의)
+
+# 단일 테넌트 로컬 개발: X-Scope-OrgID 헤더 없이 쓰도록 멀티테넌시를 끕니다.
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  log_level: warn
+
+# 단일 노드이므로 모든 링을 인메모리로, 복제 계수 1로 둡니다.
+ingester:
+  ring:
+    replication_factor: 1
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+distributor:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+# 로컬 파일시스템 스토리지(블록/컴팩터/룰러).
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+  tsdb:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/rules
+
+limits:
+  # OTLP로 들어온 메트릭에 Prometheus 관례 접미사(_total, 단위 _seconds/_bytes 등)를 붙여
+  # 스크레이프 방식과 동일한 이름으로 저장합니다. 이게 없으면 board_create / http_server_requests_count 처럼
+  # 접미사가 빠져, PromQL 대시보드(board_create_total, http_server_requests_seconds_bucket 등)가 어긋납니다.
+  otel_metric_suffixes_enabled: true
+  # 로컬에서 과거/미래 타임스탬프 샘플도 넉넉히 받아들입니다.
+  out_of_order_time_window: 1h

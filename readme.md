@@ -15,10 +15,11 @@
 * **Cache/Counter**: **Reactive Redis (Lettuce)** — 조회수 카운터(INCR + 주기적 DB write-back), 논블로킹
 * **Search**: **Elasticsearch 9.2.x + Nori** (`spring-data-elasticsearch`, 리액티브 클라이언트) — 한글 형태소 전문검색·관련도순 정렬·하이라이트, 논블로킹
 * **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
-* **Observability (3종 통합)**: Grafana에서 **메트릭·로그·트레이스**를 traceId로 오가는 통합 관측성
-  * **메트릭** — Actuator + **Micrometer Prometheus** (HTTP 지연 히스토그램) + **도메인 비즈니스 메트릭**(`ObservabilityPort` out-port로 헥사고날 규칙 안에서 수집: 생성/조회/수정/삭제/검색/플러시/아카이브)
-  * **로그** — Spring Boot 4 네이티브 **구조화 JSON(ECS)** 콘솔 + **Loki**로 HTTP push(loki4j), MDC의 traceId 포함
-  * **트레이스** — **Micrometer Tracing → OpenTelemetry → OTLP → Tempo**, Reactor↔코루틴 컨텍스트 자동 전파로 suspend/Flow 경계 넘어 traceId 유지
+* **Observability (LGTM 스택)**: 별도 스크레이퍼 없이 **Loki·Grafana·Tempo·Mimir** 4종만으로 메트릭·로그·트레이스를 Grafana 단일 대시보드에서 통합(모두 앱이 push)
+  * **메트릭(M)** — **Mimir**(Prometheus 대체 저장소). 앱이 **OTLP로 push**(Mimir는 스스로 스크레이프 안 함). HTTP 지연 히스토그램 + **도메인 비즈니스 메트릭**(`ObservabilityPort` out-port로 헥사고날 규칙 안에서 수집: 생성/조회/수정/삭제/검색/플러시/아카이브). `/actuator/prometheus`는 로컬 디버깅용으로 유지
+  * **로그(L)** — Spring Boot 4 네이티브 **구조화 JSON(ECS)** 콘솔 + **Loki**로 HTTP push(loki4j), MDC의 traceId 포함
+  * **트레이스(T)** — **Micrometer Tracing → OpenTelemetry → OTLP → Tempo**, Reactor↔코루틴 컨텍스트 자동 전파로 suspend/Flow 경계 넘어 traceId 유지
+  * **Grafana(G)** — 3종 데이터소스 자동 등록 + 통합 대시보드. traceId로 로그↔트레이스 상호 점프
 * **API Docs**: **springdoc-openapi (WebFlux)** — Swagger UI (`/swagger-ui.html`), OpenAPI JSON (`/v3/api-docs`)
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters), **Konsist**로 아키텍처 규칙 자동 강제
@@ -118,7 +119,7 @@ demo.board
 | :--- | :--- | :--- |
 | `GET` | `/actuator/health` | 애플리케이션/의존성 상태 (r2dbc·redis 헬스 포함) |
 | `GET` | `/actuator/metrics` | 애플리케이션 메트릭 |
-| `GET` | `/actuator/prometheus` | Prometheus 스크레이프 엔드포인트 (HTTP 요청 지연 히스토그램 포함) |
+| `GET` | `/actuator/prometheus` | Micrometer 메트릭 노출(로컬 디버깅용). 저장/조회는 Mimir가 담당(앱이 OTLP push) |
 | `GET` | `/swagger-ui.html` | Swagger UI (API 문서 뷰어) |
 | `GET` | `/v3/api-docs` | OpenAPI 3 문서 (JSON) |
 | `POST` | `/api/admin/view-counts/flush` | 조회수 델타를 즉시 DB로 write-back (온디맨드 플러시, **admin 토큰 필요**) |
@@ -309,7 +310,7 @@ git clone <repository-url>
 ./gradlew clean build
 
 # 방법 A (권장) — 로컬 의존 스택을 docker-compose로 한 번에 기동
-#   PostgreSQL + Redis + Elasticsearch(+Nori) + Prometheus + Grafana
+#   PostgreSQL + Redis + Elasticsearch(+Nori) + LGTM(Loki + Grafana + Tempo + Mimir)
 #   (elasticsearch는 docker/elasticsearch/Dockerfile을 빌드해 Nori 플러그인을 포함합니다)
 docker compose up -d
 
@@ -335,8 +336,8 @@ docker run --name hexagonal-elasticsearch -p 9200:9200 \
 
 * **API 문서 (Swagger UI)**: <http://localhost:8080/swagger-ui.html>
 * **헬스 체크**: <http://localhost:8080/actuator/health>
-* **Prometheus 메트릭**: <http://localhost:8080/actuator/prometheus>
-* **Grafana** : <http://localhost:3000> (admin / admin) — 기동 시 **메트릭(Prometheus)·로그(Loki)·트레이스(Tempo)** 3종 데이터소스가 자동 등록되고, "Hexagonal Board API" 대시보드(처리량·에러율·지연 p50/p95/p99·힙·CPU·GC·스레드)도 자동 프로비저닝됩니다. **Explore → Loki**에서 구조화 JSON 로그를 검색하고 `TraceID` 링크로 **Tempo** 트레이스로 점프, **Explore → Tempo**에서 요청 트레이스(WebFlux→R2DBC/Redis/ES 스팬)를 봅니다.
+* **메트릭(로컬 디버깅)**: <http://localhost:8080/actuator/prometheus> (저장/조회는 Mimir)
+* **Grafana** : <http://localhost:3000> (admin / admin) — 기동 시 **메트릭(Mimir)·로그(Loki)·트레이스(Tempo)** 3종 데이터소스가 자동 등록되고, "Hexagonal Board API" 통합 대시보드(RED·비즈니스 메트릭·JVM/시스템)도 자동 프로비저닝됩니다. **Explore → Loki**에서 구조화 JSON 로그를 검색하고 `TraceID` 링크로 **Tempo** 트레이스로 점프, **Explore → Tempo**에서 요청 트레이스(WebFlux→R2DBC/Redis/ES 스팬)를 봅니다.
 * **Loki** : <http://localhost:3100> (구조화 로그 수집 — 앱이 loki4j로 push)
 * **Tempo** : <http://localhost:3200> (트레이스 조회) / OTLP 수신 4317(gRPC)·4318(HTTP)
 
@@ -402,11 +403,12 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 #### 6. Observability — 메트릭·로그·트레이스 3종 통합
 Grafana에서 세 축을 **traceId로 서로 오가며** 관측합니다.
 
-* **메트릭**: Actuator + Micrometer Prometheus. `http.server.requests` 지연 히스토그램(처리량/지연)에 더해, **도메인 비즈니스 메트릭**을 노출합니다 — `board_create_total`·`board_view_total`·`board_search_total`·`board_search_hits`·`board_view_count_flush_total`·`board_archive_total` 등. 이 지표는 프레임워크가 주는 기술 지표와 달리 도메인 흐름에서만 알 수 있어, **`ObservabilityPort`(out-port)**로 헥사고날 규칙 안에서 수집합니다 — 서비스는 "게시글이 생성됐다" 같은 비즈니스 어휘로만 호출하고, Micrometer는 `MicrometerObservabilityAdapter`만 압니다(도메인/서비스에 관측 프레임워크가 새지 않음). (메트릭 이름은 present-tense 동사 — OpenMetrics 예약 접미사 `_created`/`_total` 충돌을 피하기 위함.)
+* **메트릭 (Mimir)**: Prometheus **서버 대신 Mimir**가 저장/조회를 맡습니다. Mimir는 스스로 스크레이프하지 않으므로, 앱이 **OTLP로 push**합니다(트레이스가 Tempo로 가는 것과 동일한 push 모델 — 별도 스크레이퍼 0개로 순수 LGTM 4종 유지). `http.server.requests` 지연 히스토그램에 더해 **도메인 비즈니스 메트릭**을 노출합니다 — `board_create_total`·`board_view_total`·`board_search_total`·`board_search_hits`·`board_view_count_flush_total`·`board_archive_total` 등. 이 지표는 프레임워크가 주는 기술 지표와 달리 도메인 흐름에서만 알 수 있어, **`ObservabilityPort`(out-port)**로 헥사고날 규칙 안에서 수집합니다 — 서비스는 "게시글이 생성됐다" 같은 비즈니스 어휘로만 호출하고, Micrometer는 `MicrometerObservabilityAdapter`만 압니다(도메인/서비스에 관측 프레임워크가 새지 않음). 조회는 Grafana Mimir 데이터소스(Prometheus 호환 API)로 **PromQL 그대로** 질의합니다. `/actuator/prometheus`는 로컬 디버깅용으로 유지합니다.
+  > **OTLP 메트릭 이름 규약**: OTLP 수집은 기본적으로 Prometheus 관례 접미사를 떼므로(`board_create`, `http_server_requests_count`), Mimir의 `otel_metric_suffixes_enabled`로 `_total`/단위 접미사를 되살립니다(`board_create_total` 등). 단, 시간 단위는 OTLP가 **밀리초** 기준이라 지연·GC·업타임 메트릭은 `_seconds`가 아니라 `_milliseconds`(예: `http_server_requests_milliseconds_bucket`)로 저장됩니다 — 대시보드 쿼리/단위도 여기에 맞춰져 있습니다.
 * **로그**: Spring Boot 4 네이티브 **구조화 로깅(ECS JSON)**으로 콘솔에 출력하고, `test`가 아닌 프로필에선 **loki4j** appender가 Loki(`:3100`)로 HTTP push합니다. MDC의 `traceId`/`spanId`가 함께 실려(loki4j는 `mdc_` 접두어), Grafana Loki 데이터소스의 파생 필드(`mdc_traceId`)가 Tempo 트레이스로 링크됩니다.
 * **트레이스**: Micrometer Tracing → OpenTelemetry → **OTLP로 Tempo(`:4318`)에 export**. HTTP 요청은 물론 `@Scheduled` 배치도 스팬으로 남습니다. WebFlux+코루틴 환경에서 `suspend`/`Flow` 경계를 넘어 추적 컨텍스트가 유실되지 않도록 Reactor 자동 컨텍스트 전파(`Hooks.enableAutomaticContextPropagation`)를 켭니다.
 
-> Loki/Tempo 전송은 **`test` 프로필에서 비활성화**돼(로그백 `<springProfile>` + `management.tracing.enabled=false`), 인프라 없이도 테스트가 조용히 통과합니다. 메트릭은 Prometheus **pull**만 쓰므로, 트레이싱 스타터가 딸려오는 OTLP **메트릭 push** 레지스트리(`micrometer-registry-otlp`)는 빌드에서 제외했습니다.
+> Loki/Tempo/Mimir 전송은 모두 **`test` 프로필에서 비활성화**됩니다(로그백 `<springProfile>` + `management.tracing.enabled=false` + `management.otlp.metrics.export.enabled=false`) — 인프라 없이도 테스트가 조용히 통과합니다. `/actuator/prometheus`(Micrometer prometheus 레지스트리)는 테스트에서도 노출돼 `ActuatorEndpointTest`가 검증합니다.
 
 #### 7. Self-Documenting API
 springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.

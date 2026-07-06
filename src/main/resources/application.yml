@@ -38,9 +38,10 @@ logging:
     format:
       console: ecs
 
-# 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램 + 분산 트레이싱(OTLP→Tempo).
-# - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
-# - /actuator/metrics, /actuator/prometheus : 처리량/지연 등 메트릭 (http.server.requests 타이머)
+# 관측성(LGTM 스택). 메트릭·로그·트레이스를 모두 push 방식으로 내보내 Grafana 단일 대시보드에서 봅니다.
+# - /actuator/health : 애플리케이션/의존성 상태(r2dbc/redis/es 헬스 포함)
+# - /actuator/metrics, /actuator/prometheus : 로컬 디버깅용 Micrometer 메트릭 노출(스크레이프는 하지 않음)
+# - metrics : OTLP로 Mimir에 push (Prometheus 서버 없이 Mimir가 저장/조회 담당 — Mimir는 스스로 긁지 않음)
 # - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Tempo에 export.
 #   Reactor↔코루틴 컨텍스트 전파는 ObservabilityConfig가 켜 둠(suspend/Flow 경계 넘어 traceId 유지).
 management:
@@ -67,6 +68,14 @@ management:
         otlp:
           endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
           transport: http
+  # 메트릭 OTLP export(Micrometer OTLP 레지스트리). Mimir의 OTLP 수신 엔드포인트(/otlp/v1/metrics)로 push합니다.
+  # 앱은 호스트, Mimir는 docker(9009 노출)라 localhost로 push합니다. (트레이싱 OTLP는 위 management.opentelemetry.*,
+  # 메트릭 OTLP는 여기 management.otlp.metrics.export.* — Boot 4의 네임스페이스가 서로 다릅니다.)
+  otlp:
+    metrics:
+      export:
+        url: ${OTLP_METRICS_URL:http://localhost:9009/otlp/v1/metrics}
+        # Mimir는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다.
 
 # 오래된 게시글 일괄 아카이브 배치 설정
 

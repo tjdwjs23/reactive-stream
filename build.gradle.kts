@@ -45,22 +45,22 @@ dependencies {
     // 리액티브 클라이언트(ReactiveElasticsearchClient/Operations)가 자동 구성됩니다. 블로킹 클라이언트는 쓰지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
-    // 관측성: Actuator(health/metrics + r2dbc health), Micrometer Prometheus 레지스트리(처리량/지연 노출)
+    // 관측성(LGTM 스택). Actuator(health + r2dbc/redis/es 헬스),
+    // Micrometer Prometheus 레지스트리는 /actuator/prometheus 노출(로컬 디버깅·테스트)용으로 유지합니다.
+    // 저장/조회는 Prometheus 서버가 아니라 Mimir가 담당하며, 앱이 OTLP로 push합니다(아래).
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.micrometer:micrometer-registry-prometheus")
     // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
     implementation("io.micrometer:context-propagation")
 
-    // 분산 트레이싱: Micrometer Tracing → OpenTelemetry 브리지 → OTLP로 Tempo에 export.
+    // 분산 트레이싱 + 메트릭을 모두 OTLP로 push하는 LGTM 파이프라인.
     // Spring Boot 4는 트레이싱 자동구성을 전용 모듈로 분리했고, 이 스타터가 그 자동구성
-    // (spring-boot-micrometer-tracing[-opentelemetry], spring-boot-opentelemetry)과 OTLP span exporter를
-    // 함께 가져옵니다. (Boot 3.x식 micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 조합은
-    // Boot 4에선 자동구성이 딸려오지 않아 Tracer가 활성화되지 않습니다.)
-    implementation("org.springframework.boot:spring-boot-starter-opentelemetry") {
-        // 메트릭은 Prometheus 스크레이프(pull)로 노출합니다. 이 스타터가 딸려오는 OTLP '메트릭' 푸시 레지스트리는
-        // 켜지면 트레이스용 Tempo(:4318)로 메트릭을 push하려다 404 에러를 반복 로깅하므로 제외합니다(트레이스와 무관).
-        exclude(group = "io.micrometer", module = "micrometer-registry-otlp")
-    }
+    // (spring-boot-micrometer-tracing[-opentelemetry], spring-boot-opentelemetry)과 OTLP span exporter,
+    // 그리고 OTLP '메트릭' 레지스트리(micrometer-registry-otlp)를 함께 가져옵니다.
+    // (Boot 3.x식 micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 조합은 Boot 4에선
+    //  자동구성이 딸려오지 않아 Tracer가 활성화되지 않습니다.)
+    // → 트레이스는 OTLP로 Tempo(:4318)에, 메트릭은 OTLP로 Mimir(:9009)에 push합니다(application.yml).
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     // 구조화 로그를 Loki로 직접 push(호스트-앱 토폴로지에 적합 — 파일 마운트/사이드카 없이 HTTP push).
     // BOM 관리 밖이라 버전을 명시합니다(logback 1.5.x / JDK21 호환 라인).
     implementation("com.github.loki4j:loki-logback-appender:1.6.0")

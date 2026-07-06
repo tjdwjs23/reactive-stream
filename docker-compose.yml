@@ -1,9 +1,10 @@
-# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + Prometheus + Grafana + Loki + Tempo
+# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + LGTM(Loki + Grafana + Tempo + Mimir)
 #
 # Spring 앱(8080)은 이 compose에 포함하지 않습니다.
 #   - 앱은 호스트에서 ./gradlew bootRun 으로 실행합니다.
-#   - 도커 안의 Prometheus는 host.docker.internal:8080 으로 호스트의 앱을 긁어(scrape)갑니다.
-#   - 반대로 앱은 호스트에서 Loki(3100)/Tempo(4318)로 로그·트레이스를 push합니다(관측성 3종 통합).
+#   - 앱이 호스트에서 Loki(3100)/Tempo(4318)/Mimir(9009)로 로그·트레이스·메트릭을 모두 push합니다.
+#   - Mimir는 Prometheus와 달리 스스로 스크레이프하지 않는 저장소이므로, 메트릭도 OTLP push로 수집합니다.
+#     (별도 스크레이퍼 없이 순수 LGTM 4종으로 단일 대시보드 통합.)
 #
 # 사용법:
 #   docker compose up -d        # 7개 컨테이너 백그라운드 실행
@@ -15,8 +16,8 @@
 #   PostgreSQL     localhost:5432  (db/user=reactive, pw=reactive1234)
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
-#   Prometheus     http://localhost:9090
 #   Grafana        http://localhost:3000  (admin / admin) — 메트릭·로그·트레이스 3종 데이터소스 자동 등록
+#   Mimir          http://localhost:9009  (메트릭 저장/조회, OTLP 수신 /otlp/v1/metrics)
 #   Loki           http://localhost:3100  (구조화 로그 수집, 앱이 HTTP push)
 #   Tempo          http://localhost:3200  (트레이스 조회) / OTLP 수신 4317(gRPC)·4318(HTTP)
 
@@ -77,17 +78,18 @@ services:
       timeout: 5s
       retries: 10
 
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: reactive-prometheus
+  mimir:
+    # Prometheus 호환 메트릭 저장소(단일 프로세스 모놀리식). Prometheus 서버를 대체합니다.
+    # 스스로 스크레이프하지 않고, 앱이 OTLP(/otlp/v1/metrics)로 push한 메트릭을 저장합니다.
+    # 조회는 Prometheus 호환 API(/prometheus)로 제공되어 Grafana가 PromQL로 그대로 씁니다.
+    image: grafana/mimir:2.14.3
+    container_name: reactive-mimir
+    command: -config.file=/etc/mimir/mimir.yml
     ports:
-      - "9090:9090"
+      - "9009:9009"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    # 리눅스에서도 host.docker.internal 이 호스트를 가리키도록 매핑(맥/윈도우는 기본 지원).
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - ./monitoring/mimir/mimir.yml:/etc/mimir/mimir.yml:ro
+      - mimir-data:/data
 
   grafana:
     image: grafana/grafana:latest
@@ -98,11 +100,11 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      # 메트릭(Prometheus)·로그(Loki)·트레이스(Tempo) 데이터소스를 자동 등록 — provisioning 참고
+      # 메트릭(Mimir)·로그(Loki)·트레이스(Tempo) 데이터소스를 자동 등록 — provisioning 참고
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     depends_on:
-      - prometheus
+      - mimir
       - loki
       - tempo
 
@@ -131,7 +133,7 @@ services:
 volumes:
   postgres-data:
   elasticsearch-data:
-  prometheus-data:
+  mimir-data:
   grafana-data:
   loki-data:
   tempo-data:

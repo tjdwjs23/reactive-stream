@@ -1,0 +1,18 @@
+# Grafana가 시작할 때 Mimir 데이터소스를 자동 등록합니다(메트릭 저장/조회).
+# Mimir는 Prometheus 호환 조회 API를 제공하므로 데이터소스 type은 prometheus를 그대로 씁니다.
+apiVersion: 1
+
+datasources:
+  - name: Mimir
+    type: prometheus
+    # 고정 uid — 대시보드 JSON(hexagonal-app.json)과 Tempo 데이터소스가 이 uid로 메트릭 소스를 참조합니다.
+    uid: mimir
+    access: proxy
+    # 같은 compose 네트워크 안이므로 서비스 이름(mimir)으로 접근합니다.
+    # Mimir의 Prometheus 호환 질의 엔드포인트는 /prometheus 접두어 아래에 있습니다.
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    editable: true
+    jsonData:
+      # Mimir는 push 직후 조회 가능하지만, OTLP step(기본 1분) 주기로 데이터가 들어옵니다.
+      timeInterval: 15s

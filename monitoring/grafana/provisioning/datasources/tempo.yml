@@ -17,7 +17,7 @@ datasources:
         filterByTraceID: true
       # 서비스 그래프/노드의 요청·지연 메트릭은 Prometheus에서 조회합니다.
       serviceMap:
-        datasourceUid: prometheus
+        datasourceUid: mimir
       # 트레이스 노드에서 관련 메트릭(RED)로 이어지는 링크.
       tracesToMetrics:
-        datasourceUid: prometheus
+        datasourceUid: mimir
