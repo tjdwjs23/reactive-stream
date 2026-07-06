@@ -17,13 +17,13 @@ data class CreateBoardCommand(
 ) {
     init {
         // 입력 모델의 유효성 검증 (Self-Validating)
-        require(authorId > 0) { "authorId must be positive" }
-        require(title.isNotBlank()) { "Title must not be blank" }
+        require(authorId > 0) { "작성자 id는 양수여야 합니다." }
+        require(title.isNotBlank()) { "제목은 비어있을 수 없습니다." }
         // DB 스키마의 title VARCHAR(255)와 정합. 초과 시 raw DB 에러(500) 대신 여기서 400으로 거른다.
         // 길이 한도는 도메인(Board)이 단일 소스로 보유한다.
-        require(title.length <= MAX_TITLE_LENGTH) { "Title must be at most $MAX_TITLE_LENGTH characters" }
+        require(title.length <= MAX_TITLE_LENGTH) { "제목은 ${MAX_TITLE_LENGTH}자를 넘을 수 없습니다." }
         // 내용 최소 길이도 도메인(Board)이 단일 소스로 보유하며, 수정(Board.update)과 같은 값을 공유한다.
-        require(content.length >= MIN_CONTENT_LENGTH) { "Content must be at least $MIN_CONTENT_LENGTH characters" }
+        require(content.length >= MIN_CONTENT_LENGTH) { "내용은 ${MIN_CONTENT_LENGTH}자 이상이어야 합니다." }
     }
 }
 
@@ -42,8 +42,8 @@ data class BoardPageQuery(
     val size: Int = 20,
 ) {
     init {
-        require(size in 1..100) { "size must be between 1 and 100" }
-        require(cursor == null || cursor > 0) { "cursor must be positive" }
+        require(size in 1..100) { "size는 1에서 100 사이여야 합니다." }
+        require(cursor == null || cursor > 0) { "cursor는 양수여야 합니다." }
     }
 }
 

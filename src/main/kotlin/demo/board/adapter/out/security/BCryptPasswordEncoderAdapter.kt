@@ -13,7 +13,7 @@ class BCryptPasswordEncoderAdapter(
     // Spring의 encode 시그니처는 플랫폼 타입(nullable)로 보이나, non-null 입력에 대해 null을 반환하지 않습니다.
     override fun encode(rawPassword: String): String =
         passwordEncoder.encode(rawPassword)
-            ?: error("password encoder returned null")
+            ?: error("비밀번호 인코더가 null을 반환했습니다.")
 
     override fun matches(
         rawPassword: String,

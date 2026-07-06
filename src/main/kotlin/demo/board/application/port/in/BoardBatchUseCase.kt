@@ -13,9 +13,9 @@ data class ArchiveStaleBoardsCommand(
     val concurrency: Int = 4,
 ) {
     init {
-        require(retentionDays >= 0) { "retentionDays must be >= 0" }
-        require(chunkSize in 1..10_000) { "chunkSize must be between 1 and 10000" }
-        require(concurrency in 1..64) { "concurrency must be between 1 and 64" }
+        require(retentionDays >= 0) { "retentionDays는 0 이상이어야 합니다." }
+        require(chunkSize in 1..10_000) { "chunkSize는 1에서 10000 사이여야 합니다." }
+        require(concurrency in 1..64) { "concurrency는 1에서 64 사이여야 합니다." }
     }
 }
 

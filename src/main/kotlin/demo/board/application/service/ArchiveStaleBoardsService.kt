@@ -97,7 +97,7 @@ class ArchiveStaleBoardsService(
         // 예외만 확인하는 스케줄러가 성공으로 오인하지 않도록 예외로 신호합니다(전체 실패 = 잡 실패).
         val attempted = attemptedChunks.get()
         if (attempted > 0 && failedChunks.get() == attempted) {
-            throw IllegalStateException("archiveStaleBoards: all $attempted chunk(s) failed to delete")
+            throw IllegalStateException("archiveStaleBoards: 시도한 $attempted 개 청크 삭제가 모두 실패했습니다.")
         }
 
         return result

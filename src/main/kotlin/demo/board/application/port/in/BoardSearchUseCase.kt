@@ -15,8 +15,8 @@ data class BoardSearchQuery(
     val size: Int = 20,
 ) {
     init {
-        require(keyword.isNotBlank()) { "keyword must not be blank" }
-        require(size in 1..100) { "size must be between 1 and 100" }
+        require(keyword.isNotBlank()) { "검색어는 비어있을 수 없습니다." }
+        require(size in 1..100) { "size는 1에서 100 사이여야 합니다." }
     }
 }
 

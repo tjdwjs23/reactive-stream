@@ -16,9 +16,9 @@ class AuthenticatedUserProvider {
             ReactiveSecurityContextHolder
                 .getContext()
                 .awaitSingleOrNull()
-                ?: throw IllegalStateException("no security context")
+                ?: throw IllegalStateException("보안 컨텍스트가 없습니다.")
         val principal = context.authentication?.principal
         return (principal as? Jwt)?.subject?.toLong()
-            ?: throw IllegalStateException("unexpected authentication principal type")
+            ?: throw IllegalStateException("예상치 못한 인증 주체 타입입니다.")
     }
 }

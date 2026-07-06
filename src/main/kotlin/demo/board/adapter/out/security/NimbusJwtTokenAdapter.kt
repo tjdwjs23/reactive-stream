@@ -24,7 +24,7 @@ class NimbusJwtTokenAdapter(
     @Value("\${board.security.jwt.access-token-ttl-minutes:60}") private val ttlMinutes: Long,
 ) : AuthTokenPort {
     override fun issue(user: User): AuthToken {
-        val userId = user.id ?: error("cannot issue token for a non-persisted user (id is null)")
+        val userId = user.id ?: error("영속화되지 않은 사용자(id가 null)에게는 토큰을 발급할 수 없습니다.")
         val now: Instant = clock.instant()
         val ttl = Duration.ofMinutes(ttlMinutes)
         val claims =

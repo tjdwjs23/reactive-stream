@@ -41,7 +41,7 @@ class AuthService(
                 createdAt = LocalDateTime.now(clock),
             )
         return userRepositoryPort.save(user).id
-            ?: error("saved user must have an id")
+            ?: error("저장된 사용자는 반드시 id를 가져야 합니다.")
     }
 
     override suspend fun login(command: LoginCommand): AuthToken {
