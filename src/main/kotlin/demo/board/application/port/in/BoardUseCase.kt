@@ -12,9 +12,12 @@ interface CreateBoardUseCase {
 data class CreateBoardCommand(
     val title: String,
     val content: String,
+    // 작성자 id. 컨트롤러가 인증된 사용자(JWT sub)에서 채워 넘깁니다.
+    val authorId: Long,
 ) {
     init {
         // 입력 모델의 유효성 검증 (Self-Validating)
+        require(authorId > 0) { "authorId must be positive" }
         require(title.isNotBlank()) { "Title must not be blank" }
         // DB 스키마의 title VARCHAR(255)와 정합. 초과 시 raw DB 에러(500) 대신 여기서 400으로 거른다.
         // 길이 한도는 도메인(Board)이 단일 소스로 보유한다.

@@ -69,18 +69,20 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 
 ### REST endpoints
 
-| Method | Path | UseCase |
-|---|---|---|
-| `POST` | `/api/boards` | `CreateBoardUseCase` → 201 Created |
-| `GET` | `/api/boards/{id}` | `GetBoardUseCase` → 200 OK |
-| `GET` | `/api/boards` | `GetBoardUseCase` → 200 OK |
-| `PUT` | `/api/boards/{id}` | `UpdateBoardUseCase` → 200 OK |
-| `DELETE` | `/api/boards/{id}` | `DeleteBoardUseCase` → 204 No Content |
-| `GET` | `/api/boards/search?keyword=&size=` | `SearchBoardUseCase` → 200 OK (한글 전문검색, 관련도순) |
-| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인, admin 토큰) |
-| `POST` | `/api/admin/view-counts/flush` | `FlushBoardViewCountsUseCase` → 200 OK (조회수 즉시 플러시, admin 토큰) |
+| Method | Path | UseCase | 인가 |
+|---|---|---|---|
+| `POST` | `/api/auth/signup` | `SignUpUseCase` → 201 Created | 공개 |
+| `POST` | `/api/auth/login` | `LoginUseCase` → 200 OK (JWT 발급) | 공개 |
+| `POST` | `/api/boards` | `CreateBoardUseCase` → 201 Created | 인증 |
+| `GET` | `/api/boards/{id}` | `GetBoardUseCase` → 200 OK | 공개 |
+| `GET` | `/api/boards` | `GetBoardUseCase` → 200 OK | 공개 |
+| `PUT` | `/api/boards/{id}` | `UpdateBoardUseCase` → 200 OK | 인증 |
+| `DELETE` | `/api/boards/{id}` | `DeleteBoardUseCase` → 204 No Content | 인증 |
+| `GET` | `/api/boards/search?keyword=&size=` | `SearchBoardUseCase` → 200 OK (한글 전문검색, 관련도순) | 공개 |
+| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인) | ROLE_ADMIN |
+| `POST` | `/api/admin/view-counts/flush` | `FlushBoardViewCountsUseCase` → 200 OK (조회수 즉시 플러시) | ROLE_ADMIN |
 
-> **Admin 엔드포인트 보호**: `/search/reindex`와 `/admin/view-counts/flush`는 쓰기를 유발하는 운영 트리거라 `AdminAccessGuard`로 보호됩니다. `board.admin.token`(env `BOARD_ADMIN_TOKEN`)이 설정돼 있으면 요청은 `X-Admin-Token` 헤더로 그 값을 전달해야 하며 불일치 시 401입니다. 미설정(로컬 기본값)이면 통과하되 기동 시 경고 로그를 남깁니다.
+> **인증/인가 (리액티브 Spring Security + 자체 발급 JWT)**: `SecurityConfig`가 필터 체인을 정의합니다 — 읽기(GET 단건/목록/검색)·문서·actuator는 **공개**, 게시글 쓰기(POST/PUT/DELETE)는 **인증**, 운영 트리거(reindex/flush)는 **ROLE_ADMIN**. 로그인(`/api/auth/login`)이 HS256 JWT를 발급하고(`NimbusJwtTokenAdapter`), 이후 요청은 `Authorization: Bearer <token>`로 전달합니다. JWT의 `sub`=사용자 id는 게시글 생성 시 `author_id`로 기록됩니다(수정/삭제는 인증된 사용자면 누구나 — 소유권 강제 없음). 관리자 계정은 기동 시 `board.security.admin.*`로 부트스트랩됩니다(가입 API는 ROLE_USER만 생성). JWT 서명키는 `board.security.jwt.secret`(env `BOARD_JWT_SECRET`, 미설정 시 dev 기본값 + 경고). 비밀번호는 BCrypt 해시로 저장하며, 사용자 영속화(`users` 테이블)·해싱·토큰 발급은 각각 out-port(`UserRepositoryPort`/`PasswordEncoderPort`/`AuthTokenPort`)로 분리돼 서비스는 Spring Security를 모릅니다.
 
 ### Korean full-text search (Elasticsearch + Nori)
 

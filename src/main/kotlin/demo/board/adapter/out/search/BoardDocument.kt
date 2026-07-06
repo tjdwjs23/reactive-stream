@@ -27,4 +27,6 @@ data class BoardDocument(
     val content: String,
     val createdAt: LocalDateTime,
     val viewCount: Long,
+    // 작성자 id. 검색 히트에서 도메인 Board를 그대로 복원하기 위해 저장합니다(작성자 미상은 null).
+    val authorId: Long?,
 )

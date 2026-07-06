@@ -24,22 +24,22 @@ class OpenApiConfig {
                             "응답은 BaseResponse(code/status/result)로 통일됩니다.",
                     ).version("v1"),
             )
-            // admin 엔드포인트(재색인/조회수 플러시)는 X-Admin-Token 헤더로 보호됩니다.
-            // 여기서 apiKey 보안 스킴을 선언해 두면 Swagger UI에 Authorize 입력이 노출되고,
-            // 각 엔드포인트의 @SecurityRequirement("admin-token")가 이 스킴을 참조합니다.
+            // 쓰기/admin 엔드포인트는 자체 발급 JWT(Authorization: Bearer)로 보호됩니다.
+            // bearer 보안 스킴을 선언해 두면 Swagger UI에 Authorize(토큰 입력)가 노출되고,
+            // 각 엔드포인트의 @SecurityRequirement("bearer-jwt")가 이 스킴을 참조합니다.
             .components(
                 Components().addSecuritySchemes(
-                    ADMIN_TOKEN_SCHEME,
+                    BEARER_JWT_SCHEME,
                     SecurityScheme()
-                        .type(SecurityScheme.Type.APIKEY)
-                        .`in`(SecurityScheme.In.HEADER)
-                        .name("X-Admin-Token")
-                        .description("운영/시험용 admin 엔드포인트 보호 토큰(board.admin.token과 일치해야 함)"),
+                        .type(SecurityScheme.Type.HTTP)
+                        .scheme("bearer")
+                        .bearerFormat("JWT")
+                        .description("로그인(/api/auth/login)으로 받은 액세스 토큰"),
                 ),
             )
 
     companion object {
         // @SecurityRequirement가 참조하는 스킴 이름.
-        const val ADMIN_TOKEN_SCHEME = "admin-token"
+        const val BEARER_JWT_SCHEME = "bearer-jwt"
     }
 }

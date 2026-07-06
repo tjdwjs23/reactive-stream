@@ -16,7 +16,7 @@
 ```
 load/
 ├── lib/
-│   ├── config.js      # BASE_URL, ADMIN_TOKEN, 공용 threshold/헤더  (mixed·smoke가 import)
+│   ├── config.js      # BASE_URL, 로드/admin 자격, 공용 threshold/authHeaders  (mixed·smoke가 import)
 │   └── helpers.js     # 랜덤 한글 게시글 payload, 생성 API, 시드 유틸  (mixed·smoke가 import)
 ├── scenarios/
 │   ├── smoke.js       # 최소 경로 점검(부하 X) — 본 부하 전 항상 먼저
@@ -83,7 +83,8 @@ BASE_URL=http://다른서버:8080 k6 run load/scenarios/mixed.js
 | 변수 | 기본값 | 의미 |
 |---|---|---|
 | `BASE_URL` | `http://localhost:8080` | 대상 서버 |
-| `ADMIN_TOKEN` | (빈 값) | admin 플러시용 `X-Admin-Token`. 로컬 미설정이면 빈 값으로 통과 |
+| `LOAD_USERNAME`/`LOAD_PASSWORD` | `loadtester`/`loadtest-password` | 쓰기 부하용 사용자(setup에서 가입·로그인해 Bearer 토큰 확보) |
+| `ADMIN_USERNAME`/`ADMIN_PASSWORD` | `admin`/(빈 값) | teardown 플러시용 관리자 자격(서버 `board.security.admin.*`와 일치해야 함). 빈 값이면 플러시 생략 |
 | `PEAK_RATE` | `1000` | 피크 목표 RPS |
 | `HOT_COUNT` | `30` | 인기 글 시드 수(읽기·검색 대상) |
 | `READ_PCT`/`WRITE_PCT` | `70`/`20` | 읽기/쓰기 비중(%), 나머지는 검색 |

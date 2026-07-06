@@ -8,29 +8,28 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import org.springframework.test.web.reactive.server.WebTestClient
 
-private class AdminControllerFixture(
-    adminToken: String = "",
-) {
+// 접근 통제(ROLE_ADMIN)는 SecurityConfig(필터 체인)의 책임이라 SecurityIntegrationTest가 검증합니다.
+// 여기서는 standalone WebTestClient로 핸들러가 유즈케이스를 호출하고 결과를 통일 포맷으로 반환하는지만 봅니다.
+private class AdminControllerFixture {
     val flushUseCase = mockk<FlushBoardViewCountsUseCase>()
 
     val client: WebTestClient =
         WebTestClient
-            .bindToController(
-                AdminViewCountController(flushUseCase, AdminAccessGuard(adminToken)),
-            ).controllerAdvice(GlobalExceptionHandler())
+            .bindToController(AdminViewCountController(flushUseCase))
+            .controllerAdvice(GlobalExceptionHandler())
             .build()
 }
 
 class AdminViewCountControllerTest :
     BehaviorSpec({
 
-        Given("admin 토큰 미설정(개발 기본값) - POST /api/admin/view-counts/flush") {
+        Given("조회수 플러시 - POST /api/admin/view-counts/flush") {
             val fixture = AdminControllerFixture()
             coEvery { fixture.flushUseCase.flush() } returns
                 FlushViewCountsResult(boards = 5, updatedRows = 5, failed = 0)
 
-            When("헤더 없이 플러시를 요청하면") {
-                Then("200 OK와 플러시 결과 요약을 반환한다(무인증 통과)") {
+            When("플러시를 요청하면") {
+                Then("200 OK와 플러시 결과 요약을 반환한다") {
                     fixture.client
                         .post()
                         .uri("/api/admin/view-counts/flush")
@@ -46,41 +45,6 @@ class AdminViewCountControllerTest :
                         .isEqualTo(5)
 
                     coVerify { fixture.flushUseCase.flush() }
-                }
-            }
-        }
-
-        Given("admin 토큰 설정 - POST /api/admin/view-counts/flush") {
-            val fixture = AdminControllerFixture(adminToken = "s3cret")
-            coEvery { fixture.flushUseCase.flush() } returns
-                FlushViewCountsResult(boards = 1, updatedRows = 1, failed = 0)
-
-            When("X-Admin-Token 헤더 없이 요청하면") {
-                Then("401 UNAUTHORIZED를 반환한다") {
-                    fixture.client
-                        .post()
-                        .uri("/api/admin/view-counts/flush")
-                        .exchange()
-                        .expectStatus()
-                        .isUnauthorized
-                        .expectBody()
-                        .jsonPath("$.result.code")
-                        .isEqualTo("UNAUTHORIZED")
-                }
-            }
-
-            When("올바른 X-Admin-Token 헤더로 요청하면") {
-                Then("200 OK로 플러시가 수행된다") {
-                    fixture.client
-                        .post()
-                        .uri("/api/admin/view-counts/flush")
-                        .header("X-Admin-Token", "s3cret")
-                        .exchange()
-                        .expectStatus()
-                        .isOk
-                        .expectBody()
-                        .jsonPath("$.result.boards")
-                        .isEqualTo(1)
                 }
             }
         }

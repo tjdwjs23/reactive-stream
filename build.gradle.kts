@@ -32,6 +32,12 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
 
+    // 인증/인가: 리액티브 Spring Security + 자체 발급 JWT.
+    // resource-server 스타터가 리액티브 JWT 디코딩과 spring-security-oauth2-jose(NimbusJwtEncoder/Decoder)를 함께 가져옵니다.
+    // 별도 JWT 라이브러리 없이 Spring Security 자체 지원(HS256 대칭키)으로 발급/검증합니다.
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
+
     // 조회수 카운터: 리액티브 Redis(Lettuce, 논블로킹). 블로킹 RedisTemplate/Jedis는 쓰지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-data-redis-reactive")
 
@@ -57,6 +63,8 @@ dependencies {
     testImplementation("io.kotest:kotest-assertions-core:5.9.1")
     testImplementation("io.kotest.extensions:kotest-extensions-spring:1.3.0")
     testImplementation("io.mockk:mockk:1.13.13")
+    // 리액티브 보안 테스트 지원(mockUser/JWT mutator 등)
+    testImplementation("org.springframework.security:spring-security-test")
     // 아키텍처 규칙(헥사고날 의존성 방향·계층 순수성)을 테스트로 강제 (Kotlin 네이티브)
     testImplementation("com.lemonappdev:konsist:0.17.3")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")

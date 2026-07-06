@@ -2,6 +2,8 @@ package demo.board.adapter.`in`.web
 
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.exception.BoardValidationException
+import demo.board.domain.exception.DuplicateUsernameException
+import demo.board.domain.exception.InvalidCredentialsException
 import org.springframework.beans.TypeMismatchException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -20,6 +22,15 @@ class GlobalExceptionHandler {
     @ExceptionHandler(BoardValidationException::class)
     fun handleBoardValidationException(e: BoardValidationException): ResponseEntity<FailureResponse> =
         failure(CommonErrorCode.ValidationError, e.message)
+
+    // 가입 시 username 중복 → 409 Conflict
+    @ExceptionHandler(DuplicateUsernameException::class)
+    fun handleDuplicateUsernameException(e: DuplicateUsernameException): ResponseEntity<FailureResponse> =
+        failure(AuthErrorCode.DuplicateUsername, e.message)
+
+    // 로그인 실패(사용자 미존재/비밀번호 불일치) → 401 Unauthorized. 어느 쪽인지 구분하지 않습니다.
+    @ExceptionHandler(InvalidCredentialsException::class)
+    fun handleInvalidCredentialsException(): ResponseEntity<FailureResponse> = failure(AuthErrorCode.InvalidCredentials)
 
     // CreateBoardCommand.init의 require()에서 발생하는 자가 검증 실패
     @ExceptionHandler(IllegalArgumentException::class)

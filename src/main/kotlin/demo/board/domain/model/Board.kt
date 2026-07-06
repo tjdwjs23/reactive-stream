@@ -12,6 +12,9 @@ data class Board(
     val createdAt: LocalDateTime,
     // 조회수. DB에 누적된 값이며, 조회 응답 시 Redis에 아직 반영 안 된 델타를 더해 실시간 값으로 보정합니다.
     val viewCount: Long = 0,
+    // 작성자(users.id). 생성 시 인증된 사용자로 채워집니다. 기존/작성자 미상 게시글은 null일 수 있습니다.
+    // 수정/삭제는 인증된 사용자면 누구나 허용하므로 소유권 검사에는 쓰이지 않고, 표시·데이터 모델링용입니다.
+    val authorId: Long? = null,
 ) {
     fun update(
         title: String,

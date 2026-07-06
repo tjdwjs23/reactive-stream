@@ -12,9 +12,9 @@ import io.mockk.mockk
 import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.LocalDateTime
 
-private class SearchControllerFixture(
-    adminToken: String = "",
-) {
+// reindex의 접근 통제(ROLE_ADMIN)는 SecurityConfig가 담당하며 SecurityIntegrationTest가 검증합니다.
+// 여기서는 standalone WebTestClient로 검색/재색인 핸들러 동작만 봅니다.
+private class SearchControllerFixture {
     val searchBoardUseCase = mockk<SearchBoardUseCase>()
     val reindexBoardsUseCase = mockk<ReindexBoardsUseCase>()
 
@@ -25,7 +25,6 @@ private class SearchControllerFixture(
                     searchBoardUseCase,
                     reindexBoardsUseCase,
                     BoardWebMapper(),
-                    AdminAccessGuard(adminToken),
                 ),
             ).controllerAdvice(GlobalExceptionHandler())
             .build()
@@ -124,12 +123,12 @@ class BoardSearchControllerTest :
             }
         }
 
-        Given("admin 토큰이 설정되지 않았을 때(개발 기본값) - POST /api/boards/search/reindex") {
+        Given("전체 재색인 - POST /api/boards/search/reindex") {
             val fixture = SearchControllerFixture()
             coEvery { fixture.reindexBoardsUseCase.reindexAll() } returns ReindexResult(indexed = 42L, failed = 3L)
 
-            When("헤더 없이 재색인을 요청하면") {
-                Then("200 OK와 색인/실패 건수를 반환한다(무인증 통과)") {
+            When("재색인을 요청하면") {
+                Then("200 OK와 색인/실패 건수를 반환한다") {
                     fixture.client
                         .post()
                         .uri("/api/boards/search/reindex")
@@ -143,40 +142,6 @@ class BoardSearchControllerTest :
                         .isEqualTo(3)
 
                     coVerify { fixture.reindexBoardsUseCase.reindexAll() }
-                }
-            }
-        }
-
-        Given("admin 토큰이 설정됐을 때 - POST /api/boards/search/reindex") {
-            val fixture = SearchControllerFixture(adminToken = "s3cret")
-            coEvery { fixture.reindexBoardsUseCase.reindexAll() } returns ReindexResult(indexed = 1L, failed = 0L)
-
-            When("X-Admin-Token 헤더 없이 요청하면") {
-                Then("401 UNAUTHORIZED를 반환한다") {
-                    fixture.client
-                        .post()
-                        .uri("/api/boards/search/reindex")
-                        .exchange()
-                        .expectStatus()
-                        .isUnauthorized
-                        .expectBody()
-                        .jsonPath("$.result.code")
-                        .isEqualTo("UNAUTHORIZED")
-                }
-            }
-
-            When("올바른 X-Admin-Token 헤더로 요청하면") {
-                Then("200 OK로 재색인이 수행된다") {
-                    fixture.client
-                        .post()
-                        .uri("/api/boards/search/reindex")
-                        .header("X-Admin-Token", "s3cret")
-                        .exchange()
-                        .expectStatus()
-                        .isOk
-                        .expectBody()
-                        .jsonPath("$.result.reindexed")
-                        .isEqualTo(1)
                 }
             }
         }

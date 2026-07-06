@@ -14,6 +14,7 @@ class BoardWebMapper {
             content = board.content,
             createdAt = board.createdAt,
             viewCount = board.viewCount,
+            authorId = board.authorId,
         )
 
     fun toPageResponse(page: BoardPage): BoardPageResponse =

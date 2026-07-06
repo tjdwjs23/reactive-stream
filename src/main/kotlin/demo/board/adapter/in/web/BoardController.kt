@@ -9,6 +9,7 @@ import demo.board.application.port.`in`.UpdateBoardCommand
 import demo.board.application.port.`in`.UpdateBoardUseCase
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -33,13 +34,24 @@ class BoardController(
     private val updateBoardUseCase: UpdateBoardUseCase,
     private val deleteBoardUseCase: DeleteBoardUseCase,
     private val boardWebMapper: BoardWebMapper,
+    // 인증된 사용자 id를 보안 컨텍스트에서 꺼내 작성자로 넘깁니다(생성 경로는 인증 필수).
+    private val authenticatedUserProvider: AuthenticatedUserProvider,
 ) {
-    @Operation(summary = "게시글 생성", description = "제목과 내용(10자 이상)으로 게시글을 만들고 201 Created + Location을 반환합니다.")
+    @Operation(
+        summary = "게시글 생성",
+        description = "제목과 내용(10자 이상)으로 게시글을 만들고 201 Created + Location을 반환합니다. 인증(Bearer 토큰)이 필요합니다.",
+    )
+    @SecurityRequirement(name = "bearer-jwt")
     @PostMapping
     suspend fun createBoard(
         @RequestBody request: CreateBoardRequest,
     ): ResponseEntity<SuccessResponse<BoardResponse>> {
-        val command = CreateBoardCommand(title = request.title, content = request.content)
+        val command =
+            CreateBoardCommand(
+                title = request.title,
+                content = request.content,
+                authorId = authenticatedUserProvider.currentUserId(),
+            )
         val response = boardWebMapper.toResponse(createBoardUseCase.createBoard(command))
         return SuccessResponse.created(response, URI.create("/api/boards/${response.id}"))
     }
@@ -65,7 +77,11 @@ class BoardController(
         return SuccessResponse.ok(boardWebMapper.toPageResponse(page))
     }
 
-    @Operation(summary = "게시글 수정", description = "제목/내용을 수정합니다. 제목은 공백일 수 없으며, 없는 게시글이면 404입니다.")
+    @Operation(
+        summary = "게시글 수정",
+        description = "제목/내용을 수정합니다. 제목은 공백일 수 없으며, 없는 게시글이면 404입니다. 인증(Bearer 토큰)이 필요합니다.",
+    )
+    @SecurityRequirement(name = "bearer-jwt")
     @PutMapping("/{id}")
     suspend fun updateBoard(
         @PathVariable id: Long,
@@ -75,7 +91,11 @@ class BoardController(
         return SuccessResponse.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
     }
 
-    @Operation(summary = "게시글 삭제", description = "id로 게시글을 삭제하고 본문 없는 204 No Content를 반환합니다.")
+    @Operation(
+        summary = "게시글 삭제",
+        description = "id로 게시글을 삭제하고 본문 없는 204 No Content를 반환합니다. 인증(Bearer 토큰)이 필요합니다.",
+    )
+    @SecurityRequirement(name = "bearer-jwt")
     @DeleteMapping("/{id}")
     suspend fun deleteBoard(
         @PathVariable id: Long,

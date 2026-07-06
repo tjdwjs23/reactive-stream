@@ -15,6 +15,7 @@ class BoardDocumentMapper {
             content = domain.content,
             createdAt = domain.createdAt,
             viewCount = domain.viewCount,
+            authorId = domain.authorId,
         )
 
     fun toDomain(document: BoardDocument): Board =
@@ -24,5 +25,6 @@ class BoardDocumentMapper {
             content = document.content,
             createdAt = document.createdAt,
             viewCount = document.viewCount,
+            authorId = document.authorId,
         )
 }

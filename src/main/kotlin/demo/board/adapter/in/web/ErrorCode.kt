@@ -55,3 +55,18 @@ object BoardErrorCode {
         override val statusCode = HttpStatus.NOT_FOUND.value()
     }
 }
+
+// 인증/인가 도메인 전용 에러 코드 모음.
+object AuthErrorCode {
+    object DuplicateUsername : ErrorCode {
+        override val code = "DUPLICATE_USERNAME"
+        override val label = "이미 사용 중인 사용자명입니다."
+        override val statusCode = HttpStatus.CONFLICT.value()
+    }
+
+    object InvalidCredentials : ErrorCode {
+        override val code = "INVALID_CREDENTIALS"
+        override val label = "사용자명 또는 비밀번호가 올바르지 않습니다."
+        override val statusCode = HttpStatus.UNAUTHORIZED.value()
+    }
+}

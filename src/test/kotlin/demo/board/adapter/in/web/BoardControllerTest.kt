@@ -21,6 +21,13 @@ private class ControllerFixture {
     val updateBoardUseCase = mockk<UpdateBoardUseCase>()
     val deleteBoardUseCase = mockk<DeleteBoardUseCase>()
 
+    // 인증 사용자 id 제공자. 표준(standalone) WebTestClient는 보안 필터를 거치지 않으므로,
+    // 여기서 목으로 고정 id를 돌려줍니다(실제 인가는 SecurityIntegrationTest가 검증).
+    val authenticatedUserProvider =
+        mockk<AuthenticatedUserProvider> {
+            coEvery { currentUserId() } returns 7L
+        }
+
     // WebFlux 컨트롤러(suspend 핸들러)는 MockMvc가 아닌 WebTestClient로 검증합니다.
     val client: WebTestClient =
         WebTestClient
@@ -31,6 +38,7 @@ private class ControllerFixture {
                     updateBoardUseCase,
                     deleteBoardUseCase,
                     BoardWebMapper(),
+                    authenticatedUserProvider,
                 ),
             ).controllerAdvice(GlobalExceptionHandler())
             .build()

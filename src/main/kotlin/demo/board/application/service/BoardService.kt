@@ -55,6 +55,7 @@ class BoardService(
                 title = command.title,
                 content = command.content,
                 createdAt = LocalDateTime.now(clock),
+                authorId = command.authorId,
             )
         // 포트를 통해 저장 (단일 INSERT → R2DBC 자동 커밋, ID가 부여된 객체가 반환됨)
         val saved = boardRepositoryPort.save(newBoard)

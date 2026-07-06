@@ -13,11 +13,14 @@ import http from 'k6/http';
 import { check } from 'k6';
 import {
   BASE_URL,
-  JSON_HEADERS,
-  ADMIN_HEADERS,
+  authHeaders,
   BASE_THRESHOLDS,
+  LOAD_USERNAME,
+  LOAD_PASSWORD,
+  ADMIN_USERNAME,
+  ADMIN_PASSWORD,
 } from '../lib/config.js';
-import { seedBoards, randomBoardPayload, pick, SEARCH_KEYWORDS } from '../lib/helpers.js';
+import { seedBoards, signUpAndLogin, login, randomBoardPayload, pick, SEARCH_KEYWORDS } from '../lib/helpers.js';
 
 const HOT_COUNT = Number(__ENV.HOT_COUNT || 30);
 const PEAK_RATE = Number(__ENV.PEAK_RATE || 1000);
@@ -58,10 +61,16 @@ export const options = {
 };
 
 export function setup() {
-  const ids = seedBoards(HOT_COUNT);
+  // 쓰기는 인증이 필요하므로 로드용 사용자를 가입/로그인해 토큰을 확보합니다.
+  const userToken = signUpAndLogin(LOAD_USERNAME, LOAD_PASSWORD);
+  if (!userToken) throw new Error('로드 유저 로그인 실패: 서버가 떠 있고 PostgreSQL이 연결됐는지 확인하세요.');
+  // admin 플러시(teardown)용 토큰. ADMIN_PASSWORD가 서버 설정과 일치하면 확보, 아니면 null(플러시 생략).
+  const adminToken = ADMIN_PASSWORD ? login(ADMIN_USERNAME, ADMIN_PASSWORD) : null;
+
+  const ids = seedBoards(HOT_COUNT, userToken);
   if (ids.length === 0) throw new Error('시드 실패: 서버가 떠 있고 PostgreSQL이 연결됐는지 확인하세요.');
-  console.log(`[setup] 인기 글 ${ids.length}건 시드 완료`);
-  return { ids };
+  console.log(`[setup] 인기 글 ${ids.length}건 시드 완료 (admin 토큰 ${adminToken ? '확보' : '없음'})`);
+  return { ids, userToken, adminToken };
 }
 
 export default function (data) {
@@ -73,9 +82,9 @@ export default function (data) {
     const res = http.get(`${BASE_URL}/api/boards/${id}`, { tags: { name: 'get', op: 'read' } });
     check(res, { 'read 200': (r) => r.status === 200 });
   } else if (roll < READ_PCT + WRITE_PCT) {
-    // 쓰기: 새 글 생성(→ DB write + 인라인 ES 색인)
+    // 쓰기: 새 글 생성(→ DB write + 인라인 ES 색인). 인증 필요 — 로드 유저 토큰을 Bearer로 전달.
     const res = http.post(`${BASE_URL}/api/boards`, JSON.stringify(randomBoardPayload()), {
-      headers: JSON_HEADERS,
+      headers: authHeaders(data.userToken),
       tags: { name: 'create', op: 'write' },
     });
     check(res, { 'write 201': (r) => r.status === 201 });
@@ -90,9 +99,14 @@ export default function (data) {
 }
 
 // 부하 종료 후 조회수 델타를 DB로 flush(누적 델타 write-back 경로까지 마무리 검증).
-export function teardown() {
+// flush는 ROLE_ADMIN이 필요하므로 admin 토큰이 있을 때만 호출합니다(없으면 생략).
+export function teardown(data) {
+  if (!data.adminToken) {
+    console.log('[teardown] admin 토큰 없음 → view-count flush 생략 (ADMIN_PASSWORD 설정 시 수행)');
+    return;
+  }
   const res = http.post(`${BASE_URL}/api/admin/view-counts/flush`, null, {
-    headers: ADMIN_HEADERS,
+    headers: authHeaders(data.adminToken),
     tags: { name: 'flush' },
   });
   console.log(`[teardown] view-count flush status=${res.status} body=${res.body}`);

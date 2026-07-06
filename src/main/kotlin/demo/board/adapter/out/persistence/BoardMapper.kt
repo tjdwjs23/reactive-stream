@@ -12,6 +12,7 @@ class BoardMapper {
             content = domain.content,
             createdAt = domain.createdAt,
             viewCount = domain.viewCount,
+            authorId = domain.authorId,
         )
 
     fun toDomain(entity: BoardR2dbcEntity): Board =
@@ -21,5 +22,6 @@ class BoardMapper {
             content = entity.content,
             createdAt = entity.createdAt,
             viewCount = entity.viewCount,
+            authorId = entity.authorId,
         )
 }

@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -24,7 +23,6 @@ class BoardSearchController(
     private val searchBoardUseCase: SearchBoardUseCase,
     private val reindexBoardsUseCase: ReindexBoardsUseCase,
     private val boardWebMapper: BoardWebMapper,
-    private val adminAccessGuard: AdminAccessGuard,
 ) {
     @Operation(
         summary = "게시글 전문검색",
@@ -45,14 +43,11 @@ class BoardSearchController(
         summary = "전체 재색인",
         description =
             "DB(정본)를 순회하며 ES 색인을 다시 채웁니다. 인덱스를 새로 만들었거나 인라인 색인 누락을 회복할 때 사용합니다. " +
-                "운영에서는 X-Admin-Token 헤더로 관리 토큰을 전달해야 합니다.",
+                "ROLE_ADMIN 권한(Bearer 토큰)이 필요합니다.",
     )
-    @SecurityRequirement(name = "admin-token")
+    @SecurityRequirement(name = "bearer-jwt")
     @PostMapping("/reindex")
-    suspend fun reindex(
-        @RequestHeader(name = "X-Admin-Token", required = false) adminToken: String?,
-    ): ResponseEntity<SuccessResponse<ReindexResponse>> {
-        adminAccessGuard.verify(adminToken)
+    suspend fun reindex(): ResponseEntity<SuccessResponse<ReindexResponse>> {
         val result = reindexBoardsUseCase.reindexAll()
         return SuccessResponse.ok(ReindexResponse(reindexed = result.indexed, failed = result.failed))
     }

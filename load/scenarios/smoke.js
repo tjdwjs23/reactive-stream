@@ -4,8 +4,8 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { BASE_URL } from '../lib/config.js';
-import { createBoard, pick, SEARCH_KEYWORDS } from '../lib/helpers.js';
+import { BASE_URL, LOAD_USERNAME, LOAD_PASSWORD } from '../lib/config.js';
+import { createBoard, signUpAndLogin, pick, SEARCH_KEYWORDS } from '../lib/helpers.js';
 
 export const options = {
   vus: 1,
@@ -15,9 +15,16 @@ export const options = {
   },
 };
 
-export default function () {
-  // 1) 생성
-  const id = createBoard({ name: 'create' });
+// 쓰기(생성) 경로가 인증을 요구하므로 토큰을 먼저 확보합니다.
+export function setup() {
+  const token = signUpAndLogin(LOAD_USERNAME, LOAD_PASSWORD);
+  if (!token) throw new Error('로그인 실패: 서버/DB 상태를 확인하세요.');
+  return { token };
+}
+
+export default function (data) {
+  // 1) 생성(인증 필요)
+  const id = createBoard(data.token, { name: 'create' });
   check(id, { '생성된 id 존재': (v) => v != null });
 
   // 2) 단건 조회(→ Redis 조회수 증가 경로)

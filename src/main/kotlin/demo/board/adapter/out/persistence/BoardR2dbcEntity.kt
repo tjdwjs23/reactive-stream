@@ -16,4 +16,6 @@ class BoardR2dbcEntity(
     val content: String,
     val createdAt: LocalDateTime,
     val viewCount: Long = 0,
+    // 작성자(author_id). 기존 행/작성자 미상은 null일 수 있어 nullable입니다.
+    val authorId: Long? = null,
 )

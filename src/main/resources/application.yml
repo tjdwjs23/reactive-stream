@@ -49,11 +49,17 @@ management:
 # 오래된 게시글 일괄 아카이브 배치 설정
 
 board:
-  # 운영/시험용 admin 엔드포인트(조회수 즉시 플러시, 전체 재색인) 보호용 토큰.
-  # 비워두면 무인증(개발 편의) — 기동 시 경고 로그가 남습니다. 운영에서는 반드시 설정하고,
-  # 호출 시 X-Admin-Token 헤더로 이 값을 전달해야 합니다.
-  admin:
-    token: ${BOARD_ADMIN_TOKEN:}
+  # 인증/인가(자체 발급 JWT + 관리자 부트스트랩).
+  security:
+    jwt:
+      # HS256 서명용 대칭키(≥32byte). 비우면 개발용 고정 기본값 + 기동 경고. 운영은 반드시 BOARD_JWT_SECRET 주입.
+      secret: ${BOARD_JWT_SECRET:}
+      access-token-ttl-minutes: ${BOARD_JWT_TTL_MINUTES:60}
+    admin:
+      # 기동 시 ROLE_ADMIN 계정을 부트스트랩합니다(가입 API는 ROLE_USER만 생성).
+      # password가 비어 있으면 부트스트랩을 건너뛰고 경고합니다. 운영은 BOARD_ADMIN_PASSWORD 주입.
+      username: ${BOARD_ADMIN_USERNAME:admin}
+      password: ${BOARD_ADMIN_PASSWORD:}
 
   archiving:
     enabled: false            # 운영에서 켤 때만 true

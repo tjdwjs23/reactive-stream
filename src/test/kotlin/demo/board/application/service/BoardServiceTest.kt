@@ -39,18 +39,25 @@ class BoardServiceTest :
 
         Given("유효한 CreateBoardCommand가 주어졌을 때") {
             val fixture = ServiceFixture()
-            val command = CreateBoardCommand(title = "제목", content = "10자 이상의 유효한 내용입니다.")
+            val command = CreateBoardCommand(title = "제목", content = "10자 이상의 유효한 내용입니다.", authorId = 7L)
             val savedBoard =
-                Board(id = 1L, title = "제목", content = "10자 이상의 유효한 내용입니다.", createdAt = LocalDateTime.now())
+                Board(
+                    id = 1L,
+                    title = "제목",
+                    content = "10자 이상의 유효한 내용입니다.",
+                    createdAt = LocalDateTime.now(),
+                    authorId = 7L,
+                )
             coEvery { fixture.boardRepositoryPort.save(any()) } returns savedBoard
 
             When("createBoard를 호출하면") {
                 val result = fixture.boardService.createBoard(command)
 
-                Then("저장 후 Board를 반환한다") {
+                Then("작성자 id를 담아 저장하고 Board를 반환한다") {
                     result.id shouldBe 1L
                     result.title shouldBe "제목"
-                    coVerify { fixture.boardRepositoryPort.save(any()) }
+                    // 커맨드의 authorId가 저장되는 Board로 전달되는지 검증
+                    coVerify { fixture.boardRepositoryPort.save(match { it.authorId == 7L }) }
                 }
             }
         }
