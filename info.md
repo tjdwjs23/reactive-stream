@@ -40,7 +40,7 @@
    - 앱이 Redis PENDING을 DRAINING으로 RENAME(이름 변경, 새 조회는 새 PENDING으로 격리)                                                                                                                                                                                                                                  
    - 앱이 DRAINING을 읽어 메모리 Map으로 가져옴 (DB가 Redis를 보는 게 아님)                                                                                                                                                                                                                                              
    - 앱이 그 Map을 DB에 넘겨 UPDATE ... view_count = view_count + delta 실행                                                                                                                                                                                                                                             
-   - DRAINING 삭제
+   - DB 반영에 성공한 청크만 DRAINING에서 HDEL(commit-then-delete). 반영 전 크래시 시 DRAINING이 남아 다음 플러시가 재시도(유실 없음)
 
 DB 쓰기는 비싼 작업이라, 이게 몰리면 DB가 휘청입니다.
 정작 조회수는 "정확히 실시간"일 필요까진 없는데 말이죠.
@@ -137,17 +137,20 @@ Key: "board:views:pending"   ← 아직 DB에 반영 안 된 조회수들이 모
 │       └───────────────┘                                                │
 │                                                                        │
 │ (2) draining 전체를 읽어서 Map으로:  { 7→153, 42→8 }                    │
-│ (3) draining 삭제 (DELETE)                                             │
+│     ★ 아직 지우지 않는다 — DB 반영 성공분만 나중에 지운다(commit-then-delete)│
 └──────────────────────────────────────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│ (4) DB에 반영 — 청크(예: 1000개)씩 묶어 "단 한 번의 UPDATE"로            │
+│ (3) DB에 반영 — 청크(예: 1000개)씩 묶어 "단 한 번의 UPDATE"로            │
 │                                                                        │
 │   UPDATE board AS b                                                     │
 │   SET view_count = b.view_count + d.delta                              │
 │   FROM unnest(:ids, :deltas) AS d(id, delta)   ← id/delta 배열을 펼쳐   │
 │   WHERE b.id = d.id                             ← 한 방에 조인 반영     │
+│                                                                        │
+│ (4) 반영에 성공한 청크만 draining에서 HDEL로 제거                        │
+│     ← 반영 전 크래시 시 draining이 남아 다음 플러시가 재시도(유실 없음)  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,7 +176,7 @@ Key: "board:views:pending"   ← 아직 DB에 반영 안 된 조회수들이 모
 
 ### 관련 파일
 - 읽기/증가: `application/service/BoardService.kt` (`getBoard`)
-- Redis 버퍼: `adapter/out/redis/BoardViewCountRedisAdapter.kt` (`increment`, `drainPendingDeltas`)
+- Redis 버퍼: `adapter/out/redis/BoardViewCountRedisAdapter.kt` (`increment`, `snapshotPendingDeltas`, `removeDrained`)
 - 반영 로직: `application/service/FlushBoardViewCountsService.kt` (`flush`)
 - 반영 스케줄러: `adapter/in/batch/BoardViewCountFlushScheduler.kt`
 - 배치 UPDATE SQL: `adapter/out/persistence/BoardPersistenceAdapter.kt` (`addViewCountsBatch`)

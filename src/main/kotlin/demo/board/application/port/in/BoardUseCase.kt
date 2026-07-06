@@ -56,9 +56,9 @@ interface UpdateBoardUseCase {
     suspend fun updateBoard(command: UpdateBoardCommand): Board
 }
 
-// CreateBoardCommand와 달리 init 블록 검증이 없습니다.
-// 수정 시 제목 공백 여부는 Board.update()가 도메인 규칙으로 검증하며,
-// 내용 최소 길이는 최초 생성 시에만 강제합니다 (수정은 기존 내용을 줄이는 것을 허용).
+// CreateBoardCommand와 달리 여기엔 init 블록 검증이 없습니다.
+// 수정 규칙은 도메인이 단일 소스로 강제합니다 — Board.update()가 제목 공백·제목 길이(MAX_TITLE_LENGTH)와
+// 내용 최소 길이(MIN_CONTENT_LENGTH)를 생성(CreateBoardCommand)과 동일하게 대칭 검증합니다.
 data class UpdateBoardCommand(
     val id: Long,
     val title: String,

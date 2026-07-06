@@ -128,14 +128,14 @@ demo.board
 조회가 몰리는 게시글에서 **매 조회마다 DB `UPDATE`를 날리는 부담**을 없애기 위해, 조회수를 **리액티브 Redis에 누적하고 주기적으로 DB에 반영(write-back)** 합니다. 전 구간 논블로킹을 유지하기 위해 블로킹 `RedisTemplate`/Jedis가 아닌 **Lettuce 기반 `ReactiveStringRedisTemplate`** + 코루틴 브리지(`awaitSingle`)를 사용합니다.
 
 * **읽기 경로**: `GET /api/boards/{id}` 시 Redis Hash(`board:views:pending`)에 `HINCRBY`로 원자적 증가. 응답 `viewCount`는 **DB 누적값 + 미반영 델타**로 실시간 값을 돌려줍니다.
-* **원자적 드레인**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷한 뒤 읽고 삭제합니다. `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓이므로 **델타가 유실되지 않습니다**.
-* **write-back(배치)**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 드레인한 델타를 **청크 단위 단일 `UPDATE ... FROM unnest(:ids, :deltas)`** 로 반영합니다(`BoardRepositoryPort.addViewCountsBatch`). 게시글별 순차 `UPDATE` 대비 DB 왕복이 대상 수 `N`에서 `ceil(N/chunkSize)`로 줄어, 플러시 대상이 많을수록 큰 이득입니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 청크 실패가 전체를 막지 않도록 내결함성 처리합니다.
+* **원자적 스냅샷 + commit-then-delete**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷하지만 **곧바로 지우지 않습니다**. 청크의 DB 반영이 성공한 뒤에만 그 청크를 `draining`에서 제거(`HDEL`)합니다. 그래서 **반영 전에 프로세스가 죽어도 스냅샷이 남아 다음 플러시가 재시도**하며(유실 없음, at-least-once — 조회수는 근사값이라 크래시 시 약간의 중복 계수를 유실보다 우선), `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓입니다. 스냅샷~제거가 짝을 이루도록 플러시 전체는 `FlushBoardViewCountsService`가 뮤텍스로 직렬화합니다(단일 인스턴스 기준).
+* **write-back(배치)**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 스냅샷한 델타를 **청크 단위 단일 `UPDATE ... FROM unnest(:ids, :deltas)`** 로 반영합니다(`BoardRepositoryPort.addViewCountsBatch`). 게시글별 순차 `UPDATE` 대비 DB 왕복이 대상 수 `N`에서 `ceil(N/chunkSize)`로 줄어, 플러시 대상이 많을수록 큰 이득입니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 청크 실패가 전체를 막지 않도록(그리고 실패 청크는 지우지 않아 다음 플러시가 재시도하도록) 내결함성 처리합니다.
 * **Redis 장애 내성(graceful degradation)**: 조회수 집계는 부가 기능(best-effort)입니다. `getBoard`는 `HINCRBY`를 `withTimeout` 시간 예산 안에서 시도하고, Redis가 죽거나(연결 거부) 느려도(행) **델타 0으로 강등해 DB 누적값으로 정상 조회(200)** 를 반환합니다. 즉 Redis 장애가 핵심 읽기 경로를 막지 않으며, 행 상태에서도 조회 지연이 예산 안에서 상한을 가집니다.
 * **온디맨드 플러시**: `POST /api/admin/view-counts/flush`로 스케줄과 무관하게 즉시 write-back합니다(배포·셧다운 직전 버퍼 비우기, 결정적 부하 테스트에 사용). 스케줄러와 동일한 `FlushBoardViewCountsUseCase`에만 의존하며, 운영에서는 `AdminAccessGuard`(`X-Admin-Token`)로 보호됩니다.
 * **헥사고날 분리**: 조회수 버퍼는 out-port `BoardViewCountPort`(Redis 어댑터)로, DB 반영은 `BoardRepositoryPort.addViewCountsBatch`로 분리됩니다. 서비스는 구체 기술(Redis)을 모릅니다.
 * **운영 튜닝**: `board.view-count.*`로 코드 변경 없이 조절합니다 — `flush-enabled`, `flush-interval-ms`(주기를 짧게 하면 DB 정합성↑·쓰기 부하↑), `flush-chunk-size`(한 배치 UPDATE에 묶을 게시글 수), `increment-timeout-ms`(조회 시 Redis 증가 시간 예산).
 
-> 학습용 단순화: 드레인 이후 DB 반영 전에 프로세스가 죽으면 그 델타는 유실될 수 있습니다. 실무에선 반영 성공분만 커밋 후 삭제하거나 실패분을 버퍼로 되돌리는 보상 로직을 둡니다.
+> 내구성(commit-then-delete): 스냅샷을 DB 반영 성공분만 지우므로, 반영 전 크래시가 나도 다음 플러시가 재시도해 델타가 유실되지 않습니다(at-least-once, 크래시 시 소량 중복 계수 허용). 남은 학습용 한계: **다중 인스턴스** 동시 플러시는 이 로컬 뮤텍스로 막지 못하므로, 실무에선 Redis 분산 락/리더 선출이 필요합니다.
 
 ## 🔎 Korean Full-Text Search (Elasticsearch + Nori)
 
@@ -215,7 +215,7 @@ src/test
 | `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
 | `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되고, `addViewCountsBatch`(`unnest` 배치 UPDATE)가 존재하는 id만 가산하는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
-| `BoardViewCountRedisAdapterTest` | 조회수 버퍼 통합 (Redis Testcontainers) | 반복 `increment`가 델타를 누적하는지, `drainPendingDeltas`가 전체를 반환하고 버퍼를 비우는지 검증 |
+| `BoardViewCountRedisAdapterTest` | 조회수 버퍼 통합 (Redis Testcontainers) | 반복 `increment`가 델타를 누적하는지, `snapshotPendingDeltas`+`removeDrained`(commit-then-delete)가 스냅샷을 반환하고 반영 성공분만 비우는지, 잔여 스냅샷을 다음 플러시가 재시도하는지 검증 |
 | `BoardSearchAdapterTest` | 검색 통합 (ES+Nori Testcontainers) | Nori 형태소 매칭("메일"↔"메일과"), `title^2` 관련도 정렬, `<em>` 하이라이트, 삭제 반영, **벌크 `indexAll`** 검증 |
 | `BoardApplicationTests` | 전체 컨텍스트 (Testcontainers) | 모든 빈이 정상 구성되어 ApplicationContext가 로딩되는지 검증 |
 
