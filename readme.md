@@ -236,7 +236,7 @@ src/test
 
 영속성/컨텍스트 통합 테스트는 `PostgresTestContainer`·`RedisTestContainer`·`ElasticsearchTestContainer` 싱글톤을 공유하며, `TestContainers.registerAll()`이 세 컨테이너의 접속 정보를 함께 주입합니다(앱 컨텍스트에 R2DBC·리액티브 Redis·ES가 모두 포함되므로).
 
-1. 테스트 실행 시 `postgres:16-alpine`·`redis:7-alpine`·`hexagonal-elasticsearch-nori:9.2.2`(Nori 포함 커스텀 이미지, `docker/elasticsearch/Dockerfile`로 빌드) 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`/`6379`/`9200`과는 무관합니다). JDBC 드라이버가 없으므로 Postgres readiness는 **로그 메시지 기반 대기 전략**으로 판정합니다.
+1. 테스트 실행 시 `postgres:16-alpine`·`redis:7-alpine`·`reactive-elasticsearch-nori:9.2.2`(Nori 포함 커스텀 이미지, `docker/elasticsearch/Dockerfile`로 빌드) 컨테이너를 띄웁니다 (호스트의 **랜덤 포트**에 매핑되며, `application.yml`의 `localhost:5432`/`6379`/`9200`과는 무관합니다). JDBC 드라이버가 없으므로 Postgres readiness는 **로그 메시지 기반 대기 전략**으로 판정합니다.
 2. `@DynamicPropertySource`가 컨테이너의 실제 접속 정보를 **`spring.r2dbc.*`(R2DBC URL)** · **`spring.data.redis.*`** · **`spring.elasticsearch.uris`** 로 주입합니다.
 3. ApplicationContext가 뜨면서 `ConnectionFactoryInitializer`가 `src/main/resources/db/schema.sql`을 R2DBC로 실행해 스키마를 구성하고, 이후 모든 쿼리도 R2DBC로 실행됩니다.
 4. JVM(Gradle 테스트 프로세스) 종료 시 Testcontainers의 Ryuk이 컨테이너를 자동으로 정리합니다.
@@ -315,18 +315,18 @@ git clone <repository-url>
 docker compose up -d
 
 # 방법 B — 필요한 것만 개별 docker run으로 기동
-# 로컬 실행용 PostgreSQL (application.yml: localhost:5432/hexagonal, hexagonal/hexagonal1234)
-docker run --name hexagonal-postgres -e POSTGRES_DB=hexagonal \
-  -e POSTGRES_USER=hexagonal -e POSTGRES_PASSWORD=hexagonal1234 \
+# 로컬 실행용 PostgreSQL (application.yml: localhost:5432/reactive, reactive/reactive1234)
+docker run --name reactive-postgres -e POSTGRES_DB=reactive \
+  -e POSTGRES_USER=reactive -e POSTGRES_PASSWORD=reactive1234 \
   -p 5432:5432 -d postgres:16-alpine
 # 조회수 카운터용 Redis (application.yml: localhost:6379)
-docker run --name hexagonal-redis -p 6379:6379 -d redis:7-alpine
+docker run --name reactive-redis -p 6379:6379 -d redis:7-alpine
 # 검색용 Elasticsearch + Nori (application.yml: localhost:9200)
 #   Nori 플러그인이 필요하므로 커스텀 이미지를 빌드해 실행합니다
-docker build -t hexagonal-elasticsearch-nori:9.2.2 ./docker/elasticsearch
-docker run --name hexagonal-elasticsearch -p 9200:9200 \
+docker build -t reactive-elasticsearch-nori:9.2.2 ./docker/elasticsearch
+docker run --name reactive-elasticsearch -p 9200:9200 \
   -e discovery.type=single-node -e xpack.security.enabled=false \
-  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" -d hexagonal-elasticsearch-nori:9.2.2
+  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" -d reactive-elasticsearch-nori:9.2.2
 
 # Run
 ./gradlew bootRun
@@ -343,7 +343,7 @@ docker run --name hexagonal-elasticsearch -p 9200:9200 \
 
 `bootRun`은 `src/main/resources/application.yml`의 접속 정보로 DB·Redis·Elasticsearch에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL·Redis·Elasticsearch가 떠 있어야 합니다. 접속 정보와 비밀번호는 **환경변수로 외부화**돼 있어(`${SPRING_R2DBC_URL}`·`${SPRING_R2DBC_PASSWORD}`·`${SPRING_DATA_REDIS_HOST}`·`${SPRING_ELASTICSEARCH_URIS}` 등, 로컬 기본값 내장) 소스 수정 없이 환경(운영은 Vault/K8s Secret)에서 덮어쓸 수 있습니다. 운영에서는 JWT 서명키 `BOARD_JWT_SECRET`(≥32byte)와 관리자 부트스트랩 자격 `BOARD_ADMIN_USERNAME`/`BOARD_ADMIN_PASSWORD`도 설정합니다.
 
-* **모든 DB 접근**은 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/hexagonal`)로 **논블로킹** 실행됩니다. **JDBC는 어디에서도 사용하지 않습니다.**
+* **모든 DB 접근**은 `spring.r2dbc.url`(`r2dbc:postgresql://localhost:5432/reactive`)로 **논블로킹** 실행됩니다. **JDBC는 어디에서도 사용하지 않습니다.**
 * **조회수 카운터**는 `spring.data.redis`(`localhost:6379`)의 **리액티브 Redis(Lettuce)** 로 논블로킹 처리됩니다.
 * **검색**은 `spring.elasticsearch.uris`(`http://localhost:9200`)의 **Elasticsearch(+Nori)** 로 처리됩니다. ES가 없어도 앱은 기동되며(색인 초기화 실패는 로그만 남김), 검색 API만 사용할 수 없습니다.
 * **스키마 초기화**는 `R2dbcSchemaInitializer`가 등록한 R2DBC `ConnectionFactoryInitializer`가 담당합니다. 애플리케이션 기동 시 `src/main/resources/db/schema.sql`을 R2DBC 커넥션으로 실행합니다.

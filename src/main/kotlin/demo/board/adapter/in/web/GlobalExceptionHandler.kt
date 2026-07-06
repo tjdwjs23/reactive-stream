@@ -32,7 +32,8 @@ class GlobalExceptionHandler {
     @ExceptionHandler(InvalidCredentialsException::class)
     fun handleInvalidCredentialsException(): ResponseEntity<FailureResponse> = failure(AuthErrorCode.InvalidCredentials)
 
-    // CreateBoardCommand.init의 require()에서 발생하는 자가 검증 실패
+    // 커맨드/쿼리의 자가 검증(init 블록 require())에서 발생하는 유효성 검사 실패
+    // (CreateBoardCommand·SignUpCommand·BoardPageQuery·BoardSearchQuery·ArchiveStaleBoardsCommand 등)
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgumentException(e: IllegalArgumentException): ResponseEntity<FailureResponse> =
         failure(CommonErrorCode.ValidationError, e.message)

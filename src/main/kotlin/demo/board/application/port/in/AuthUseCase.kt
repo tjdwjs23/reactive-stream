@@ -17,10 +17,10 @@ data class SignUpCommand(
         // 자가 검증(Self-Validating) — Board의 CreateBoardCommand와 동일한 관례.
         // 길이 규칙의 단일 소스는 도메인(User)이며, 초과 username은 여기서 400으로 거릅니다.
         require(username.length in USERNAME_MIN_LENGTH..USERNAME_MAX_LENGTH) {
-            "Username must be between $USERNAME_MIN_LENGTH and $USERNAME_MAX_LENGTH characters"
+            "사용자명은 ${USERNAME_MIN_LENGTH}자에서 ${USERNAME_MAX_LENGTH}자 사이여야 합니다."
         }
         require(password.length >= PASSWORD_MIN_LENGTH) {
-            "Password must be at least $PASSWORD_MIN_LENGTH characters"
+            "비밀번호는 ${PASSWORD_MIN_LENGTH}자 이상이어야 합니다."
         }
     }
 }

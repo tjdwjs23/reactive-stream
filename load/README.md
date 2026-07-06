@@ -9,7 +9,7 @@
 - 대상 서버와 분리된 단독 바이너리 → `k6 run <script>.js` 한 방
 - Go 엔진이라 단일 노드에서 고동시성(수천 VU) 부하가 가볍다
 - `thresholds`로 p95 지연·에러율 합격 기준을 스크립트에 박아두면 = 그대로 CI 게이트
-- 이 레포의 monitoring 스택(Prometheus/Grafana)에 그대로 물릴 수 있다(아래 참고)
+- 이 레포의 monitoring 스택(LGTM — Mimir/Loki/Tempo/Grafana)에 그대로 물릴 수 있다(아래 참고)
 
 ## 디렉토리 구성 (최소 세트)
 
@@ -43,7 +43,7 @@ brew install k6
 부하는 "이미 떠 있는 서버"에 줍니다. 두 개를 먼저 올립니다.
 
 ```bash
-# (1) 의존 인프라: PostgreSQL / Redis / Elasticsearch / Prometheus / Grafana
+# (1) 의존 인프라: PostgreSQL / Redis / Elasticsearch / LGTM(Mimir·Loki·Tempo·Grafana)
 docker compose up -d
 docker compose ps            # 5개 다 Up 인지 확인
 
@@ -142,8 +142,8 @@ done
 ## 6. 부하 중 앱 내부 상태 보기 (선택) — Grafana
 
 부하가 도는 동안 **앱 관점 지표**(R2DBC 커넥션 풀, WebFlux 지연, JVM 스레드)를 실시간으로 봅니다.
-Prometheus가 이미 `host.docker.internal:8080/actuator/prometheus`를 5초마다 긁습니다
-(`monitoring/prometheus.yml`). Grafana(`http://localhost:3000`, admin/admin)에서 확인.
+앱이 메트릭을 OTLP로 Mimir에 push하므로(스크레이프 아님), Grafana(`http://localhost:3000`, admin/admin)의
+"Hexagonal Board API" 대시보드나 Explore(Mimir 데이터소스)에서 확인합니다.
 
 빠르게 커맨드라인으로 몇 개만 보고 싶으면:
 ```bash
@@ -151,8 +151,9 @@ curl -s localhost:8080/actuator/metrics/r2dbc.pool.acquired | jq '.measurements'
 curl -s localhost:8080/actuator/metrics/jvm.threads.live    | jq '.measurements'   # 살아있는 스레드
 ```
 
-> k6 자체 지표(요청 지연/RPS)를 Grafana 그래프로도 보고 싶으면 Prometheus에 remote-write 수신을 켜고
-> `k6 run -o experimental-prometheus-rw ...` 로 실행 → Grafana 공식 k6 대시보드(ID **19665**) import.
+> k6 자체 지표(요청 지연/RPS)를 Grafana 그래프로도 보고 싶으면 Mimir의 remote-write 엔드포인트로 보냅니다:
+> `K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9009/api/v1/push k6 run -o experimental-prometheus-rw ...`
+> → Grafana 공식 k6 대시보드(ID **19665**) import.
 > (그냥 터미널 요약만으로도 충분하니 필수는 아님.)
 
 ## 정합성 점검 팁
