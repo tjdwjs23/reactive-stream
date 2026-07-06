@@ -38,14 +38,17 @@ class ActuatorEndpointTest(
                 }
             }
 
-            When("GET /actuator/prometheus") {
-                Then("Prometheus 메트릭이 노출된다") {
+            When("GET /actuator/metrics") {
+                Then("Micrometer 메트릭 목록이 노출된다(메트릭 저장/조회는 Mimir, 여기선 로컬 디버깅용)") {
                     client
                         .get()
-                        .uri("/actuator/prometheus")
+                        .uri("/actuator/metrics")
                         .exchange()
                         .expectStatus()
                         .isOk
+                        .expectBody()
+                        .jsonPath("$.names")
+                        .exists()
                 }
             }
         }

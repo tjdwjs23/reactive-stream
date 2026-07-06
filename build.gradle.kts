@@ -45,11 +45,10 @@ dependencies {
     // 리액티브 클라이언트(ReactiveElasticsearchClient/Operations)가 자동 구성됩니다. 블로킹 클라이언트는 쓰지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
-    // 관측성(LGTM 스택). Actuator(health + r2dbc/redis/es 헬스),
-    // Micrometer Prometheus 레지스트리는 /actuator/prometheus 노출(로컬 디버깅·테스트)용으로 유지합니다.
-    // 저장/조회는 Prometheus 서버가 아니라 Mimir가 담당하며, 앱이 OTLP로 push합니다(아래).
+    // 관측성. Actuator(health + r2dbc/redis/es 헬스, /actuator/metrics).
+    // 메트릭 저장/조회는 Mimir가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
+    // 스크레이프 파이프라인이 없어(Alloy는 OTLP 수신만) Prometheus 레지스트리는 두지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("io.micrometer:micrometer-registry-prometheus")
     // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
     implementation("io.micrometer:context-propagation")
 

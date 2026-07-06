@@ -16,7 +16,7 @@
 * **Search**: **Elasticsearch 9.2.x + Nori** (`spring-data-elasticsearch`, 리액티브 클라이언트) — 한글 형태소 전문검색·관련도순 정렬·하이라이트, 논블로킹
 * **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
 * **Observability (Grafana Alloy + LGTM 스택)**: 앱이 metrics/logs/traces를 **모두 OTLP로 단일 수집기 Grafana Alloy에 push**하고, Alloy가 **Mimir·Loki·Tempo**로 팬아웃합니다(별도 스크레이퍼 0개, 순수 LGTM). 세 신호는 동일한 리소스 속성(`service.name=reactive` + `deployment.environment`)을 공유해 Grafana에서 서비스 단위로 상관됩니다.
-  * **메트릭(M)** — Micrometer OTLP 레지스트리 → **Alloy → Mimir**. HTTP 지연 히스토그램 + **도메인 비즈니스 메트릭**(`ObservabilityPort` out-port로 헥사고날 규칙 안에서 수집: 생성/조회/수정/삭제/검색/플러시/아카이브). `/actuator/prometheus`는 로컬 디버깅용으로 유지
+  * **메트릭(M)** — Micrometer OTLP 레지스트리 → **Alloy → Mimir**. HTTP 지연 히스토그램 + **도메인 비즈니스 메트릭**(`ObservabilityPort` out-port로 헥사고날 규칙 안에서 수집: 생성/조회/수정/삭제/검색/플러시/아카이브). `/actuator/metrics`(JSON)는 로컬 디버깅용
   * **로그(L)** — Spring Boot 4 네이티브 **구조화 JSON(ECS)** 콘솔 + **OTel logback appender → OTLP → Alloy → Loki**. 활성 스팬의 `traceid`가 실려 로그↔트레이스 상관
   * **트레이스(T)** — **Micrometer Tracing → OpenTelemetry → OTLP → Alloy → Tempo**, Reactor↔코루틴 컨텍스트 자동 전파로 suspend/Flow 경계 넘어 traceId 유지
   * **Grafana(G)** — 3종 데이터소스 자동 등록 + 통합 대시보드. traceId로 로그↔트레이스 상호 점프
@@ -119,7 +119,7 @@ demo.board
 | :--- | :--- | :--- |
 | `GET` | `/actuator/health` | 애플리케이션/의존성 상태 (r2dbc·redis 헬스 포함) |
 | `GET` | `/actuator/metrics` | 애플리케이션 메트릭 |
-| `GET` | `/actuator/prometheus` | Micrometer 메트릭 노출(로컬 디버깅용). 저장/조회는 Mimir가 담당(앱 → Alloy → Mimir, OTLP push) |
+| `GET` | `/actuator/metrics` | Micrometer 메트릭(JSON, 로컬 디버깅용). 저장/조회는 Mimir가 담당(앱 → Alloy → Mimir, OTLP push) |
 | `GET` | `/swagger-ui.html` | Swagger UI (API 문서 뷰어) |
 | `GET` | `/v3/api-docs` | OpenAPI 3 문서 (JSON) |
 | `POST` | `/api/admin/view-counts/flush` | 조회수 델타를 즉시 DB로 write-back (온디맨드 플러시, **admin 토큰 필요**) |
@@ -189,7 +189,7 @@ src/test
     │   ├── BoardSearchControllerTest          # 검색/재색인 컨트롤러 슬라이스 (입력검증·admin 가드 포함)
     │   ├── AdminViewCountControllerTest       # 조회수 플러시 컨트롤러 슬라이스 (admin 가드 포함)
     │   ├── AdminAccessGuardTest               # admin 토큰 가드 단위 테스트
-    │   ├── ActuatorEndpointTest               # Actuator/Prometheus 구성 검증 (전체 서버, Testcontainers)
+    │   ├── ActuatorEndpointTest               # Actuator 구성 검증(health·metrics, 전체 서버, Testcontainers)
     │   ├── OpenApiDocsTest                    # springdoc OpenAPI 문서 서빙 검증 (전체 서버)
     │   └── RouteNotFoundTest                  # 미존재 경로가 404 통일 포맷으로 응답하는지 검증
     ├── adapter/out/persistence/
@@ -222,7 +222,7 @@ src/test
 | `AdminViewCountControllerTest` | Web 슬라이스 (WebTestClient + MockK) | 플러시 응답 포맷, admin 토큰 가드(미설정 통과 / 설정 시 401·정상) 검증 |
 | `AdminAccessGuardTest` | 단위 | 토큰 미설정 시 통과, 설정 시 일치만 통과·불일치/누락은 401 검증 |
 | `RouteNotFoundTest` | Web 통합 (전체 서버) | 매핑되지 않은 경로가 500이 아닌 **404** 통일 실패 포맷으로 응답하는지 검증 |
-| `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc·redis 헬스 포함)와 `/actuator/prometheus` 노출 검증 |
+| `ActuatorEndpointTest` | 관측성 통합 (전체 서버, Testcontainers) | `/actuator/health`(r2dbc·redis 헬스 포함)와 `/actuator/metrics` 노출 검증 |
 | `OpenApiDocsTest` | 문서 통합 (전체 서버, Testcontainers) | `/v3/api-docs`에 Board 경로가 포함되고 `/swagger-ui.html`이 리다이렉트되는지 검증 |
 | `BoardPersistenceAdapterTest` | 영속성 통합 (Testcontainers) | 실제 PostgreSQL에 `save`/`findById`/`findPage`(키셋)/`deleteById`가 정상 반영되고, `addViewCountsBatch`(`unnest` 배치 UPDATE)가 존재하는 id만 가산하는지 검증 |
 | `BoardBatchPersistenceAdapterTest` | 배치 영속성 통합 (Testcontainers) | 키셋 페이지네이션이 여러 페이지에 걸쳐 동작하는지, `deleteByIds` 벌크 삭제가 정확한지 검증 |
@@ -336,7 +336,7 @@ docker run --name reactive-elasticsearch -p 9200:9200 \
 
 * **API 문서 (Swagger UI)**: <http://localhost:8080/swagger-ui.html>
 * **헬스 체크**: <http://localhost:8080/actuator/health>
-* **메트릭(로컬 디버깅)**: <http://localhost:8080/actuator/prometheus> (저장/조회는 Mimir)
+* **메트릭(로컬 디버깅)**: <http://localhost:8080/actuator/metrics> (JSON; 저장/조회는 Mimir)
 * **Grafana** : <http://localhost:3000> (admin / admin) — 기동 시 **메트릭(Mimir)·로그(Loki)·트레이스(Tempo)** 3종 데이터소스가 자동 등록되고, "Hexagonal Board API" 통합 대시보드(RED·비즈니스 메트릭·JVM/시스템)도 자동 프로비저닝됩니다. **Explore → Loki**에서 구조화 JSON 로그를 검색하고 `TraceID` 링크로 **Tempo** 트레이스로 점프, **Explore → Tempo**에서 요청 트레이스(WebFlux→R2DBC/Redis/ES 스팬)를 봅니다.
 * **Alloy** : OTLP 수신 4318(HTTP)·4317(gRPC) — 앱이 여기로 push / 디버그 UI <http://localhost:12345>
 * **Loki** : <http://localhost:3100> (로그 저장/조회 — Alloy가 OTLP를 변환해 전달)
@@ -404,12 +404,12 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 #### 6. Observability — 메트릭·로그·트레이스 3종 통합
 Grafana에서 세 축을 **traceId로 서로 오가며** 관측합니다.
 
-* **메트릭 (Mimir)**: Prometheus **서버 대신 Mimir**가 저장/조회를 맡습니다. Mimir는 스스로 스크레이프하지 않으므로, 앱이 Micrometer OTLP 레지스트리로 **Alloy에 push → Alloy가 Mimir로 전달**합니다(트레이스·로그와 동일한 OTLP push 모델 — 별도 스크레이퍼 0개로 순수 LGTM 유지). `http.server.requests` 지연 히스토그램에 더해 **도메인 비즈니스 메트릭**을 노출합니다 — `board_create_total`·`board_view_total`·`board_search_total`·`board_search_hits`·`board_view_count_flush_total`·`board_archive_total` 등. 이 지표는 프레임워크가 주는 기술 지표와 달리 도메인 흐름에서만 알 수 있어, **`ObservabilityPort`(out-port)**로 헥사고날 규칙 안에서 수집합니다 — 서비스는 "게시글이 생성됐다" 같은 비즈니스 어휘로만 호출하고, Micrometer는 `MicrometerObservabilityAdapter`만 압니다(도메인/서비스에 관측 프레임워크가 새지 않음). 조회는 Grafana Mimir 데이터소스(Prometheus 호환 API)로 **PromQL 그대로** 질의합니다. `/actuator/prometheus`는 로컬 디버깅용으로 유지합니다.
+* **메트릭 (Mimir)**: Prometheus **서버 대신 Mimir**가 저장/조회를 맡습니다. Mimir는 스스로 스크레이프하지 않으므로, 앱이 Micrometer OTLP 레지스트리로 **Alloy에 push → Alloy가 Mimir로 전달**합니다(트레이스·로그와 동일한 OTLP push 모델 — 별도 스크레이퍼 0개로 순수 LGTM 유지). `http.server.requests` 지연 히스토그램에 더해 **도메인 비즈니스 메트릭**을 노출합니다 — `board_create_total`·`board_view_total`·`board_search_total`·`board_search_hits`·`board_view_count_flush_total`·`board_archive_total` 등. 이 지표는 프레임워크가 주는 기술 지표와 달리 도메인 흐름에서만 알 수 있어, **`ObservabilityPort`(out-port)**로 헥사고날 규칙 안에서 수집합니다 — 서비스는 "게시글이 생성됐다" 같은 비즈니스 어휘로만 호출하고, Micrometer는 `MicrometerObservabilityAdapter`만 압니다(도메인/서비스에 관측 프레임워크가 새지 않음). 조회는 Grafana Mimir 데이터소스(Prometheus 호환 API)로 **PromQL 그대로** 질의합니다. `/actuator/metrics`(Micrometer JSON)는 로컬 디버깅용으로 유지합니다(스크레이프 파이프라인이 없어 Prometheus 레지스트리는 두지 않습니다).
   > **OTLP 메트릭 이름 규약**: OTLP 수집은 기본적으로 Prometheus 관례 접미사를 떼므로(`board_create`, `http_server_requests_count`), Mimir의 `otel_metric_suffixes_enabled`로 `_total`/단위 접미사를 되살립니다(`board_create_total` 등). 단, 시간 단위는 OTLP가 **밀리초** 기준이라 지연·GC·업타임 메트릭은 `_seconds`가 아니라 `_milliseconds`(예: `http_server_requests_milliseconds_bucket`)로 저장됩니다 — 대시보드 쿼리/단위도 여기에 맞춰져 있습니다.
 * **로그**: Spring Boot 4 네이티브 **구조화 로깅(ECS JSON)**으로 콘솔에 출력하고, `test`가 아닌 프로필에선 **OTel logback appender**가 로그를 OTel LogRecord로 변환해 **OTLP로 Alloy(`:4318`)에 export → Alloy가 Loki로 전달**합니다. 활성 스팬의 `trace_id`/`span_id`가 자동 첨부되고(로그 라인 JSON의 `traceid`/`spanid` 필드), Grafana Loki 데이터소스의 파생 필드(`"traceid"` regex)가 Tempo 트레이스로 링크됩니다.
 * **트레이스**: Micrometer Tracing → OpenTelemetry → **OTLP로 Alloy(`:4318`)에 export → Alloy가 Tempo로 전달**. HTTP 요청은 물론 `@Scheduled` 배치도 스팬으로 남습니다. WebFlux+코루틴 환경에서 `suspend`/`Flow` 경계를 넘어 추적 컨텍스트가 유실되지 않도록 Reactor 자동 컨텍스트 전파(`Hooks.enableAutomaticContextPropagation`)를 켭니다.
 
-> Loki/Tempo/Mimir 전송은 모두 **`test` 프로필에서 비활성화**됩니다(로그백 `<springProfile>` + `management.tracing.enabled=false` + `management.otlp.metrics.export.enabled=false`) — 인프라 없이도 테스트가 조용히 통과합니다. `/actuator/prometheus`(Micrometer prometheus 레지스트리)는 테스트에서도 노출돼 `ActuatorEndpointTest`가 검증합니다.
+> Loki/Tempo/Mimir 전송은 모두 **`test` 프로필에서 비활성화**됩니다(로그백 `<springProfile>` + `management.tracing.enabled=false` + `management.otlp.metrics.export.enabled=false`) — 인프라 없이도 테스트가 조용히 통과합니다. `/actuator/metrics`(Micrometer)는 테스트에서도 노출돼 `ActuatorEndpointTest`가 검증합니다.
 
 #### 7. Self-Documenting API
 springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.
