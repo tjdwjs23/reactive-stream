@@ -30,7 +30,7 @@ schema_config:
         period: 24h
 
 limits_config:
-  # loki4j가 보내는 구조화 메타데이터를 허용합니다.
+  # Alloy(otelcol.exporter.loki)가 OTel 로그를 변환해 실어 보내는 구조화 메타데이터를 허용합니다.
   allow_structured_metadata: true
   # 로컬에서 과거/미래 타임스탬프 로그도 넉넉히 받아들입니다.
   reject_old_samples: false

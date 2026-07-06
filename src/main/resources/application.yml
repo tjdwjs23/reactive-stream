@@ -38,11 +38,14 @@ logging:
     format:
       console: ecs
 
-# 관측성(LGTM 스택). 메트릭·로그·트레이스를 모두 push 방식으로 내보내 Grafana 단일 대시보드에서 봅니다.
+# 관측성(LGTM 스택 + 단일 수집기 Grafana Alloy). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
+# push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(monitoring/alloy/config.alloy).
+# 앱이 백엔드마다 다른 프로토콜/주소로 직접 붙던 것을 단일 OTLP 엔드포인트로 통합한 구조입니다.
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc/redis/es 헬스 포함)
 # - /actuator/metrics, /actuator/prometheus : 로컬 디버깅용 Micrometer 메트릭 노출(스크레이프는 하지 않음)
-# - metrics : OTLP로 Mimir에 push (Prometheus 서버 없이 Mimir가 저장/조회 담당 — Mimir는 스스로 긁지 않음)
-# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Tempo에 export.
+# - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Mimir로 전달(이름/접미사는 Mimir가 처리)
+# - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Loki로 전달(trace_id는 구조화 메타데이터)
+# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Alloy에 export → Alloy가 Tempo로 전달.
 #   Reactor↔코루틴 컨텍스트 전파는 ObservabilityConfig가 켜 둠(suspend/Flow 경계 넘어 traceId 유지).
 management:
   endpoints:
@@ -60,22 +63,35 @@ management:
     sampling:
       # 로컬/개발은 전량 샘플링. 운영은 MANAGEMENT_TRACING_SAMPLING_PROBABILITY로 낮춰 오버헤드를 제어합니다.
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
-  # Spring Boot 4에서 OTLP 트레이싱 export 설정은 management.opentelemetry.tracing.export.otlp.* 로 이동했습니다
-  # (Boot 3.x의 management.otlp.tracing.endpoint 아님). Tempo의 OTLP/HTTP 수신(4318)으로 push합니다.
+  # Spring Boot 4에서 OTLP 트레이싱/로깅 export 설정은 management.opentelemetry.*.export.otlp.* 로 모였습니다
+  # (Boot 3.x의 management.otlp.tracing.endpoint 아님). 둘 다 Alloy의 OTLP/HTTP 수신(4318)으로 push합니다.
   opentelemetry:
+    # 3종 신호(metrics/logs/traces)가 공유하는 리소스 속성 = 레이블의 단일 소스입니다.
+    # Boot 4에서는 이 한 곳이 OTel SDK(트레이스/로그)와 Micrometer OTLP 레지스트리(메트릭)에 모두 적용돼
+    # 세 신호가 동일한 리소스로 나갑니다(기동 로그로 확인). service.name은 spring.application.name(=reactive).
+    # deployment.environment로 서비스 단위 상관/필터를 통일합니다.
+    # (주의: service.namespace를 넣으면 Prometheus job / Loki service_name이 "ns/name"으로 합성돼
+    #  Tempo의 raw service.name(=reactive)과 갈라져 상관 키가 어긋나므로, 상관 키는 service.name으로 통일합니다.)
+    resource-attributes:
+      deployment.environment: ${DEPLOYMENT_ENV:local}
     tracing:
       export:
         otlp:
           endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
           transport: http
-  # 메트릭 OTLP export(Micrometer OTLP 레지스트리). Mimir의 OTLP 수신 엔드포인트(/otlp/v1/metrics)로 push합니다.
-  # 앱은 호스트, Mimir는 docker(9009 노출)라 localhost로 push합니다. (트레이싱 OTLP는 위 management.opentelemetry.*,
-  # 메트릭 OTLP는 여기 management.otlp.metrics.export.* — Boot 4의 네임스페이스가 서로 다릅니다.)
+    # 로그 OTLP export. OTel logback appender(logback-spring.xml)가 만든 LogRecord를 여기 엔드포인트로 push합니다.
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_LOGS_ENDPOINT:http://localhost:4318/v1/logs}
+          transport: http
+  # 메트릭 OTLP export(Micrometer OTLP 레지스트리)는 별도 네임스페이스(management.otlp.metrics.export.*)입니다.
+  # 앱은 호스트, Alloy는 docker(4318 노출)라 localhost로 push합니다.
   otlp:
     metrics:
       export:
-        url: ${OTLP_METRICS_URL:http://localhost:9009/otlp/v1/metrics}
-        # Mimir는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다.
+        url: ${OTLP_METRICS_URL:http://localhost:4318/v1/metrics}
+        # Mimir는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다(Alloy가 그대로 전달).
 
 # 오래된 게시글 일괄 아카이브 배치 설정
 

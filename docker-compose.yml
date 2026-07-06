@@ -1,13 +1,14 @@
-# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + LGTM(Loki + Grafana + Tempo + Mimir)
+# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + Alloy + LGTM(Loki + Grafana + Tempo + Mimir)
 #
 # Spring 앱(8080)은 이 compose에 포함하지 않습니다.
 #   - 앱은 호스트에서 ./gradlew bootRun 으로 실행합니다.
-#   - 앱이 호스트에서 Loki(3100)/Tempo(4318)/Mimir(9009)로 로그·트레이스·메트릭을 모두 push합니다.
+#   - 앱은 metrics/logs/traces를 모두 OTLP로 단일 수집기 Grafana Alloy(4318/HTTP·4317/gRPC)에 push합니다.
+#   - Alloy가 이를 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(monitoring/alloy/config.alloy).
+#     즉 앱은 백엔드를 몰라도 되고, 수집 파이프라인이 Alloy 한 곳으로 통합됩니다.
 #   - Mimir는 Prometheus와 달리 스스로 스크레이프하지 않는 저장소이므로, 메트릭도 OTLP push로 수집합니다.
-#     (별도 스크레이퍼 없이 순수 LGTM 4종으로 단일 대시보드 통합.)
 #
 # 사용법:
-#   docker compose up -d        # 7개 컨테이너 백그라운드 실행
+#   docker compose up -d        # 8개 컨테이너 백그라운드 실행
 #   docker compose ps           # 상태 확인
 #   docker compose down         # 정지 + 컨테이너 삭제(볼륨/데이터는 유지)
 #   docker compose down -v      # 볼륨까지 삭제(완전 초기화)
@@ -17,9 +18,10 @@
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
 #   Grafana        http://localhost:3000  (admin / admin) — 메트릭·로그·트레이스 3종 데이터소스 자동 등록
-#   Mimir          http://localhost:9009  (메트릭 저장/조회, OTLP 수신 /otlp/v1/metrics)
-#   Loki           http://localhost:3100  (구조화 로그 수집, 앱이 HTTP push)
-#   Tempo          http://localhost:3200  (트레이스 조회) / OTLP 수신 4317(gRPC)·4318(HTTP)
+#   Alloy          OTLP 수신 4318(HTTP)·4317(gRPC) — 앱이 여기로 push / 디버그 UI http://localhost:12345
+#   Mimir          http://localhost:9009  (메트릭 저장/조회, Alloy가 OTLP로 전달)
+#   Loki           http://localhost:3100  (로그 저장/조회, Alloy가 전달)
+#   Tempo          http://localhost:3200  (트레이스 조회) — OTLP 수신은 내부망에서 Alloy로부터만
 
 services:
   postgres:
@@ -80,7 +82,7 @@ services:
 
   mimir:
     # Prometheus 호환 메트릭 저장소(단일 프로세스 모놀리식). Prometheus 서버를 대체합니다.
-    # 스스로 스크레이프하지 않고, 앱이 OTLP(/otlp/v1/metrics)로 push한 메트릭을 저장합니다.
+    # 스스로 스크레이프하지 않고, Alloy가 OTLP(/otlp/v1/metrics)로 전달한 메트릭을 저장합니다.
     # 조회는 Prometheus 호환 API(/prometheus)로 제공되어 Grafana가 PromQL로 그대로 씁니다.
     image: grafana/mimir:2.14.3
     container_name: reactive-mimir
@@ -124,11 +126,32 @@ services:
     command: -config.file=/etc/tempo/tempo.yml
     ports:
       - "3200:3200"   # Tempo 조회 API(Grafana가 사용)
-      - "4318:4318"   # OTLP/HTTP 수신(앱이 트레이스 push)
-      - "4317:4317"   # OTLP/gRPC 수신
+      # OTLP 수신(4317/4318)은 호스트로 노출하지 않습니다 — 이제 Alloy가 그 포트를 소유하고,
+      # Tempo로는 내부 compose 네트워크에서 Alloy가 트레이스를 전달합니다.
     volumes:
       - ./monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
       - tempo-data:/var/tempo
+
+  alloy:
+    # 단일 OTLP 수집기. 앱이 push한 metrics/logs/traces를 받아 Mimir/Loki/Tempo로 팬아웃합니다.
+    image: grafana/alloy:v1.5.1
+    container_name: reactive-alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    ports:
+      - "4317:4317"    # OTLP/gRPC 수신(호스트의 앱이 push)
+      - "4318:4318"    # OTLP/HTTP 수신(호스트의 앱이 push)
+      - "12345:12345"  # Alloy 디버그 UI
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - mimir
+      - loki
+      - tempo
 
 volumes:
   postgres-data:
@@ -137,3 +160,4 @@ volumes:
   grafana-data:
   loki-data:
   tempo-data:
+  alloy-data:

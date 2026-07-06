@@ -59,11 +59,14 @@ dependencies {
     // 그리고 OTLP '메트릭' 레지스트리(micrometer-registry-otlp)를 함께 가져옵니다.
     // (Boot 3.x식 micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 조합은 Boot 4에선
     //  자동구성이 딸려오지 않아 Tracer가 활성화되지 않습니다.)
-    // → 트레이스는 OTLP로 Tempo(:4318)에, 메트릭은 OTLP로 Mimir(:9009)에 push합니다(application.yml).
+    // → metrics/logs/traces를 모두 OTLP로 단일 수집기 Grafana Alloy(:4318)에 push하고, Alloy가
+    //   Mimir/Loki/Tempo로 팬아웃합니다(application.yml + monitoring/alloy/config.alloy).
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
-    // 구조화 로그를 Loki로 직접 push(호스트-앱 토폴로지에 적합 — 파일 마운트/사이드카 없이 HTTP push).
-    // BOM 관리 밖이라 버전을 명시합니다(logback 1.5.x / JDK21 호환 라인).
-    implementation("com.github.loki4j:loki-logback-appender:1.6.0")
+    // 로그도 OTLP로 내보내 3종 신호(metrics/logs/traces)를 단일 파이프라인(→ Grafana Alloy)으로 통합합니다.
+    // 이 appender가 logback 로그를 OTel LogRecord로 변환하고, Boot가 구성한 OTLP log exporter가 Alloy로 push합니다.
+    // (Boot는 이 appender를 자동 부착하지 않으므로 OpenTelemetryAppender.install(...)을 기동 시 호출 — config 참고.)
+    // BOM 관리 밖이라 버전을 명시합니다(-alpha 라인이 최신 안정 배포 관례).
+    implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.21.0-alpha")
 
     // API 문서 자동화: springdoc-openapi(WebFlux). /swagger-ui.html + /v3/api-docs 제공.
     // v3.x가 Spring Boot 4 / Spring Framework 7 지원 라인입니다(2.x는 Boot 4에서 동작하지 않음).

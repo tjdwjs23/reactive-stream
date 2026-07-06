@@ -1,7 +1,7 @@
 # 로컬 개발용 Grafana Mimir(단일 프로세스 모놀리식) 최소 설정. 운영용 아님(운영은 객체 스토리지 + 다중 컴포넌트).
 #
-# 역할: Prometheus 서버를 대체하는 메트릭 저장소. 스스로 스크레이프하지 않고, 앱이 OTLP로 push한 메트릭을 저장한다.
-# - OTLP 수신:  POST /otlp/v1/metrics   (앱 Micrometer OTLP 레지스트리가 여기로 push)
+# 역할: Prometheus 서버를 대체하는 메트릭 저장소. 스스로 스크레이프하지 않고, Alloy가 OTLP로 전달한 메트릭을 저장한다.
+# - OTLP 수신:  POST /otlp/v1/metrics   (앱 → Alloy → 여기로 전달. 앱은 Alloy에만 push하고 Mimir를 직접 모른다)
 # - 조회(PromQL): /prometheus/api/v1/... (Grafana Mimir 데이터소스가 Prometheus API로 질의)
 
 # 단일 테넌트 로컬 개발: X-Scope-OrgID 헤더 없이 쓰도록 멀티테넌시를 끕니다.
