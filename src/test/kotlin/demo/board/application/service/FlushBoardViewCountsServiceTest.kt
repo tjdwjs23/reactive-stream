@@ -2,19 +2,48 @@ package demo.board.application.service
 
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.application.port.out.DistributedLockPort
 import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import java.time.Duration
+
+// 락을 항상 획득해 블록을 그대로 실행하는 테스트 더블(단일 인스턴스·경합 없음 상황을 재현).
+private object AlwaysAcquiringLock : DistributedLockPort {
+    override suspend fun <T> withLock(
+        key: String,
+        ttl: Duration,
+        block: suspend () -> T,
+    ): T? = block()
+}
+
+// 락을 절대 획득하지 못하는 더블(다른 인스턴스가 이미 플러시 중인 상황을 재현). 블록을 실행하지 않고 null을 반환.
+private object NeverAcquiringLock : DistributedLockPort {
+    override suspend fun <T> withLock(
+        key: String,
+        ttl: Duration,
+        block: suspend () -> T,
+    ): T? = null
+}
 
 private class FlushFixture(
     chunkSize: Int = 1000,
+    lock: DistributedLockPort = AlwaysAcquiringLock,
 ) {
     val boardViewCountPort = mockk<BoardViewCountPort>()
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
-    val service = FlushBoardViewCountsService(boardViewCountPort, boardRepositoryPort, NoOpObservabilityPort, chunkSize)
+    val service =
+        FlushBoardViewCountsService(
+            boardViewCountPort,
+            boardRepositoryPort,
+            NoOpObservabilityPort,
+            lock,
+            chunkSize,
+            lockTtlMs = 300_000,
+        )
 
     init {
         // commit-then-delete: 반영 성공 청크는 버퍼에서 지웁니다. 기본은 무동작으로 둡니다.
@@ -78,6 +107,22 @@ class FlushBoardViewCountsServiceTest :
                     result.failed shouldBe 0
                     coVerify(exactly = 0) { fixture.boardRepositoryPort.addViewCountsBatch(any()) }
                     coVerify(exactly = 0) { fixture.boardViewCountPort.removeDrained(any()) }
+                }
+            }
+        }
+
+        Given("다른 인스턴스가 이미 플러시 중이라 분산 락을 잡지 못할 때") {
+            val fixture = FlushFixture(lock = NeverAcquiringLock)
+
+            When("flush를 호출하면") {
+                val result = fixture.service.flush()
+
+                Then("스냅샷도 DB도 건드리지 않고 빈 결과를 반환한다(이번 차례는 스킵)") {
+                    result.boards shouldBe 0
+                    result.updatedRows shouldBe 0
+                    result.failed shouldBe 0
+                    coVerify(exactly = 0) { fixture.boardViewCountPort.snapshotPendingDeltas() }
+                    coVerify(exactly = 0) { fixture.boardRepositoryPort.addViewCountsBatch(any()) }
                 }
             }
         }

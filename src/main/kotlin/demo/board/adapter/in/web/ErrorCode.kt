@@ -54,6 +54,13 @@ object BoardErrorCode {
         override val label = "게시글을 찾을 수 없습니다."
         override val statusCode = HttpStatus.NOT_FOUND.value()
     }
+
+    // 소유자도 관리자도 아닌 사용자가 남의 게시글을 수정/삭제하려 할 때(IDOR 차단).
+    object AccessDenied : ErrorCode {
+        override val code = "BOARD_ACCESS_DENIED"
+        override val label = "해당 게시글에 대한 권한이 없습니다."
+        override val statusCode = HttpStatus.FORBIDDEN.value()
+    }
 }
 
 // 인증/인가 도메인 전용 에러 코드 모음.

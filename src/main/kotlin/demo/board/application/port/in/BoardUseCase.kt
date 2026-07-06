@@ -62,13 +62,23 @@ interface UpdateBoardUseCase {
 // CreateBoardCommand와 달리 여기엔 init 블록 검증이 없습니다.
 // 수정 규칙은 도메인이 단일 소스로 강제합니다 — Board.update()가 제목 공백·제목 길이(MAX_TITLE_LENGTH)와
 // 내용 최소 길이(MIN_CONTENT_LENGTH)를 생성(CreateBoardCommand)과 동일하게 대칭 검증합니다.
+// requesterId/requesterIsAdmin: 인증된 요청자 정보. 소유자 또는 관리자만 수정할 수 있도록 서비스가 인가에 씁니다.
 data class UpdateBoardCommand(
     val id: Long,
     val title: String,
     val content: String,
+    val requesterId: Long,
+    val requesterIsAdmin: Boolean = false,
 )
 
 // 4. 게시글 삭제 유즈케이스
 interface DeleteBoardUseCase {
-    suspend fun deleteBoard(id: Long)
+    suspend fun deleteBoard(command: DeleteBoardCommand)
 }
+
+// 삭제도 수정과 동일하게 요청자 정보를 함께 받아 소유권을 검사합니다(소유자 또는 관리자만 삭제 가능).
+data class DeleteBoardCommand(
+    val id: Long,
+    val requesterId: Long,
+    val requesterIsAdmin: Boolean = false,
+)

@@ -104,4 +104,5 @@ board:
     flush-enabled: true       # 끄면 스케줄 플러시를 건너뜀(델타는 Redis에 계속 누적)
     flush-interval-ms: 30000  # 플러시 주기(ms). 짧을수록 DB 정합성↑, 쓰기 부하↑
     flush-chunk-size: 1000    # 한 번의 배치 UPDATE에 묶을 게시글 수(DB 왕복 = ceil(N/chunk))
+    flush-lock-ttl-ms: 300000 # 분산 플러시 락 TTL(ms). 홀더가 죽어도 이 시간 뒤 자동 해제. 최대 플러시 소요보다 넉넉히
     increment-timeout-ms: 200 # 조회 시 Redis 조회수 증가에 허용하는 시간 예산. 초과/실패 시 DB 값으로 강등 응답

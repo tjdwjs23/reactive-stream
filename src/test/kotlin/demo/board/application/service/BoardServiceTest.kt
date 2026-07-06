@@ -2,10 +2,12 @@ package demo.board.application.service
 
 import demo.board.application.port.`in`.BoardPageQuery
 import demo.board.application.port.`in`.CreateBoardCommand
+import demo.board.application.port.`in`.DeleteBoardCommand
 import demo.board.application.port.`in`.UpdateBoardCommand
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardSearchPort
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.domain.exception.BoardAccessDeniedException
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.model.Board
 import demo.board.support.NoOpObservabilityPort
@@ -176,10 +178,12 @@ class BoardServiceTest :
             }
         }
 
-        Given("존재하는 Board와 유효한 Command가 주어졌을 때") {
+        Given("소유자가 자신의 Board를 유효한 Command로 수정할 때") {
             val fixture = ServiceFixture()
-            val existingBoard = Board(id = 1L, title = "원래 제목", content = "원래 내용입니다.", createdAt = LocalDateTime.now())
-            val command = UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용은 열 자 이상입니다")
+            val existingBoard =
+                Board(id = 1L, title = "원래 제목", content = "원래 내용입니다.", createdAt = LocalDateTime.now(), authorId = 7L)
+            val command =
+                UpdateBoardCommand(id = 1L, title = "새 제목", content = "새 내용은 열 자 이상입니다", requesterId = 7L)
             val updatedBoard = existingBoard.update(command.title, command.content)
             coEvery { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
             coEvery { fixture.boardRepositoryPort.save(any()) } returns updatedBoard
@@ -195,9 +199,54 @@ class BoardServiceTest :
             }
         }
 
+        Given("소유자가 아닌 사용자가 남의 Board를 수정하려 할 때") {
+            val fixture = ServiceFixture()
+            val existingBoard =
+                Board(id = 1L, title = "원래 제목", content = "원래 내용입니다.", createdAt = LocalDateTime.now(), authorId = 7L)
+            // 요청자(99L) ≠ 작성자(7L), 관리자도 아님
+            val command =
+                UpdateBoardCommand(id = 1L, title = "탈취 제목", content = "남의 글을 고치려는 시도입니다", requesterId = 99L)
+            coEvery { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
+
+            When("updateBoard를 호출하면") {
+                Then("BoardAccessDeniedException을 던지고 저장하지 않는다") {
+                    shouldThrow<BoardAccessDeniedException> {
+                        fixture.boardService.updateBoard(command)
+                    }
+                    coVerify(exactly = 0) { fixture.boardRepositoryPort.save(any()) }
+                }
+            }
+        }
+
+        Given("관리자가 남의 Board를 수정할 때") {
+            val fixture = ServiceFixture()
+            val existingBoard =
+                Board(id = 1L, title = "원래 제목", content = "원래 내용입니다.", createdAt = LocalDateTime.now(), authorId = 7L)
+            // 요청자(99L)는 작성자가 아니지만 관리자 → 허용
+            val command =
+                UpdateBoardCommand(
+                    id = 1L,
+                    title = "관리자 수정",
+                    content = "관리자가 정리하는 내용입니다",
+                    requesterId = 99L,
+                    requesterIsAdmin = true,
+                )
+            val updatedBoard = existingBoard.update(command.title, command.content)
+            coEvery { fixture.boardRepositoryPort.findById(1L) } returns existingBoard
+            coEvery { fixture.boardRepositoryPort.save(any()) } returns updatedBoard
+
+            When("updateBoard를 호출하면") {
+                Then("소유자가 아니어도 수정에 성공한다") {
+                    val result = fixture.boardService.updateBoard(command)
+                    result.title shouldBe "관리자 수정"
+                    coVerify { fixture.boardRepositoryPort.save(any()) }
+                }
+            }
+        }
+
         Given("존재하지 않는 ID의 Command가 주어졌을 때") {
             val fixture = ServiceFixture()
-            val command = UpdateBoardCommand(id = 999L, title = "새 제목", content = "새 내용")
+            val command = UpdateBoardCommand(id = 999L, title = "새 제목", content = "새 내용입니다열자", requesterId = 7L)
             coEvery { fixture.boardRepositoryPort.findById(999L) } returns null
 
             When("updateBoard를 호출하면") {
@@ -210,16 +259,50 @@ class BoardServiceTest :
             }
         }
 
-        Given("유효한 ID가 주어졌을 때") {
+        Given("소유자가 자신의 Board를 삭제할 때") {
             val fixture = ServiceFixture()
             val id = 1L
+            val existingBoard =
+                Board(id = id, title = "제목", content = "내용입니다열자", createdAt = LocalDateTime.now(), authorId = 7L)
+            coEvery { fixture.boardRepositoryPort.findById(id) } returns existingBoard
             coEvery { fixture.boardRepositoryPort.deleteById(id) } returns Unit
 
             When("deleteBoard를 호출하면") {
-                fixture.boardService.deleteBoard(id)
+                fixture.boardService.deleteBoard(DeleteBoardCommand(id = id, requesterId = 7L))
 
                 Then("Repository의 deleteById를 호출한다") {
                     coVerify { fixture.boardRepositoryPort.deleteById(id) }
+                }
+            }
+        }
+
+        Given("소유자가 아닌 사용자가 남의 Board를 삭제하려 할 때") {
+            val fixture = ServiceFixture()
+            val id = 1L
+            val existingBoard =
+                Board(id = id, title = "제목", content = "내용입니다열자", createdAt = LocalDateTime.now(), authorId = 7L)
+            coEvery { fixture.boardRepositoryPort.findById(id) } returns existingBoard
+
+            When("deleteBoard를 호출하면") {
+                Then("BoardAccessDeniedException을 던지고 deleteById를 호출하지 않는다") {
+                    shouldThrow<BoardAccessDeniedException> {
+                        fixture.boardService.deleteBoard(DeleteBoardCommand(id = id, requesterId = 99L))
+                    }
+                    coVerify(exactly = 0) { fixture.boardRepositoryPort.deleteById(any()) }
+                }
+            }
+        }
+
+        Given("삭제하려는 Board가 존재하지 않을 때") {
+            val fixture = ServiceFixture()
+            coEvery { fixture.boardRepositoryPort.findById(404L) } returns null
+
+            When("deleteBoard를 호출하면") {
+                Then("BoardNotFoundException을 던지고 deleteById를 호출하지 않는다") {
+                    shouldThrow<BoardNotFoundException> {
+                        fixture.boardService.deleteBoard(DeleteBoardCommand(id = 404L, requesterId = 7L))
+                    }
+                    coVerify(exactly = 0) { fixture.boardRepositoryPort.deleteById(any()) }
                 }
             }
         }

@@ -14,6 +14,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.time.Clock
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -29,11 +30,13 @@ import java.util.concurrent.atomic.AtomicInteger
 class ArchiveStaleBoardsService(
     private val boardBatchQueryPort: BoardBatchQueryPort,
     private val observability: ObservabilityPort,
+    // 배치 실행 시각을 주입된 시계에서 얻습니다(벽시계 직접 호출 대신 — 테스트에서 고정 가능, BoardService와 동일 원칙).
+    private val clock: Clock,
 ) : ArchiveStaleBoardsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override suspend fun archiveStaleBoards(command: ArchiveStaleBoardsCommand): ArchiveResult {
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(clock)
         val threshold = now.minusDays(command.retentionDays)
 
         val scanned = AtomicInteger()

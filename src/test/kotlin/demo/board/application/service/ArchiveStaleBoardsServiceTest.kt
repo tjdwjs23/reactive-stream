@@ -11,7 +11,9 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
+import java.time.Clock
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.Collections
 
 // 실제 DB 대신 인메모리 페이크 out-port. 스트리밍/청크/내결함성 흐름을 결정적으로 검증합니다.
@@ -44,11 +46,15 @@ class ArchiveStaleBoardsServiceTest :
 
         val now = LocalDateTime.now()
 
+        // 배치가 주입 시계로 "지금"을 읽으므로, 서비스의 now가 이 테스트의 now와 정확히 일치하도록 고정 시계를 넘깁니다.
+        val zone: ZoneId = ZoneId.systemDefault()
+        val clock: Clock = Clock.fixed(now.atZone(zone).toInstant(), zone)
+
         Given("오래된 게시글과 최신 게시글이 섞여 있을 때") {
             val stale = (1L..5L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fresh = (6L..8L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(10)) }
             val fakePort = FakeBoardBatchQueryPort(stale + fresh)
-            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort, clock)
 
             When("보관 기간 365일로 배치를 실행하면") {
                 val result =
@@ -75,7 +81,7 @@ class ArchiveStaleBoardsServiceTest :
         Given("특정 청크 삭제가 실패하도록 설정됐을 때") {
             val stale = (1L..6L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fakePort = FakeBoardBatchQueryPort(stale, failOnId = 3L)
-            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort, clock)
 
             When("배치를 실행하면") {
                 val result =
@@ -96,7 +102,7 @@ class ArchiveStaleBoardsServiceTest :
         Given("시도한 모든 청크의 삭제가 실패할 때") {
             val stale = (1L..4L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fakePort = FakeBoardBatchQueryPort(stale, failAll = true)
-            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort, clock)
 
             When("배치를 실행하면") {
                 Then("부분 실패와 달리 예외로 전체 실패를 신호한다(스케줄러가 성공으로 오인하지 않도록)") {

@@ -4,6 +4,7 @@ import demo.board.application.port.`in`.BoardPage
 import demo.board.application.port.`in`.BoardPageQuery
 import demo.board.application.port.`in`.CreateBoardCommand
 import demo.board.application.port.`in`.CreateBoardUseCase
+import demo.board.application.port.`in`.DeleteBoardCommand
 import demo.board.application.port.`in`.DeleteBoardUseCase
 import demo.board.application.port.`in`.GetBoardUseCase
 import demo.board.application.port.`in`.UpdateBoardCommand
@@ -12,6 +13,7 @@ import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardSearchPort
 import demo.board.application.port.out.BoardViewCountPort
 import demo.board.application.port.out.ObservabilityPort
+import demo.board.domain.exception.BoardAccessDeniedException
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.model.Board
 import kotlinx.coroutines.CancellationException
@@ -121,21 +123,43 @@ class BoardService(
             boardRepositoryPort.findById(command.id)
                 ?: throw BoardNotFoundException(command.id)
 
-        // 2. 도메인 로직 실행 (내용 수정)
+        // 2. 소유권 인가: 소유자 또는 관리자만 수정 가능(IDOR 방지). 도메인 로직 실행 전에 검사한다.
+        assertCanModify(existingBoard, command.requesterId, command.requesterIsAdmin)
+
+        // 3. 도메인 로직 실행 (내용 수정)
         // Board가 data class(immutable)라면 copy로 새 객체를 만듭니다.
         val updatedBoard = existingBoard.update(command.title, command.content)
 
-        // 3. 변경된 객체 저장 (단일 UPDATE → 자동 커밋)
+        // 4. 변경된 객체 저장 (단일 UPDATE → 자동 커밋)
         val saved = boardRepositoryPort.save(updatedBoard)
         indexSafely(saved) // 커밋 후 수정 내용을 검색 색인에 반영(같은 id 문서 덮어쓰기) — 트랜잭션 밖 부수효과
         observability.boardUpdated()
         return saved
     }
 
-    override suspend fun deleteBoard(id: Long) {
-        boardRepositoryPort.deleteById(id) // 단일 DELETE → 자동 커밋
-        deleteFromIndexSafely(id) // 커밋 후 검색 색인에서도 제거(베스트에포트) — 트랜잭션 밖 부수효과
+    override suspend fun deleteBoard(command: DeleteBoardCommand) {
+        // 삭제 전 대상을 먼저 읽어 소유권을 검사한다(없으면 404). 인가를 위해 blind delete 대신 조회를 선행한다.
+        val board =
+            boardRepositoryPort.findById(command.id)
+                ?: throw BoardNotFoundException(command.id)
+        assertCanModify(board, command.requesterId, command.requesterIsAdmin)
+
+        boardRepositoryPort.deleteById(command.id) // 단일 DELETE → 자동 커밋
+        deleteFromIndexSafely(command.id) // 커밋 후 검색 색인에서도 제거(베스트에포트) — 트랜잭션 밖 부수효과
         observability.boardDeleted()
+    }
+
+    // 소유자 또는 관리자만 수정/삭제할 수 있습니다. 그 외에는 403(BoardAccessDeniedException).
+    // 소유권 규칙 자체는 도메인(Board.isOwnedBy)에 두고, 여기서는 "관리자면 통과"라는 인가 정책만 조합합니다.
+    private fun assertCanModify(
+        board: Board,
+        requesterId: Long,
+        requesterIsAdmin: Boolean,
+    ) {
+        if (requesterIsAdmin) return
+        if (!board.isOwnedBy(requesterId)) {
+            throw BoardAccessDeniedException(board.id, requesterId)
+        }
     }
 
     // 색인 반영을 베스트에포트로 수행합니다. ES가 느리거나 죽어도 게시글 쓰기(DB)는 이미 성공했으므로

@@ -11,6 +11,10 @@ object PostgresTestContainer {
     // postgres 이미지는 초기화 중 한 번, 실제 기동 시 한 번 "ready to accept connections"를 찍으므로 2회를 기다립니다.
     private val container: PostgreSQLContainer<*> =
         PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
+            // 이 컨테이너는 JVM당 싱글톤으로 공유됩니다. Spring TestContext가 서로 다른 @SpringBootTest 컨텍스트를
+            // 동시에 캐시해 두므로, 각 컨텍스트의 R2DBC 풀이 이 한 대의 Postgres에 커넥션을 겹쳐 엽니다.
+            // 기본 max_connections(100)로는 컨텍스트 수가 늘면 "too many clients already(53300)"로 터지므로 넉넉히 올립니다.
+            .withCommand("postgres", "-c", "max_connections=400")
             .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*", 2))
             .apply { start() }
 

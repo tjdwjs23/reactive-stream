@@ -26,6 +26,7 @@ private class ControllerFixture {
     val authenticatedUserProvider =
         mockk<AuthenticatedUserProvider> {
             coEvery { currentUserId() } returns 7L
+            coEvery { current() } returns AuthenticatedUser(id = 7L, isAdmin = false)
         }
 
     // WebFlux 컨트롤러(suspend 핸들러)는 MockMvc가 아닌 WebTestClient로 검증합니다.
@@ -288,10 +289,10 @@ class BoardControllerTest :
         Given("유효한 ID가 주어졌을 때 - DELETE /api/boards/{id}") {
             val fixture = ControllerFixture()
             val id = 1L
-            coEvery { fixture.deleteBoardUseCase.deleteBoard(id) } returns Unit
+            coEvery { fixture.deleteBoardUseCase.deleteBoard(any()) } returns Unit
 
             When("DELETE 요청을 보내면") {
-                Then("204 No Content를 반환한다") {
+                Then("204 No Content를 반환하고, 인증 요청자 정보를 담은 커맨드로 삭제를 위임한다") {
                     fixture.client
                         .delete()
                         .uri("/api/boards/$id")
@@ -299,7 +300,9 @@ class BoardControllerTest :
                         .expectStatus()
                         .isNoContent
 
-                    coVerify { fixture.deleteBoardUseCase.deleteBoard(id) }
+                    coVerify {
+                        fixture.deleteBoardUseCase.deleteBoard(match { it.id == id && it.requesterId == 7L })
+                    }
                 }
             }
         }

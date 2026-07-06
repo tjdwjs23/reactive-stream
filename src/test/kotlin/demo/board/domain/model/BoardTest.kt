@@ -74,6 +74,33 @@ class BoardTest :
             }
         }
 
+        Given("작성자(authorId)가 있는 Board의 소유권을 물을 때") {
+            val board =
+                Board(id = 1L, title = "제목", content = "내용입니다열자", createdAt = LocalDateTime.now(), authorId = 7L)
+
+            When("작성자 본인 id로 물으면") {
+                Then("소유자다") {
+                    board.isOwnedBy(7L) shouldBe true
+                }
+            }
+
+            When("다른 사용자 id로 물으면") {
+                Then("소유자가 아니다") {
+                    board.isOwnedBy(99L) shouldBe false
+                }
+            }
+        }
+
+        Given("작성자 미상(authorId == null)인 Board의 소유권을 물을 때") {
+            val board = Board(id = 1L, title = "제목", content = "내용입니다열자", createdAt = LocalDateTime.now())
+
+            When("어떤 사용자 id로 물어도") {
+                Then("누구의 소유도 아니다") {
+                    board.isOwnedBy(7L) shouldBe false
+                }
+            }
+        }
+
         Given("보관 기간(retentionDays)이 365일일 때") {
             val now = LocalDateTime.of(2026, 7, 2, 0, 0)
 

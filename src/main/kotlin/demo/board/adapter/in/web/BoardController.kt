@@ -3,6 +3,7 @@ package demo.board.adapter.`in`.web
 import demo.board.application.port.`in`.BoardPageQuery
 import demo.board.application.port.`in`.CreateBoardCommand
 import demo.board.application.port.`in`.CreateBoardUseCase
+import demo.board.application.port.`in`.DeleteBoardCommand
 import demo.board.application.port.`in`.DeleteBoardUseCase
 import demo.board.application.port.`in`.GetBoardUseCase
 import demo.board.application.port.`in`.UpdateBoardCommand
@@ -79,7 +80,9 @@ class BoardController(
 
     @Operation(
         summary = "게시글 수정",
-        description = "제목/내용을 수정합니다. 제목은 공백일 수 없으며, 없는 게시글이면 404입니다. 인증(Bearer 토큰)이 필요합니다.",
+        description =
+            "제목/내용을 수정합니다. 제목은 공백일 수 없으며, 없는 게시글이면 404입니다. " +
+                "인증(Bearer 토큰)이 필요하며, 소유자 또는 관리자만 수정할 수 있습니다(그 외 403).",
     )
     @SecurityRequirement(name = "bearer-jwt")
     @PutMapping("/{id}")
@@ -87,20 +90,33 @@ class BoardController(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest,
     ): ResponseEntity<SuccessResponse<BoardResponse>> {
-        val command = UpdateBoardCommand(id = id, title = request.title, content = request.content)
+        val requester = authenticatedUserProvider.current()
+        val command =
+            UpdateBoardCommand(
+                id = id,
+                title = request.title,
+                content = request.content,
+                requesterId = requester.id,
+                requesterIsAdmin = requester.isAdmin,
+            )
         return SuccessResponse.ok(boardWebMapper.toResponse(updateBoardUseCase.updateBoard(command)))
     }
 
     @Operation(
         summary = "게시글 삭제",
-        description = "id로 게시글을 삭제하고 본문 없는 204 No Content를 반환합니다. 인증(Bearer 토큰)이 필요합니다.",
+        description =
+            "id로 게시글을 삭제하고 본문 없는 204 No Content를 반환합니다. " +
+                "인증(Bearer 토큰)이 필요하며, 소유자 또는 관리자만 삭제할 수 있습니다(그 외 403).",
     )
     @SecurityRequirement(name = "bearer-jwt")
     @DeleteMapping("/{id}")
     suspend fun deleteBoard(
         @PathVariable id: Long,
     ): ResponseEntity<Void> {
-        deleteBoardUseCase.deleteBoard(id)
+        val requester = authenticatedUserProvider.current()
+        deleteBoardUseCase.deleteBoard(
+            DeleteBoardCommand(id = id, requesterId = requester.id, requesterIsAdmin = requester.isAdmin),
+        )
         return SuccessResponse.noContent()
     }
 }

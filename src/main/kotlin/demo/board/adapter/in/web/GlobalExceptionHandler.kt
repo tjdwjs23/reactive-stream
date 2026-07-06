@@ -1,5 +1,6 @@
 package demo.board.adapter.`in`.web
 
+import demo.board.domain.exception.BoardAccessDeniedException
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.exception.BoardValidationException
 import demo.board.domain.exception.DuplicateUsernameException
@@ -22,6 +23,10 @@ class GlobalExceptionHandler {
     @ExceptionHandler(BoardValidationException::class)
     fun handleBoardValidationException(e: BoardValidationException): ResponseEntity<FailureResponse> =
         failure(CommonErrorCode.ValidationError, e.message)
+
+    // 소유자/관리자가 아닌 사용자의 수정·삭제 시도 → 403. 내부 식별자(요청자·게시글 id) 노출을 피하려 label만 응답합니다.
+    @ExceptionHandler(BoardAccessDeniedException::class)
+    fun handleBoardAccessDeniedException(): ResponseEntity<FailureResponse> = failure(BoardErrorCode.AccessDenied)
 
     // 가입 시 username 중복 → 409 Conflict
     @ExceptionHandler(DuplicateUsernameException::class)

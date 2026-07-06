@@ -139,6 +139,83 @@ class SecurityIntegrationTest(
                 }
             }
         }
+
+        Given("소유권 인가 - 한 사용자가 만든 게시글이 있을 때") {
+            signUp("owner-1", "password123")
+            val ownerToken = login("owner-1", "password123")
+            signUp("intruder-1", "password123")
+            val intruderToken = login("intruder-1", "password123")
+            val adminToken = login("admin", "admin-pass-123")
+
+            // 소유자가 게시글을 생성하고 그 id를 확보
+            val boardId =
+                client
+                    .post()
+                    .uri("/api/boards")
+                    .header("Authorization", "Bearer $ownerToken")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue("""{"title":"소유권 원본","content":"10자 이상의 유효한 내용입니다."}""")
+                    .exchange()
+                    .expectStatus()
+                    .isCreated
+                    .resultField("id")
+                    .toLong()
+
+            When("다른 사용자가 그 게시글을 수정하려 하면") {
+                Then("403 Forbidden이고 에러 코드는 BOARD_ACCESS_DENIED다") {
+                    client
+                        .put()
+                        .uri("/api/boards/$boardId")
+                        .header("Authorization", "Bearer $intruderToken")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"title":"탈취 제목","content":"남의 글을 고치려는 시도입니다."}""")
+                        .exchange()
+                        .expectStatus()
+                        .isForbidden
+                        .expectBody()
+                        .jsonPath("$.result.code")
+                        .isEqualTo("BOARD_ACCESS_DENIED")
+                }
+            }
+
+            When("다른 사용자가 그 게시글을 삭제하려 하면") {
+                Then("403 Forbidden이다") {
+                    client
+                        .delete()
+                        .uri("/api/boards/$boardId")
+                        .header("Authorization", "Bearer $intruderToken")
+                        .exchange()
+                        .expectStatus()
+                        .isForbidden
+                }
+            }
+
+            When("소유자 본인이 그 게시글을 수정하면") {
+                Then("200 OK로 수정된다") {
+                    client
+                        .put()
+                        .uri("/api/boards/$boardId")
+                        .header("Authorization", "Bearer $ownerToken")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"title":"소유자 수정","content":"소유자가 직접 고친 내용입니다."}""")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                }
+            }
+
+            When("관리자가 그 게시글을 삭제하면") {
+                Then("소유자가 아니어도 204 No Content로 삭제된다") {
+                    client
+                        .delete()
+                        .uri("/api/boards/$boardId")
+                        .header("Authorization", "Bearer $adminToken")
+                        .exchange()
+                        .expectStatus()
+                        .isNoContent
+                }
+            }
+        }
     }) {
     override fun extensions() = listOf(SpringExtension)
 
