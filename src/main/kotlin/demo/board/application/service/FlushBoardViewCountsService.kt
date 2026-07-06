@@ -4,6 +4,7 @@ import demo.board.application.port.`in`.FlushBoardViewCountsUseCase
 import demo.board.application.port.`in`.FlushViewCountsResult
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.application.port.out.ObservabilityPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Service
 class FlushBoardViewCountsService(
     private val boardViewCountPort: BoardViewCountPort,
     private val boardRepositoryPort: BoardRepositoryPort,
+    private val observability: ObservabilityPort,
     // 한 UPDATE에 묶을 게시글 수. 클수록 왕복↓(하지만 실패 시 재시도 단위↑·문장당 바인딩↑).
     @Value("\${board.view-count.flush-chunk-size:1000}") private val chunkSize: Int,
 ) : FlushBoardViewCountsUseCase {
@@ -62,6 +64,10 @@ class FlushBoardViewCountsService(
             }
 
             FlushViewCountsResult(boards = deltas.size, updatedRows = updatedRows, failed = failed)
-                .also { log.info("view count flush finished: {}", it) }
+                .also {
+                    log.info("view count flush finished: {}", it)
+                    // DB에 실제 반영된(실패 제외) 게시글 수를 비즈니스 메트릭으로 기록합니다.
+                    observability.viewCountsFlushed(it.boards - it.failed)
+                }
         }
 }

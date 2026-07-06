@@ -11,6 +11,7 @@ import demo.board.application.port.`in`.UpdateBoardUseCase
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardSearchPort
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.application.port.out.ObservabilityPort
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.model.Board
 import kotlinx.coroutines.CancellationException
@@ -38,6 +39,8 @@ class BoardService(
     private val boardViewCountPort: BoardViewCountPort,
     // 한글 전문검색 색인. 쓰기 경로에서 베스트에포트로 동기화합니다(실패해도 게시글 저장은 성공).
     private val boardSearchPort: BoardSearchPort,
+    // 도메인 비즈니스 메트릭(생성/조회/수정/삭제 카운트). 구체 기술(Micrometer)은 어댑터가 감춥니다.
+    private val observability: ObservabilityPort,
     // 생성 시각 주입용 시계. 도메인이 벽시계를 직접 읽지 않도록 여기서 now를 만들어 넘깁니다(테스트에서 고정 가능).
     private val clock: Clock,
     // 조회수 증가(Redis)에 허용하는 시간 예산. Redis가 느리거나 죽어도 조회 지연이 여기서 상한선을 가집니다.
@@ -60,6 +63,7 @@ class BoardService(
         // 포트를 통해 저장 (단일 INSERT → R2DBC 자동 커밋, ID가 부여된 객체가 반환됨)
         val saved = boardRepositoryPort.save(newBoard)
         indexSafely(saved) // 저장(커밋) 후 검색 색인에 베스트에포트 반영 — 트랜잭션 밖 부수효과
+        observability.boardCreated()
         return saved
     }
 
@@ -72,6 +76,7 @@ class BoardService(
             boardRepositoryPort.findById(id) // (1) DB에서 확정값 읽기 (SELECT만!)
                 ?: throw BoardNotFoundException(id)
         val pendingDelta = incrementViewCountSafely(id) // (2) Redis에 +1, 누적 델타 받기 (트랜잭션 밖)
+        observability.boardViewed()
         return board.copy(viewCount = board.viewCount + pendingDelta) // (3) 합쳐서 응답
     }
 
@@ -123,12 +128,14 @@ class BoardService(
         // 3. 변경된 객체 저장 (단일 UPDATE → 자동 커밋)
         val saved = boardRepositoryPort.save(updatedBoard)
         indexSafely(saved) // 커밋 후 수정 내용을 검색 색인에 반영(같은 id 문서 덮어쓰기) — 트랜잭션 밖 부수효과
+        observability.boardUpdated()
         return saved
     }
 
     override suspend fun deleteBoard(id: Long) {
         boardRepositoryPort.deleteById(id) // 단일 DELETE → 자동 커밋
         deleteFromIndexSafely(id) // 커밋 후 검색 색인에서도 제거(베스트에포트) — 트랜잭션 밖 부수효과
+        observability.boardDeleted()
     }
 
     // 색인 반영을 베스트에포트로 수행합니다. ES가 느리거나 죽어도 게시글 쓰기(DB)는 이미 성공했으므로

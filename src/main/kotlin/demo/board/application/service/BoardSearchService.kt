@@ -7,6 +7,7 @@ import demo.board.application.port.`in`.SearchBoardUseCase
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardSearchHit
 import demo.board.application.port.out.BoardSearchPort
+import demo.board.application.port.out.ObservabilityPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.toList
 import org.slf4j.LoggerFactory
@@ -18,13 +19,17 @@ import org.springframework.stereotype.Service
 class BoardSearchService(
     private val boardSearchPort: BoardSearchPort,
     private val boardRepositoryPort: BoardRepositoryPort,
+    private val observability: ObservabilityPort,
 ) : SearchBoardUseCase,
     ReindexBoardsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
     // 관련도순으로 흘러오는 Flow를 한 페이지(size)만큼 즉시 소비합니다.
     override suspend fun search(query: BoardSearchQuery): List<BoardSearchHit> =
-        boardSearchPort.search(query.keyword, query.size).toList()
+        boardSearchPort
+            .search(query.keyword, query.size)
+            .toList()
+            .also { observability.boardSearched(it.size) }
 
     // DB(정본)를 키셋 페이지네이션으로 순회하며 ES에 다시 색인합니다.
     // 한 번에 REINDEX_PAGE_SIZE건만 메모리에 올리므로 데이터가 커져도 일정한 메모리로 동작합니다.

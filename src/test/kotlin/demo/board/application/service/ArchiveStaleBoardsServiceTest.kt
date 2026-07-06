@@ -3,6 +3,7 @@ package demo.board.application.service
 import demo.board.application.port.`in`.ArchiveStaleBoardsCommand
 import demo.board.application.port.out.BoardBatchQueryPort
 import demo.board.domain.model.Board
+import demo.board.support.NoOpObservabilityPort
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -47,7 +48,7 @@ class ArchiveStaleBoardsServiceTest :
             val stale = (1L..5L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fresh = (6L..8L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(10)) }
             val fakePort = FakeBoardBatchQueryPort(stale + fresh)
-            val service = ArchiveStaleBoardsService(fakePort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
 
             When("보관 기간 365일로 배치를 실행하면") {
                 val result =
@@ -74,7 +75,7 @@ class ArchiveStaleBoardsServiceTest :
         Given("특정 청크 삭제가 실패하도록 설정됐을 때") {
             val stale = (1L..6L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fakePort = FakeBoardBatchQueryPort(stale, failOnId = 3L)
-            val service = ArchiveStaleBoardsService(fakePort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
 
             When("배치를 실행하면") {
                 val result =
@@ -95,7 +96,7 @@ class ArchiveStaleBoardsServiceTest :
         Given("시도한 모든 청크의 삭제가 실패할 때") {
             val stale = (1L..4L).map { Board(id = it, title = "t$it", content = "c", createdAt = now.minusDays(400)) }
             val fakePort = FakeBoardBatchQueryPort(stale, failAll = true)
-            val service = ArchiveStaleBoardsService(fakePort)
+            val service = ArchiveStaleBoardsService(fakePort, NoOpObservabilityPort)
 
             When("배치를 실행하면") {
                 Then("부분 실패와 달리 예외로 전체 실패를 신호한다(스케줄러가 성공으로 오인하지 않도록)") {

@@ -15,7 +15,10 @@
 * **Cache/Counter**: **Reactive Redis (Lettuce)** — 조회수 카운터(INCR + 주기적 DB write-back), 논블로킹
 * **Search**: **Elasticsearch 9.2.x + Nori** (`spring-data-elasticsearch`, 리액티브 클라이언트) — 한글 형태소 전문검색·관련도순 정렬·하이라이트, 논블로킹
 * **Schema Init**: R2DBC `ConnectionFactoryInitializer` (기동 시 `db/schema.sql` 실행)
-* **Observability**: Spring Boot Actuator + **Micrometer Prometheus** (health/metrics/prometheus, HTTP 요청 지연 히스토그램), Reactor↔코루틴 컨텍스트 자동 전파
+* **Observability (3종 통합)**: Grafana에서 **메트릭·로그·트레이스**를 traceId로 오가는 통합 관측성
+  * **메트릭** — Actuator + **Micrometer Prometheus** (HTTP 지연 히스토그램) + **도메인 비즈니스 메트릭**(`ObservabilityPort` out-port로 헥사고날 규칙 안에서 수집: 생성/조회/수정/삭제/검색/플러시/아카이브)
+  * **로그** — Spring Boot 4 네이티브 **구조화 JSON(ECS)** 콘솔 + **Loki**로 HTTP push(loki4j), MDC의 traceId 포함
+  * **트레이스** — **Micrometer Tracing → OpenTelemetry → OTLP → Tempo**, Reactor↔코루틴 컨텍스트 자동 전파로 suspend/Flow 경계 넘어 traceId 유지
 * **API Docs**: **springdoc-openapi (WebFlux)** — Swagger UI (`/swagger-ui.html`), OpenAPI JSON (`/v3/api-docs`)
 * **Build Tool**: Gradle
 * **Architecture**: Hexagonal Architecture (Ports and Adapters), **Konsist**로 아키텍처 규칙 자동 강제
@@ -333,7 +336,9 @@ docker run --name hexagonal-elasticsearch -p 9200:9200 \
 * **API 문서 (Swagger UI)**: <http://localhost:8080/swagger-ui.html>
 * **헬스 체크**: <http://localhost:8080/actuator/health>
 * **Prometheus 메트릭**: <http://localhost:8080/actuator/prometheus>
-* **Grafana** : <http://localhost:3000/dashboards> (admin / admin) — "Hexagonal Board API" 대시보드(처리량·에러율·지연 p50/p95/p99·힙·CPU·GC·스레드)가 기동 시 자동 프로비저닝됩니다. Prometheus 데이터소스도 자동 등록되므로 수동 설정이 필요 없습니다.
+* **Grafana** : <http://localhost:3000> (admin / admin) — 기동 시 **메트릭(Prometheus)·로그(Loki)·트레이스(Tempo)** 3종 데이터소스가 자동 등록되고, "Hexagonal Board API" 대시보드(처리량·에러율·지연 p50/p95/p99·힙·CPU·GC·스레드)도 자동 프로비저닝됩니다. **Explore → Loki**에서 구조화 JSON 로그를 검색하고 `TraceID` 링크로 **Tempo** 트레이스로 점프, **Explore → Tempo**에서 요청 트레이스(WebFlux→R2DBC/Redis/ES 스팬)를 봅니다.
+* **Loki** : <http://localhost:3100> (구조화 로그 수집 — 앱이 loki4j로 push)
+* **Tempo** : <http://localhost:3200> (트레이스 조회) / OTLP 수신 4317(gRPC)·4318(HTTP)
 
 `bootRun`은 `src/main/resources/application.yml`의 접속 정보로 DB·Redis·Elasticsearch에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL·Redis·Elasticsearch가 떠 있어야 합니다. 접속 정보와 비밀번호는 **환경변수로 외부화**돼 있어(`${SPRING_R2DBC_URL}`·`${SPRING_R2DBC_PASSWORD}`·`${SPRING_DATA_REDIS_HOST}`·`${SPRING_ELASTICSEARCH_URIS}` 등, 로컬 기본값 내장) 소스 수정 없이 환경(운영은 Vault/K8s Secret)에서 덮어쓸 수 있습니다. 운영에서는 JWT 서명키 `BOARD_JWT_SECRET`(≥32byte)와 관리자 부트스트랩 자격 `BOARD_ADMIN_USERNAME`/`BOARD_ADMIN_PASSWORD`도 설정합니다.
 
@@ -394,8 +399,14 @@ DB 테이블 구조(R2DBC Entity)가 변경되어도 비즈니스 로직(Domain 
 #### 5. Keyset(Seek) Pagination
 목록 조회는 `OFFSET` 대신 **"마지막으로 본 id 이후"** 를 조건으로 다음 페이지를 읽습니다. 뒤쪽 페이지에서도 성능이 일정하고, 한 페이지(`size`)만 읽으므로 요청당 메모리/지연이 커지지 않습니다. `hasNext` 판정을 위해 `size+1`건을 조회해 초과분이 있으면 다음 페이지가 있다고 봅니다.
 
-#### 6. Observability
-Actuator + Micrometer Prometheus로 상태·메트릭을 노출합니다. `http.server.requests` 타이머에 지연 히스토그램을 켜 처리량/지연을 관측할 수 있고, `/actuator/health`에는 r2dbc 헬스가 포함됩니다. WebFlux+코루틴 환경에서 `suspend`/`Flow` 경계를 넘어 추적 컨텍스트가 유실되지 않도록 Reactor 자동 컨텍스트 전파(`Hooks.enableAutomaticContextPropagation`)를 켭니다.
+#### 6. Observability — 메트릭·로그·트레이스 3종 통합
+Grafana에서 세 축을 **traceId로 서로 오가며** 관측합니다.
+
+* **메트릭**: Actuator + Micrometer Prometheus. `http.server.requests` 지연 히스토그램(처리량/지연)에 더해, **도메인 비즈니스 메트릭**을 노출합니다 — `board_create_total`·`board_view_total`·`board_search_total`·`board_search_hits`·`board_view_count_flush_total`·`board_archive_total` 등. 이 지표는 프레임워크가 주는 기술 지표와 달리 도메인 흐름에서만 알 수 있어, **`ObservabilityPort`(out-port)**로 헥사고날 규칙 안에서 수집합니다 — 서비스는 "게시글이 생성됐다" 같은 비즈니스 어휘로만 호출하고, Micrometer는 `MicrometerObservabilityAdapter`만 압니다(도메인/서비스에 관측 프레임워크가 새지 않음). (메트릭 이름은 present-tense 동사 — OpenMetrics 예약 접미사 `_created`/`_total` 충돌을 피하기 위함.)
+* **로그**: Spring Boot 4 네이티브 **구조화 로깅(ECS JSON)**으로 콘솔에 출력하고, `test`가 아닌 프로필에선 **loki4j** appender가 Loki(`:3100`)로 HTTP push합니다. MDC의 `traceId`/`spanId`가 함께 실려(loki4j는 `mdc_` 접두어), Grafana Loki 데이터소스의 파생 필드(`mdc_traceId`)가 Tempo 트레이스로 링크됩니다.
+* **트레이스**: Micrometer Tracing → OpenTelemetry → **OTLP로 Tempo(`:4318`)에 export**. HTTP 요청은 물론 `@Scheduled` 배치도 스팬으로 남습니다. WebFlux+코루틴 환경에서 `suspend`/`Flow` 경계를 넘어 추적 컨텍스트가 유실되지 않도록 Reactor 자동 컨텍스트 전파(`Hooks.enableAutomaticContextPropagation`)를 켭니다.
+
+> Loki/Tempo 전송은 **`test` 프로필에서 비활성화**돼(로그백 `<springProfile>` + `management.tracing.enabled=false`), 인프라 없이도 테스트가 조용히 통과합니다. 메트릭은 Prometheus **pull**만 쓰므로, 트레이싱 스타터가 딸려오는 OTLP **메트릭 push** 레지스트리(`micrometer-registry-otlp`)는 빌드에서 제외했습니다.
 
 #### 7. Self-Documenting API
 springdoc-openapi(WebFlux)가 컨트롤러의 `@Tag`/`@Operation`/`@Parameter`를 읽어 OpenAPI 3 문서를 자동 생성합니다. Swagger UI(`/swagger-ui.html`)에서 바로 API를 탐색·호출할 수 있습니다.

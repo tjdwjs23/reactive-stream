@@ -2,6 +2,7 @@ package demo.board.application.service
 
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
@@ -13,7 +14,7 @@ private class FlushFixture(
 ) {
     val boardViewCountPort = mockk<BoardViewCountPort>()
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
-    val service = FlushBoardViewCountsService(boardViewCountPort, boardRepositoryPort, chunkSize)
+    val service = FlushBoardViewCountsService(boardViewCountPort, boardRepositoryPort, NoOpObservabilityPort, chunkSize)
 
     init {
         // commit-then-delete: 반영 성공 청크는 버퍼에서 지웁니다. 기본은 무동작으로 둡니다.

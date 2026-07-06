@@ -8,6 +8,7 @@ import demo.board.application.port.out.BoardSearchPort
 import demo.board.application.port.out.BoardViewCountPort
 import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.model.Board
+import demo.board.support.NoOpObservabilityPort
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.containExactly
@@ -31,7 +32,14 @@ private class ServiceFixture {
     val boardSearchPort = mockk<BoardSearchPort>(relaxed = true)
 
     // 생성 시각 주입용 시계. 이 테스트는 createdAt 값 자체를 검증하지 않으므로 시스템 시계로 충분합니다.
-    val boardService = BoardService(boardRepositoryPort, boardViewCountPort, boardSearchPort, Clock.systemDefaultZone())
+    val boardService =
+        BoardService(
+            boardRepositoryPort,
+            boardViewCountPort,
+            boardSearchPort,
+            NoOpObservabilityPort,
+            Clock.systemDefaultZone(),
+        )
 }
 
 class BoardServiceTest :

@@ -4,6 +4,7 @@ import demo.board.application.port.`in`.ArchiveResult
 import demo.board.application.port.`in`.ArchiveStaleBoardsCommand
 import demo.board.application.port.`in`.ArchiveStaleBoardsUseCase
 import demo.board.application.port.out.BoardBatchQueryPort
+import demo.board.application.port.out.ObservabilityPort
 import demo.board.domain.model.Board
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @Service
 class ArchiveStaleBoardsService(
     private val boardBatchQueryPort: BoardBatchQueryPort,
+    private val observability: ObservabilityPort,
 ) : ArchiveStaleBoardsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -91,7 +93,10 @@ class ArchiveStaleBoardsService(
                 scanned = scanned.get(),
                 deleted = deleted.get(),
                 failedChunks = failedChunks.get(),
-            ).also { log.info("archiveStaleBoards finished: {}", it) }
+            ).also {
+                log.info("archiveStaleBoards finished: {}", it)
+                observability.boardsArchived(it.deleted)
+            }
 
         // 부분 실패는 result.failedChunks로 보고하지만, "시도한 모든 청크가 실패"한 경우는
         // 예외만 확인하는 스케줄러가 성공으로 오인하지 않도록 예외로 신호합니다(전체 실패 = 잡 실패).

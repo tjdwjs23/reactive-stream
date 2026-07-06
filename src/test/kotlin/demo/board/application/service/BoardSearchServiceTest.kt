@@ -5,6 +5,7 @@ import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardSearchHit
 import demo.board.application.port.out.BoardSearchPort
 import demo.board.domain.model.Board
+import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -87,7 +88,11 @@ class BoardSearchServiceTest :
                     ),
                 )
             val service =
-                BoardSearchService(FakeBoardSearchPort(searchResult = hits), FakeBoardRepositoryPort(emptyList()))
+                BoardSearchService(
+                    FakeBoardSearchPort(searchResult = hits),
+                    FakeBoardRepositoryPort(emptyList()),
+                    NoOpObservabilityPort,
+                )
 
             When("검색을 수행하면") {
                 val result = service.search(BoardSearchQuery(keyword = "메일", size = 10))
@@ -102,7 +107,7 @@ class BoardSearchServiceTest :
             // 501건 → 500(꽉 참) + 1(짧은 마지막 페이지)
             val boards = (1L..(PAGE_SIZE + 1L)).map { board(it) }
             val searchPort = FakeBoardSearchPort()
-            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards))
+            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards), NoOpObservabilityPort)
 
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
@@ -120,7 +125,7 @@ class BoardSearchServiceTest :
             // 1000건 → 500 + 500 후 빈 페이지로 종료(무한 루프 방지 경계)
             val boards = (1L..(PAGE_SIZE * 2L)).map { board(it) }
             val searchPort = FakeBoardSearchPort()
-            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards))
+            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards), NoOpObservabilityPort)
 
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
@@ -137,7 +142,7 @@ class BoardSearchServiceTest :
             // 501건: 첫 페이지(id 501..2)에 실패 대상 id=300이 포함 → 첫 페이지만 실패, 마지막 페이지(id 1)는 성공
             val boards = (1L..(PAGE_SIZE + 1L)).map { board(it) }
             val searchPort = FakeBoardSearchPort(failOnId = 300L)
-            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards))
+            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards), NoOpObservabilityPort)
 
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
@@ -152,7 +157,7 @@ class BoardSearchServiceTest :
 
         Given("게시글이 하나도 없을 때 - reindexAll()") {
             val searchPort = FakeBoardSearchPort()
-            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(emptyList()))
+            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(emptyList()), NoOpObservabilityPort)
 
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
