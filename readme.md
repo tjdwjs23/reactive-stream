@@ -333,6 +333,7 @@ docker run --name hexagonal-elasticsearch -p 9200:9200 \
 * **API 문서 (Swagger UI)**: <http://localhost:8080/swagger-ui.html>
 * **헬스 체크**: <http://localhost:8080/actuator/health>
 * **Prometheus 메트릭**: <http://localhost:8080/actuator/prometheus>
+* **Grafana** : <http://localhost:3000/dashboards>
 
 `bootRun`은 `src/main/resources/application.yml`의 접속 정보로 DB·Redis·Elasticsearch에 연결하므로, 로컬에 해당 정보로 접속 가능한 PostgreSQL·Redis·Elasticsearch가 떠 있어야 합니다. 접속 정보와 비밀번호는 **환경변수로 외부화**돼 있어(`${SPRING_R2DBC_URL}`·`${SPRING_R2DBC_PASSWORD}`·`${SPRING_DATA_REDIS_HOST}`·`${SPRING_ELASTICSEARCH_URIS}` 등, 로컬 기본값 내장) 소스 수정 없이 환경(운영은 Vault/K8s Secret)에서 덮어쓸 수 있습니다. 운영에서는 JWT 서명키 `BOARD_JWT_SECRET`(≥32byte)와 관리자 부트스트랩 자격 `BOARD_ADMIN_USERNAME`/`BOARD_ADMIN_PASSWORD`도 설정합니다.
 
