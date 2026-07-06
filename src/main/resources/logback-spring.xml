@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  로깅 구성. 두 가지를 한다:
+  1) 콘솔을 구조화 JSON(ECS)으로 출력한다.
+     Boot 기본 base.xml은 "평문" console-appender를 물고 오므로 쓰지 않고, defaults.xml(공통 속성/변환기)
+     + structured-console-appender.xml(StructuredLogEncoder)로 직접 조립한다. 포맷은 application.yml의
+     `logging.structured.format.console: ecs` → CONSOLE_LOG_STRUCTURED_FORMAT 로 전달된다.
+     Micrometer Tracing이 MDC에 넣는 trace.id/span.id가 ECS 필드로 함께 실려 로그↔트레이스 상관이 가능하다.
+  2) test 프로필이 아닐 때만 Loki appender를 정의·부착해 구조화 로그를 Loki로 HTTP push한다.
+     (test 프로필에선 appender를 아예 정의하지 않아, Loki가 없는 테스트/최소 실행에서 연결 시도가 없다.)
+
+  앱은 호스트, Loki는 docker(3100 노출)이므로 localhost로 push한다. LOKI_URL로 외부화(운영은 실제 주소 주입).
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+
+    <springProfile name="!test">
+        <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="reactive"/>
+
+        <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+            <http>
+                <url>${LOKI_URL:-http://localhost:3100/loki/api/v1/push}</url>
+            </http>
+            <format>
+                <!--
+                  라벨은 저카디널리티만(app/level). traceId 같은 고카디널리티 값은 라벨이 아니라
+                  아래 JSON 메시지 본문(MdcJsonProvider가 trace_id/span_id를 자동 포함)에 담아
+                  Grafana 파생 필드로 Tempo와 상관한다.
+                -->
+                <label>
+                    <pattern>app=${appName},level=%level</pattern>
+                </label>
+                <!-- 구조화 JSON 페이로드. MDC(traceId/spanId)·logger·thread·stacktrace 자동 포함, JSON 이스케이프 안전. -->
+                <message class="com.github.loki4j.logback.JsonLayout"/>
+                <sortByTime>true</sortByTime>
+            </format>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="LOKI"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="test">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

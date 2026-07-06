@@ -30,9 +30,19 @@ spring:
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
 
-# 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램.
+# 로그: 콘솔/stdout을 구조화 JSON(ECS)으로 출력합니다(Spring Boot 4 네이티브 구조화 로깅, 추가 의존성 없음).
+# Micrometer Tracing이 MDC에 넣는 trace.id/span.id가 ECS 필드로 함께 실려 로그↔트레이스 상관이 가능합니다.
+# (Loki push는 test 프로필에서 꺼지도록 logback-spring.xml에서 게이트합니다. 콘솔 JSON은 모든 환경 공통.)
+logging:
+  structured:
+    format:
+      console: ecs
+
+# 관측성: Actuator 엔드포인트 노출 + HTTP 요청 지연 히스토그램 + 분산 트레이싱(OTLP→Tempo).
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc 헬스 포함)
 # - /actuator/metrics, /actuator/prometheus : 처리량/지연 등 메트릭 (http.server.requests 타이머)
+# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Tempo에 export.
+#   Reactor↔코루틴 컨텍스트 전파는 ObservabilityConfig가 켜 둠(suspend/Flow 경계 넘어 traceId 유지).
 management:
   endpoints:
     web:
@@ -45,6 +55,18 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+  tracing:
+    sampling:
+      # 로컬/개발은 전량 샘플링. 운영은 MANAGEMENT_TRACING_SAMPLING_PROBABILITY로 낮춰 오버헤드를 제어합니다.
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  # Spring Boot 4에서 OTLP 트레이싱 export 설정은 management.opentelemetry.tracing.export.otlp.* 로 이동했습니다
+  # (Boot 3.x의 management.otlp.tracing.endpoint 아님). Tempo의 OTLP/HTTP 수신(4318)으로 push합니다.
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
 
 # 오래된 게시글 일괄 아카이브 배치 설정
 

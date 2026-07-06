@@ -1,11 +1,12 @@
-# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + Prometheus + Grafana
+# 로컬 개발용 통합 스택: PostgreSQL + Redis + Elasticsearch + Prometheus + Grafana + Loki + Tempo
 #
 # Spring 앱(8080)은 이 compose에 포함하지 않습니다.
 #   - 앱은 호스트에서 ./gradlew bootRun 으로 실행합니다.
 #   - 도커 안의 Prometheus는 host.docker.internal:8080 으로 호스트의 앱을 긁어(scrape)갑니다.
+#   - 반대로 앱은 호스트에서 Loki(3100)/Tempo(4318)로 로그·트레이스를 push합니다(관측성 3종 통합).
 #
 # 사용법:
-#   docker compose up -d        # 5개 컨테이너 백그라운드 실행
+#   docker compose up -d        # 7개 컨테이너 백그라운드 실행
 #   docker compose ps           # 상태 확인
 #   docker compose down         # 정지 + 컨테이너 삭제(볼륨/데이터는 유지)
 #   docker compose down -v      # 볼륨까지 삭제(완전 초기화)
@@ -15,7 +16,9 @@
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
 #   Prometheus     http://localhost:9090
-#   Grafana        http://localhost:3000  (admin / admin)
+#   Grafana        http://localhost:3000  (admin / admin) — 메트릭·로그·트레이스 3종 데이터소스 자동 등록
+#   Loki           http://localhost:3100  (구조화 로그 수집, 앱이 HTTP push)
+#   Tempo          http://localhost:3200  (트레이스 조회) / OTLP 수신 4317(gRPC)·4318(HTTP)
 
 services:
   postgres:
@@ -95,14 +98,40 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      # 프로메테우스 데이터소스를 자동 등록(수동 설정 불필요) — 아래 provisioning 파일 참고
+      # 메트릭(Prometheus)·로그(Loki)·트레이스(Tempo) 데이터소스를 자동 등록 — provisioning 참고
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+      - loki
+      - tempo
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: reactive-loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: reactive-tempo
+    command: -config.file=/etc/tempo/tempo.yml
+    ports:
+      - "3200:3200"   # Tempo 조회 API(Grafana가 사용)
+      - "4318:4318"   # OTLP/HTTP 수신(앱이 트레이스 push)
+      - "4317:4317"   # OTLP/gRPC 수신
+    volumes:
+      - ./monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
 
 volumes:
   postgres-data:
   elasticsearch-data:
   prometheus-data:
   grafana-data:
+  loki-data:
+  tempo-data:

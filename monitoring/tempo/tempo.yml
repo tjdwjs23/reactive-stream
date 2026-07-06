@@ -1,0 +1,31 @@
+# 로컬 개발용 Tempo 최소 설정. OTLP(gRPC/HTTP) 수신 + 로컬 파일 스토리지. 운영용 아님.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        # 앱(Micrometer OTLP exporter)이 여기로 트레이스를 push합니다.
+        http:
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  # 로컬에서 트레이스가 빨리 조회되도록 flush 대기시간을 짧게 둡니다.
+  max_block_duration: 5m
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+# service graph/span 메트릭을 Prometheus로 내보내려면 metrics_generator를 켤 수 있으나,
+# 로컬 최소 구성에서는 생략합니다(트레이스 저장/조회만).
