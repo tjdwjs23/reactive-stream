@@ -1,7 +1,7 @@
 # 부하 테스트 (k6)
 
 이 프로젝트의 부하 테스트는 **Gradle 테스트 코드가 아니라 독립적인 k6 스크립트**입니다.
-`./gradlew test`(Konsist 아키텍처 + Kover 85% 커버리지 게이트)와 완전히 분리되어 있고,
+`./gradlew test`(Konsist 아키텍처 + Kover 92% 커버리지 게이트)와 완전히 분리되어 있고,
 이미 떠 있는 서버에 HTTP로 부하를 주는 **블랙박스** 방식이라 앱 코드에 어떤 결합도 만들지 않습니다.
 
 ## 왜 k6인가
@@ -20,13 +20,15 @@ load/
 │   └── helpers.js     # 랜덤 한글 게시글 payload, 생성 API, 시드 유틸  (mixed·smoke가 import)
 ├── scenarios/
 │   ├── smoke.js       # 최소 경로 점검(부하 X) — 본 부하 전 항상 먼저
-│   └── mixed.js       # ★ 메인: 읽기7:쓰기2:검색1 종합 트래픽 믹스
+│   ├── mixed.js       # ★ 메인: 읽기7:쓰기2:검색1 종합 트래픽 믹스
+│   └── pagination.js  # ★ 키셋 페이지네이션 깊이무관성(shallow/mid/deep) 증명
 ├── results/
-│   └── mixed-sweep.md # 부하 스윕 결과 정리(포트폴리오 자산)
+│   ├── mixed-sweep.md  # 종합 믹스 부하 스윕 결과(포트폴리오 자산)
+│   └── large-scale.md  # 대용량 키셋 깊이무관성 실측 결과
 └── README.md
 ```
 
-> `mixed.js`는 단독 실행이 아니라 `lib/config.js`·`lib/helpers.js`를 import합니다 — 이 3개가 한 세트입니다.
+> `mixed.js`·`pagination.js`는 단독 실행이 아니라 `lib/config.js`·`lib/helpers.js`를 import합니다.
 
 ---
 

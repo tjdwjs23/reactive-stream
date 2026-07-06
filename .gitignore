@@ -44,3 +44,6 @@ out/
 
 ### Claude Code (로컬 에이전트 상태 — 커밋하지 않음) ###
 .claude/
+
+# k6 부하 테스트 raw 요약 export(일시적 산출물)
+load/results/raw/

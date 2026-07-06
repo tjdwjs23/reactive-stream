@@ -121,11 +121,12 @@ kover {
                 classes("demo.board.BoardApplication*")
             }
         }
-        // 회귀 방지 게이트. 현재 라인 커버리지(~94%)보다 여유를 둔 하한선(85%)을 강제합니다.
+        // 회귀 방지 게이트. 현재 라인 커버리지(~94%)에 바짝 붙인 하한선(92%)을 강제합니다.
+        // 게이트가 실측보다 크게 낮으면 커버리지 회귀를 놓치므로, 실측에 근접하게 조입니다.
         // ./gradlew koverVerify 로 검증, koverHtmlReport 로 리포트 확인.
         verify {
             rule {
-                minBound(85)
+                minBound(92)
             }
         }
     }
