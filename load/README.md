@@ -45,7 +45,7 @@ brew install k6
 ```bash
 # (1) 의존 인프라: PostgreSQL / Redis / Elasticsearch / LGTM(Mimir·Loki·Tempo·Grafana)
 docker compose up -d
-docker compose ps            # 5개 다 Up 인지 확인
+docker compose ps            # 8개 다 Up 인지 확인 (postgres·redis·es·alloy·mimir·loki·tempo·grafana)
 
 # (2) 앱 (호스트에서, 8080) — 별도 터미널에서 계속 켜둠
 ./gradlew bootRun

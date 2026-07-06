@@ -41,3 +41,6 @@ out/
 
 ### macOS ###
 .DS_Store
+
+### Claude Code (로컬 에이전트 상태 — 커밋하지 않음) ###
+.claude/

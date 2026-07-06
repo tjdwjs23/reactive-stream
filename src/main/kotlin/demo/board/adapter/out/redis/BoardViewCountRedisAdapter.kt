@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository
 //     (2) 서비스가 DB에 반영한 뒤 removeDrained로 반영 성공분만 DRAINING에서 지웁니다.
 //   반영 전에 죽으면 DRAINING이 남아, 다음 플러시가 그 잔여분을 먼저 재시도합니다(유실 없음, at-least-once).
 //   주의: 스냅샷~제거 사이 DRAINING을 건드리는 흐름은 하나뿐이어야 하므로, 플러시 전체 직렬화는
-//   호출자(FlushBoardViewCountsService)가 뮤텍스로 보장합니다(단일 인스턴스 기준 — 다중 인스턴스는 분산 락 필요).
+//   호출자(FlushBoardViewCountsService)가 분산 락(DistributedLockPort, Redis SET NX)으로 클러스터 전역에서 보장합니다.
 @Repository
 class BoardViewCountRedisAdapter(
     private val redis: ReactiveStringRedisTemplate,

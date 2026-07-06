@@ -100,14 +100,14 @@ demo.board
 | `POST` | `/api/boards` | 게시글 생성(작성자=인증 사용자) | 인증 |
 | `GET` | `/api/boards?cursor={id}&size={n}` | 게시글 목록 (키셋 페이지네이션, id 내림차순) | 공개 |
 | `GET` | `/api/boards/{id}` | 특정 게시글 단건 조회 (조회수 +1) | 공개 |
-| `PUT` | `/api/boards/{id}` | 게시글 수정 | 인증 |
-| `DELETE` | `/api/boards/{id}` | 게시글 삭제 | 인증 |
+| `PUT` | `/api/boards/{id}` | 게시글 수정 | 인증 (소유자/관리자) |
+| `DELETE` | `/api/boards/{id}` | 게시글 삭제 | 인증 (소유자/관리자) |
 | `GET` | `/api/boards/search?keyword={q}&size={n}` | 한글 전문검색 (Nori 형태소, 관련도순 정렬, 하이라이트) | 공개 |
 | `POST` | `/api/boards/search/reindex` | DB(정본) → ES 전체 재색인 | ROLE_ADMIN |
 
 > 검색은 **Elasticsearch + Nori**로 `title`/`content`를 형태소 분석해 매칭하고, 관련도(`_score`) 내림차순으로 반환합니다. `keyword`는 필수(공백 불가), `size`는 1~100(기본 20)입니다. 응답 `items[]`는 `board`(원문)·`score`·`highlightedTitle`/`highlightedContent`(매칭 부분을 `<em>`으로 감쌈)를 담습니다. 게시글 생성/수정/삭제 시 색인은 **best-effort로 동기화**되며(실패해도 게시글 쓰기는 성공), 필요 시 `POST /api/boards/search/reindex`로 정합성을 회복합니다(응답 `result`는 `reindexed`·`failed` 건수). (아래 **🔎 Korean Full-Text Search** 섹션 참고)
 
-> **인증/인가 (리액티브 Spring Security + 자체 발급 JWT)**: 읽기(GET 단건/목록/검색)·문서·actuator는 **공개**, 게시글 쓰기(POST/PUT/DELETE)는 **인증**, 운영 트리거(reindex·flush)는 **ROLE_ADMIN**입니다. `/api/auth/login`이 HS256 JWT를 발급하고 이후 요청은 `Authorization: Bearer <token>`으로 전달합니다. 토큰의 `sub`=사용자 id가 게시글 생성 시 `author_id`로 기록됩니다(수정/삭제는 인증된 사용자면 누구나 — 소유권 강제 없음). 무토큰 쓰기는 **401**, 권한 부족(예: 일반 사용자의 flush)은 **403**입니다. 관리자 계정은 기동 시 `board.security.admin.*`로 부트스트랩됩니다. 사용자 영속화/비밀번호 해싱(BCrypt)/토큰 발급은 각각 out-port(`UserRepositoryPort`/`PasswordEncoderPort`/`AuthTokenPort`)로 분리돼 서비스는 Spring Security를 모릅니다. (아래 **🔐 Authentication** 섹션 참고)
+> **인증/인가 (리액티브 Spring Security + 자체 발급 JWT)**: 읽기(GET 단건/목록/검색)·문서·actuator는 **공개**, 게시글 쓰기(POST/PUT/DELETE)는 **인증**, 운영 트리거(reindex·flush)는 **ROLE_ADMIN**입니다. `/api/auth/login`이 HS256 JWT를 발급하고 이후 요청은 `Authorization: Bearer <token>`으로 전달합니다. 토큰의 `sub`=사용자 id가 게시글 생성 시 `author_id`로 기록되고, **수정/삭제 시 소유권 검사**의 기준이 됩니다 — 소유자(`Board.isOwnedBy`) 또는 관리자만 수정/삭제할 수 있고, 그 외에는 403 `BOARD_ACCESS_DENIED`(IDOR 차단). 무토큰 쓰기는 **401**, 권한 부족(예: 일반 사용자의 flush, 남의 글 수정/삭제)은 **403**입니다. 관리자 계정은 기동 시 `board.security.admin.*`로 부트스트랩됩니다. 사용자 영속화/비밀번호 해싱(BCrypt)/토큰 발급은 각각 out-port(`UserRepositoryPort`/`PasswordEncoderPort`/`AuthTokenPort`)로 분리돼 서비스는 Spring Security를 모릅니다. (아래 **🔐 Authentication** 섹션 참고)
 
 > 단건 조회 시 조회수(`viewCount`)가 1 증가합니다. DB를 직접 갱신하지 않고 Redis에 델타를 누적한 뒤 주기적으로 DB에 반영하며, 응답의 `viewCount`는 **DB 누적값 + 아직 반영 안 된 델타**로 실시간 값을 보여줍니다. **Redis가 장애여도 조회는 실패하지 않고 DB 누적값으로 200을 반환**합니다(조회수 집계는 best-effort). (아래 **👁 View Count** 섹션 참고)
 
@@ -139,14 +139,14 @@ demo.board
 조회가 몰리는 게시글에서 **매 조회마다 DB `UPDATE`를 날리는 부담**을 없애기 위해, 조회수를 **리액티브 Redis에 누적하고 주기적으로 DB에 반영(write-back)** 합니다. 전 구간 논블로킹을 유지하기 위해 블로킹 `RedisTemplate`/Jedis가 아닌 **Lettuce 기반 `ReactiveStringRedisTemplate`** + 코루틴 브리지(`awaitSingle`)를 사용합니다.
 
 * **읽기 경로**: `GET /api/boards/{id}` 시 Redis Hash(`board:views:pending`)에 `HINCRBY`로 원자적 증가. 응답 `viewCount`는 **DB 누적값 + 미반영 델타**로 실시간 값을 돌려줍니다.
-* **원자적 스냅샷 + commit-then-delete**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷하지만 **곧바로 지우지 않습니다**. 청크의 DB 반영이 성공한 뒤에만 그 청크를 `draining`에서 제거(`HDEL`)합니다. 그래서 **반영 전에 프로세스가 죽어도 스냅샷이 남아 다음 플러시가 재시도**하며(유실 없음, at-least-once — 조회수는 근사값이라 크래시 시 약간의 중복 계수를 유실보다 우선), `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓입니다. 스냅샷~제거가 짝을 이루도록 플러시 전체는 `FlushBoardViewCountsService`가 뮤텍스로 직렬화합니다(단일 인스턴스 기준).
+* **원자적 스냅샷 + commit-then-delete**: 플러시는 `RENAME pending → draining`으로 버퍼를 통째로 스냅샷하지만 **곧바로 지우지 않습니다**. 청크의 DB 반영이 성공한 뒤에만 그 청크를 `draining`에서 제거(`HDEL`)합니다. 그래서 **반영 전에 프로세스가 죽어도 스냅샷이 남아 다음 플러시가 재시도**하며(유실 없음, at-least-once — 조회수는 근사값이라 크래시 시 약간의 중복 계수를 유실보다 우선), `RENAME` 직후 들어오는 조회는 새로 생성되는 `pending`에 쌓입니다. 스냅샷~제거가 짝을 이루도록 플러시 전체는 `FlushBoardViewCountsService`가 **Redis 분산 락(`DistributedLockPort`, SET NX)** 으로 클러스터 전역에서 직렬화합니다(다중 인스턴스에서도 동시에 하나만 플러시).
 * **write-back(배치)**: `@Scheduled` 트리거(`BoardViewCountFlushScheduler`)가 스냅샷한 델타를 **청크 단위 단일 `UPDATE ... FROM unnest(:ids, :deltas)`** 로 반영합니다(`BoardRepositoryPort.addViewCountsBatch`). 게시글별 순차 `UPDATE` 대비 DB 왕복이 대상 수 `N`에서 `ceil(N/chunkSize)`로 줄어, 플러시 대상이 많을수록 큰 이득입니다. 아카이브 배치와 동일하게 `runBlocking`으로 코루틴 경계를 어댑터 안에 가두고, 한 청크 실패가 전체를 막지 않도록(그리고 실패 청크는 지우지 않아 다음 플러시가 재시도하도록) 내결함성 처리합니다.
 * **Redis 장애 내성(graceful degradation)**: 조회수 집계는 부가 기능(best-effort)입니다. `getBoard`는 `HINCRBY`를 `withTimeout` 시간 예산 안에서 시도하고, Redis가 죽거나(연결 거부) 느려도(행) **델타 0으로 강등해 DB 누적값으로 정상 조회(200)** 를 반환합니다. 즉 Redis 장애가 핵심 읽기 경로를 막지 않으며, 행 상태에서도 조회 지연이 예산 안에서 상한을 가집니다.
 * **온디맨드 플러시**: `POST /api/admin/view-counts/flush`로 스케줄과 무관하게 즉시 write-back합니다(배포·셧다운 직전 버퍼 비우기, 결정적 부하 테스트에 사용). 스케줄러와 동일한 `FlushBoardViewCountsUseCase`에만 의존하며, **ROLE_ADMIN**(Bearer 토큰)으로 보호됩니다.
 * **헥사고날 분리**: 조회수 버퍼는 out-port `BoardViewCountPort`(Redis 어댑터)로, DB 반영은 `BoardRepositoryPort.addViewCountsBatch`로 분리됩니다. 서비스는 구체 기술(Redis)을 모릅니다.
 * **운영 튜닝**: `board.view-count.*`로 코드 변경 없이 조절합니다 — `flush-enabled`, `flush-interval-ms`(주기를 짧게 하면 DB 정합성↑·쓰기 부하↑), `flush-chunk-size`(한 배치 UPDATE에 묶을 게시글 수), `increment-timeout-ms`(조회 시 Redis 증가 시간 예산).
 
-> 내구성(commit-then-delete): 스냅샷을 DB 반영 성공분만 지우므로, 반영 전 크래시가 나도 다음 플러시가 재시도해 델타가 유실되지 않습니다(at-least-once, 크래시 시 소량 중복 계수 허용). 남은 학습용 한계: **다중 인스턴스** 동시 플러시는 이 로컬 뮤텍스로 막지 못하므로, 실무에선 Redis 분산 락/리더 선출이 필요합니다.
+> 내구성(commit-then-delete): 스냅샷을 DB 반영 성공분만 지우므로, 반영 전 크래시가 나도 다음 플러시가 재시도해 델타가 유실되지 않습니다(at-least-once, 크래시 시 소량 중복 계수 허용). **다중 인스턴스** 동시 플러시는 Redis 분산 락(`RedisDistributedLockAdapter`, SET NX PX + Lua compare-and-delete 해제)으로 막습니다 — 락을 못 잡은 인스턴스는 그 주기를 건너뜁니다(TTL로 홀더 사망 시 자동 해제).
 
 ## 🔎 Korean Full-Text Search (Elasticsearch + Nori)
 
