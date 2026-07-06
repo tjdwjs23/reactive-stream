@@ -87,7 +87,19 @@ done
 평가 기록 기준 **약 10.4만 건 삭제 ≈ 1.26s (~8.3만 rows/s), 실패 0** 로 측정된 바 있다(단일 머신).
 
 > ⚠️ **출처 주의**: 위 배치 수치는 *이전 실행(프로젝트 평가 노트)* 기록이며, 이번 세션에서 재실측한 값이
-> **아니다**(현재는 온디맨드 아카이브 HTTP 엔드포인트가 없고 `@Scheduled` 트리거만 있어 즉석 재현이
-> 어렵다). 위 **키셋 깊이무관성 표는 2026-07-06 이번 세션에서 151,174행에 대해 직접 실측한 값**이다.
-> 배치 처리량을 갱신 측정하려면 온디맨드 트리거(admin 엔드포인트)를 되살리거나 스케줄러 주기를 당겨
-> 실행한 뒤 로그의 `archiveStaleBoards finished`와 소요 시간을 집계하면 된다.
+> **아니다**. 위 **키셋 깊이무관성 표는 2026-07-06 이번 세션에서 151,174행에 대해 직접 실측한 값**이다.
+
+**재실측 방법**: 온디맨드 아카이브 트리거 `POST /api/admin/boards/archive`(ROLE_ADMIN)가 있다. 오래된
+데이터를 시드한 뒤(예: `createdAt`이 과거인 행), 아래처럼 호출하고 응답의 `result.deleted`와 소요 시간을
+집계한다(주의: **실제로 삭제되므로** 시험용 데이터에만 사용).
+
+```bash
+TOKEN=... # admin 로그인 토큰
+time curl -s -X POST http://localhost:8080/api/admin/boards/archive \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"retentionDays":30,"chunkSize":1000,"concurrency":8}'
+# → {"result":{"scanned":..., "deleted":..., "failedChunks":0}} + 벽시계 소요 시간
+```
+
+`retentionDays`는 필수(누락 시 400 — 실수로 대량 삭제 방지), `chunkSize`/`concurrency`는 생략 시
+커맨드 기본값(500/4)을 쓴다.

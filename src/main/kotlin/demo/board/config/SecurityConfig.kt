@@ -29,7 +29,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 
 // 리액티브 Spring Security 설정. 자체 발급 JWT(HS256 대칭키)로 stateless 인증합니다.
-// 정책: 읽기(GET)·문서·actuator는 공개, 게시글 쓰기는 인증, reindex/flush(admin)는 ROLE_ADMIN.
+// 정책: 읽기(GET)·문서·actuator는 공개, 게시글 쓰기는 인증, reindex/flush/archive(admin)는 ROLE_ADMIN.
 @Configuration
 @EnableWebFluxSecurity
 class SecurityConfig(

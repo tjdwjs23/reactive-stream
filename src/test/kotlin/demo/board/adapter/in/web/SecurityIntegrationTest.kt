@@ -122,6 +122,19 @@ class SecurityIntegrationTest(
                         .isForbidden
                 }
             }
+
+            When("일반 사용자 토큰으로 admin 아카이브를 호출하면") {
+                Then("403 Forbidden이다(필터에서 거부 — 아카이브는 실행되지 않는다)") {
+                    client
+                        .post()
+                        .uri("/api/admin/boards/archive")
+                        .header("Authorization", "Bearer $userToken")
+                        .bodyValue(mapOf("retentionDays" to 365))
+                        .exchange()
+                        .expectStatus()
+                        .isForbidden
+                }
+            }
         }
 
         Given("부트스트랩된 관리자가 있을 때") {
