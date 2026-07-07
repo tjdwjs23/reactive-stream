@@ -4,7 +4,8 @@
 
 ```
 deploy/
-├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기)
+├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기). COLIMA_CPU/COLIMA_MEM로 자원 조절
+├── obs.sh                         관측성(LGTM)만 켜고/끄기 — `obs.sh on|off` (up.sh 재실행 없이 helm으로 토글)
 ├── pf.sh                          board-service(Swagger)+Grafana+Postgres를 한 번에 port-forward
 ├── down.sh                        정리(helm uninstall — 데이터/클러스터 유지, --all이면 kind 삭제+colima 정지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
@@ -29,6 +30,10 @@ brew install colima kind helm      # 최초 1회
 ./deploy/up.sh                     # 코어(앱 + PostgreSQL/Redis/Elasticsearch/Kafka)
 #   또는
 ./deploy/up.sh --obs               # 관측성(LGTM)까지 함께 (colima 12G로 자동 기동)
+
+# 나중에 관측성만 추가/제거 (up.sh 재실행·이미지 재빌드 없이 helm으로 토글):
+./deploy/obs.sh on                 # LGTM 5파드 추가 + 앱 OTLP on (최초엔 이미지 pull로 수 분)
+./deploy/obs.sh off                # 제거
 
 # 접근(colima에선 직결 localhost가 불안정 → port-forward 권장):
 ./deploy/pf.sh                     # board-service(8080)+Grafana(3000)+Postgres(5432) 한 번에, Ctrl+C로 종료
