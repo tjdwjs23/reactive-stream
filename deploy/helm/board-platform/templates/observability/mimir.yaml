@@ -1,0 +1,63 @@
+{{- if .Values.observability.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mimir-config
+  labels:
+    app: mimir
+    app.kubernetes.io/part-of: board-platform
+data:
+  mimir.yml: |
+{{ .Files.Get "files/mimir/mimir.yml" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimir
+  labels:
+    app: mimir
+    app.kubernetes.io/part-of: board-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+        app.kubernetes.io/part-of: board-platform
+    spec:
+      containers:
+        - name: mimir
+          image: {{ .Values.observability.mimir.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-config.file=/etc/mimir/mimir.yml"]
+          ports:
+            - containerPort: 9009
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mimir
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: mimir-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mimir
+  labels:
+    app: mimir
+    app.kubernetes.io/part-of: board-platform
+spec:
+  selector:
+    app: mimir
+  ports:
+    - port: 9009
+      targetPort: 9009
+{{- end }}

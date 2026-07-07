@@ -42,15 +42,14 @@ brew install k6
 
 ## 1. 매번 — 대상 띄우기
 
-부하는 "이미 떠 있는 서버"에 줍니다. 두 개를 먼저 올립니다.
+부하는 "이미 떠 있는 서버"에 줍니다(BASE_URL 기본 `http://localhost:8080`). 서버를 먼저 올립니다.
+
+- **로컬 k8s(권장)**: `deploy/README.md`대로 Helm 배포 후 `board-service`가 `localhost:8080`에 열립니다(kind 포트 매핑).
+- **빠른 개발 실행**: 인프라(PostgreSQL/Redis/Elasticsearch/Kafka)를 `kubectl port-forward`로 당긴 뒤 `./gradlew :board-service:bootRun`.
 
 ```bash
-# (1) 의존 인프라: PostgreSQL / Redis / Elasticsearch / LGTM(Mimir·Loki·Tempo·Grafana)
-docker compose up -d
-docker compose ps            # 8개 다 Up 인지 확인 (postgres·redis·es·alloy·mimir·loki·tempo·grafana)
-
-# (2) 앱 (호스트에서, 8080) — 별도 터미널에서 계속 켜둠
-./gradlew bootRun
+# 예: 로컬 k8s에 배포돼 있으면 그대로 localhost:8080 사용. 앱이 떴는지 확인:
+curl -s localhost:8080/actuator/health
 ```
 
 앱이 떴는지 확인:

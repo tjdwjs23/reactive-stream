@@ -14,3 +14,7 @@ nodes:
       - containerPort: 30081
         hostPort: 8081
         protocol: TCP
+      # Grafana(observability.enabled=true일 때) NodePort 30030 → 호스트 localhost:3000
+      - containerPort: 30030
+        hostPort: 3000
+        protocol: TCP

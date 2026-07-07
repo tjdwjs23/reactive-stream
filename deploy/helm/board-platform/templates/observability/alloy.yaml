@@ -1,0 +1,73 @@
+{{- if .Values.observability.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  labels:
+    app: alloy
+    app.kubernetes.io/part-of: board-platform
+data:
+  config.alloy: |
+{{ .Files.Get "files/alloy/config.alloy" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  labels:
+    app: alloy
+    app.kubernetes.io/part-of: board-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+        app.kubernetes.io/part-of: board-platform
+    spec:
+      containers:
+        - name: alloy
+          image: {{ .Values.observability.alloy.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --storage.path=/var/lib/alloy/data
+          ports:
+            - containerPort: 4317 # OTLP gRPC (앱 push)
+            - containerPort: 4318 # OTLP HTTP (앱 push)
+            - containerPort: 12345 # 디버그 UI
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: data
+              mountPath: /var/lib/alloy/data
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  labels:
+    app: alloy
+    app.kubernetes.io/part-of: board-platform
+spec:
+  selector:
+    app: alloy
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+{{- end }}

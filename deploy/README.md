@@ -11,7 +11,8 @@ deploy/
 ```
 
 구성 요소: `board-service`, `search-indexer` + `PostgreSQL` · `Redis` · `Elasticsearch(Nori)` · `Kafka(KRaft)`.
-관측성(LGTM)은 기본 제외 — 앱의 OTLP export는 꺼진 채 뜹니다(`observability.enabled=false`).
+관측성 스택(LGTM: Alloy·Mimir·Loki·Tempo·Grafana)도 **이 차트에 포함**되며 `observability.enabled`로 켜고 끕니다(docker-compose는 제거됨 — 모든 인프라가 여기에).
+기본은 off(로컬 리소스 절약): 앱 OTLP export가 꺼지고 LGTM 파드도 뜨지 않습니다.
 
 ---
 
@@ -96,9 +97,10 @@ helm get values board-platform
 ## 설정 바꾸기 (values)
 
 ```bash
-# 예: 관측성 켜서 클러스터 내 Alloy로 push
-helm upgrade board-platform deploy/helm/board-platform \
-  --set observability.enabled=true --set observability.otlpEndpointBase=http://alloy:4318
+# 예: 관측성(LGTM) 전체를 클러스터에 함께 배포 + 앱이 클러스터 내 Alloy로 push
+#   ⚠ 파드가 11개로 늘어 메모리 부담↑ — colima start --memory 12(이상) 권장.
+#   배포 후 Grafana는 http://localhost:3000 (admin/admin) — Mimir/Loki/Tempo 데이터소스·대시보드 자동 등록.
+helm upgrade board-platform deploy/helm/board-platform --set observability.enabled=true
 
 # 예: 특정 데이터스토어를 외부 것으로 대체(차트에서 제외)
 helm upgrade board-platform deploy/helm/board-platform --set kafka.enabled=false

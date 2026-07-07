@@ -231,7 +231,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **`board-service` = reader**: 검색 쿼리(`GET /api/boards/search`)와 전체 재색인(`reindex`)만 담당합니다.
 - **Nori 분석**: `boards` 인덱스는 `korean` 분석기(nori_tokenizer, decompound_mode=mixed + nori_part_of_speech/readingform/lowercase). 정의는 `resources/elasticsearch/board-settings.json`(analysis) / `board-mappings.json`(title/content). `BoardDocument`의 `@Setting`/`@Mapping`이 이 JSON을 가리킵니다.
 - **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match(title^2, content)`로 검색, 기본 `_score` 내림차순 + `<em>` 하이라이트, `Flow<BoardSearchHit>` 반환.
-- **버전 제약**: Spring Boot 4는 ES **9.2.x 클라이언트**를 번들합니다. ES 8 서버는 프로토콜이 안 맞아 통신이 깨지므로 **서버도 ES 9.2.x**(docker-compose가 `docker/elasticsearch/Dockerfile`로 Nori 포함 이미지를 빌드).
+- **버전 제약**: Spring Boot 4는 ES **9.2.x 클라이언트**를 번들합니다. ES 8 서버는 프로토콜이 안 맞아 통신이 깨지므로 **서버도 ES 9.2.x**(`docker/elasticsearch/Dockerfile`이 Nori 포함 이미지를 빌드 — 로컬 k8s는 `deploy/build-and-load.sh`가 빌드해 `kind load`로 주입).
 
 > **알려진 tradeoff(중복)**: reader(board-service)와 writer(search-indexer)가 같은 `boards` 인덱스를 공유하므로 `BoardDocument`와 Nori 설정 JSON이 **두 모듈에 중복**됩니다(매핑 변경 시 양쪽 동기화 필요 — 공유 스키마 모듈 추출은 후속 과제). 또한 `reindex`가 board-service에서 ES에 직접 쓰는 dual-writer 경로라, 이벤트 리플레이 기반으로 옮기는 것도 후속 과제입니다.
 
@@ -281,28 +281,27 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 
 ## 🚀 Getting Started
 
+전체 스택은 **로컬 쿠버네티스(Colima + kind + Helm)** 에서 실행합니다(docker-compose는 제거됨). 상세 런북은 [`deploy/README.md`](./deploy/README.md).
+
 ### Prerequisites
-JDK 21+, Docker(+ docker compose), (Gradle은 wrapper 사용).
+JDK 21+, `colima` · `kind` · `helm`(+ `docker` CLI). `brew install colima kind helm`.
 
-### 1) 인프라 기동 (docker-compose)
+### 요약 (상세는 deploy/README.md)
 ```bash
-docker compose up -d        # PostgreSQL · Redis · Elasticsearch(Nori) · Kafka(KRaft) · Alloy · LGTM
-docker compose ps
+colima start --cpu 4 --memory 8                                   # 관측성까지 켜려면 12~14GB
+kind create cluster --config deploy/kind/kind-config.yaml
+./deploy/build-and-load.sh                                        # 이미지 3종 빌드 + kind 주입
+helm upgrade --install board-platform deploy/helm/board-platform  # 전 스택 배포
+kubectl get pods -w
 ```
-접속: PostgreSQL `localhost:5432/reactive`(reactive/reactive1234), Redis `6379`, Elasticsearch `http://localhost:9200`, **Kafka `localhost:9092`**, Grafana `http://localhost:3000`(admin/admin), Alloy OTLP `4318`.
+`board-service`는 kind 포트 매핑으로 **호스트 `localhost:8080`** 에서 열립니다. 데이터스토어(PostgreSQL/Redis/Elasticsearch/Kafka)와 앱이 모두 클러스터 안에 뜨고, 관측성(LGTM)은 `--set observability.enabled=true`로 함께 배포됩니다.
 
-### 2) 서비스 실행 (호스트에서 bootRun — 멀티모듈이라 모듈을 지정)
-```bash
-# 게시판 API + 아웃박스 릴레이 활성화
-BOARD_OUTBOX_RELAY_ENABLED=true ./gradlew :board-service:bootRun     # → http://localhost:8080
+> `board-service`는 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`(멱등 `CREATE TABLE IF NOT EXISTS`)을 R2DBC로 실행합니다(Flyway는 JDBC 의존이라 제거). 모든 설정은 `${ENV:default}`로 외부화돼 Helm이 ConfigMap/Secret으로 주입합니다.
 
-# 검색 색인 컨슈머
-./gradlew :search-indexer:bootRun                                    # → http://localhost:8081 (actuator)
-```
-> `board-service`는 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`(멱등 `CREATE TABLE IF NOT EXISTS`)을 R2DBC로 실행합니다(Flyway는 JDBC 의존이라 제거). 설정은 `${ENV:default}`로 외부화돼 운영은 Vault/K8s Secret로 주입합니다.
+### 동작 확인 (end-to-end)
+회원가입·로그인으로 JWT를 받고 게시글을 생성하면 → board-service가 아웃박스에 이벤트 기록 → 릴레이가 Kafka 발행 → search-indexer가 소비해 ES 색인 → `GET /api/boards/search?keyword=...`로 검색됩니다(ES refresh ~1s 지연 감안). 구체 curl 예시는 `deploy/README.md`.
 
-### 3) 동작 확인 (end-to-end)
-회원가입·로그인으로 JWT를 받고 게시글을 생성하면 → board-service가 아웃박스에 이벤트 기록 → 릴레이가 Kafka 발행 → search-indexer가 소비해 ES 색인 → `GET /api/boards/search?keyword=...`로 검색됩니다(ES refresh ~1s 지연 감안).
+> **빠른 개발 반복(선택)**: 코드를 고치며 IDE에서 바로 띄우고 싶으면 `:board-service:bootRun`도 됩니다 — 단, 데이터스토어가 필요하므로 `kubectl port-forward`로 클러스터의 postgres/redis/es/kafka를 로컬 포트로 당겨 연결하세요.
 
 ---
 

@@ -26,7 +26,7 @@ spring:
       port: ${SPRING_DATA_REDIS_PORT:6379}
 
   # 한글 전문검색용 Elasticsearch(Nori). WebFlux 클래스패스에서 리액티브 클라이언트가 자동 구성됩니다.
-  # docker-compose의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
+  # 로컬 k8s/컨테이너의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
 
@@ -45,7 +45,7 @@ logging:
       console: ecs
 
 # 관측성(LGTM 스택 + 단일 수집기 Grafana Alloy). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
-# push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(monitoring/alloy/config.alloy).
+# push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(Alloy 설정: deploy/helm/board-platform/files/alloy/config.alloy).
 # 앱이 백엔드마다 다른 프로토콜/주소로 직접 붙던 것을 단일 OTLP 엔드포인트로 통합한 구조입니다.
 # - /actuator/health : 애플리케이션/의존성 상태(r2dbc/redis/es 헬스 포함)
 # - /actuator/metrics : 로컬 디버깅용 Micrometer 메트릭(JSON) 노출. 저장/조회는 Mimir가 담당(스크레이프 없음)

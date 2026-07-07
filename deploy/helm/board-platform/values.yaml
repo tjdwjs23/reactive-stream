@@ -62,9 +62,24 @@ security:
   jwtSecret: "local-dev-jwt-secret-please-change-me-32bytes-min"
   adminPassword: "admin1234"
 
-# ── 관측성 ──
-# 기본은 off: OTLP export를 비활성화해 로컬에서 Alloy 없이도 조용히 뜹니다.
-# true로 켜면 아래 endpointBase(클러스터 내 Alloy 등)로 metrics/logs/traces를 push합니다.
+# ── 관측성 (LGTM 스택) ──
+# 기본은 off(로컬 리소스 절약): 앱의 OTLP export가 꺼지고, 아래 LGTM 파드도 배포되지 않습니다.
+# true로 켜면 클러스터 내 Alloy → Mimir/Loki/Tempo/Grafana가 함께 배포되고, 앱이 alloy:4318로 push합니다.
+#   helm upgrade board-platform deploy/helm/board-platform --set observability.enabled=true
+#   ⚠ 파드가 11개로 늘어 메모리 부담이 큽니다 — colima를 12~14GB로 띄우세요.
 observability:
   enabled: false
-  otlpEndpointBase: "http://alloy:4318"
+  otlpEndpointBase: "http://alloy:4318" # 앱이 push할 클러스터 내 Alloy OTLP/HTTP 엔드포인트
+  alloy:
+    image: grafana/alloy:v1.5.1
+  mimir:
+    image: grafana/mimir:2.14.3
+  loki:
+    image: grafana/loki:3.3.2
+  tempo:
+    image: grafana/tempo:2.7.1
+  grafana:
+    image: grafana/grafana:11.4.0
+    adminUser: admin
+    adminPassword: admin
+    nodePort: 30030 # kind 매핑(30030→host 3000)과 일치 — http://localhost:3000
