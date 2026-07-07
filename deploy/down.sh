@@ -5,6 +5,10 @@
 set -euo pipefail
 
 CLUSTER="board-platform"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+echo "==> 백그라운드 port-forward 정리"
+"${HERE}/pf.sh" stop || true
 
 echo "==> helm 릴리스 삭제"
 helm uninstall board-platform >/dev/null 2>&1 || echo "    (릴리스 없음 — skip)"
