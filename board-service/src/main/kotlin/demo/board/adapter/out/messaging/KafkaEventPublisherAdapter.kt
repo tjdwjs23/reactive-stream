@@ -1,6 +1,10 @@
 package demo.board.adapter.out.messaging
 
 import demo.board.application.port.out.EventPublisherPort
+import demo.board.config.ResilienceConfig
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
+import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import kotlinx.coroutines.future.await
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.stereotype.Component
@@ -15,12 +19,19 @@ import org.springframework.stereotype.Component
 @Component
 class KafkaEventPublisherAdapter(
     private val kafkaTemplate: KafkaTemplate<Any, Any>,
+    circuitBreakerRegistry: CircuitBreakerRegistry,
 ) : EventPublisherPort {
+    // 브로커가 반복 실패/지연하면 서킷이 열려 즉시 실패합니다. 릴레이(RelayOutboxService)는 그 지점에서 멈추고
+    // 다음 사이클에 재시도하므로(순서 보존·미발행 행 잔존 → 유실 없음), 브레이커가 매 레코드 타임아웃 낭비를 막습니다.
+    private val breaker: CircuitBreaker = circuitBreakerRegistry.circuitBreaker(ResilienceConfig.KAFKA_PUBLISHER)
+
     override suspend fun publish(
         topic: String,
         key: String,
         payload: String,
     ) {
-        kafkaTemplate.send(topic, key, payload).await()
+        breaker.executeSuspendFunction {
+            kafkaTemplate.send(topic, key, payload).await()
+        }
     }
 }

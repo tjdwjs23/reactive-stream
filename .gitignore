@@ -19,7 +19,10 @@ bin/
 *.iws
 *.iml
 *.ipr
-out/
+# IntelliJ 컴파일 출력 디렉토리. 반드시 루트에 앵커(/out/)한다 — 앵커 없는 out/는 헥사고날 패키지
+# (application/port/out, adapter/out 등 src 하위 out 디렉토리)까지 매칭해 신규 소스 파일이 조용히 누락된다.
+# (부모 디렉토리가 제외되면 하위 파일은 !부정 규칙으로도 되살릴 수 없으므로 앵커가 유일한 해법이다.)
+/out/
 
 ### NetBeans ###
 /nbproject/private/

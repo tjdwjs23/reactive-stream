@@ -65,6 +65,15 @@ dependencies {
     // (jdk8 통합은 1.6.0부터 coroutines-core에 병합돼 별도 의존성이 필요 없습니다).
     implementation("org.springframework.kafka:spring-kafka")
 
+    // 회복탄력성(Resilience4j 2.x — Spring Boot 스타터 없이 core만 사용). Boot4 자동구성 비호환을 피하고
+    // 헥사고날 순수성을 지키기 위해 서킷브레이커를 "어댑터"에서만 프로그래매틱하게 적용합니다(application 계층은 무의존).
+    //  - circuitbreaker: CircuitBreaker/Registry 코어.
+    //  - kotlin: suspend 함수 데코레이션(executeSuspendFunction) — Redis/Kafka 어댑터의 코루틴 경로.
+    //  - reactor: Flux/Mono 연산자(CircuitBreakerOperator) — 검색 어댑터의 리액티브 경로.
+    implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.3.0")
+    implementation("io.github.resilience4j:resilience4j-kotlin:2.3.0")
+    implementation("io.github.resilience4j:resilience4j-reactor:2.3.0")
+
     // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용(JDBC 드라이버는 사용하지 않음)
     runtimeOnly("org.postgresql:r2dbc-postgresql")
 

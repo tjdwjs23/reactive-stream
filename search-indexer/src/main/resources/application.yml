@@ -16,6 +16,10 @@ spring:
   # 색인 대상 Elasticsearch(Nori). board-service와 동일한 boards 인덱스를 공유하며, 이 서비스가 writer입니다.
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
+    # 연결/소켓 타임아웃(무한 대기 차단). ES가 느리면 색인 배치가 매달리지 않고, 색인 어댑터의
+    # 서킷브레이커가 반복 실패 시 열려 빠르게 실패합니다(→ DefaultErrorHandler 재시도 후 DLQ 격리).
+    connection-timeout: ${SPRING_ELASTICSEARCH_CONNECTION_TIMEOUT:1s}
+    socket-timeout: ${SPRING_ELASTICSEARCH_SOCKET_TIMEOUT:5s}
 
 # 공개 비즈니스 API는 없지만(순수 컨슈머), k8s liveness/readiness가 /actuator/health를 HTTP로 확인해야 하므로
 # 경량 WebFlux/Netty 서버를 8081에 띄웁니다(메인=관리 포트 동일).

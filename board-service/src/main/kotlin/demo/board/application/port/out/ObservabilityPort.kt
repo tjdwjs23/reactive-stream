@@ -29,4 +29,8 @@ interface ObservabilityPort {
 
     // 아카이브 배치로 삭제된 게시글 수.
     fun boardsArchived(count: Int)
+
+    // 아웃박스 미발행(백로그) 이벤트 총수의 현재값. 카운터가 아니라 "현재 상태"라 게이지로 노출합니다
+    // (릴레이가 밀리면 커지고, 따라잡으면 0으로 수렴). 릴레이 사이클마다 최신값으로 갱신합니다.
+    fun updateOutboxBacklog(count: Long)
 }

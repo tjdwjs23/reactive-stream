@@ -24,6 +24,9 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter
 import org.springframework.security.web.server.SecurityWebFilterChain
+import org.springframework.web.cors.CorsConfiguration
+import org.springframework.web.cors.reactive.CorsConfigurationSource
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
 import reactor.core.publisher.Mono
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -34,6 +37,9 @@ import javax.crypto.spec.SecretKeySpec
 @EnableWebFluxSecurity
 class SecurityConfig(
     @Value("\${board.security.jwt.secret:}") private val configuredSecret: String,
+    // 허용 오리진(쉼표 구분). SPA 등 브라우저 클라이언트가 다른 오리진에서 API를 호출할 수 있게 CORS를 명시합니다.
+    // 기본은 로컬 프런트(3000). 운영은 BOARD_CORS_ALLOWED_ORIGINS로 실제 도메인을 주입합니다.
+    @Value("\${board.security.cors.allowed-origins:http://localhost:3000}") private val allowedOrigins: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -61,6 +67,8 @@ class SecurityConfig(
     @Bean
     fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
         http
+            // 브라우저 클라이언트(SPA)의 교차 오리진 호출 허용. 아래 corsConfigurationSource 정책을 적용합니다.
+            .cors { it.configurationSource(corsConfigurationSource()) }
             // 상태를 서버에 두지 않는 토큰 인증이라 CSRF/폼로그인/HTTP Basic은 끕니다(REST API + 무상태).
             .csrf { it.disable() }
             .httpBasic { it.disable() }
@@ -90,6 +98,25 @@ class SecurityConfig(
                 rs.jwt { jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()) }
             }
         return http.build()
+    }
+
+    // CORS 정책. 허용 오리진은 설정에서 주입(쉼표 구분), 자격증명(Authorization 헤더) 허용, 표준 메서드 허용.
+    // allowCredentials=true라 오리진에 와일드카드(*)는 쓸 수 없어(스펙 제약) 명시적 오리진 목록을 씁니다.
+    private fun corsConfigurationSource(): CorsConfigurationSource {
+        val config =
+            CorsConfiguration().apply {
+                allowedOrigins =
+                    this@SecurityConfig
+                        .allowedOrigins
+                        .split(",")
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                allowedHeaders = listOf("*")
+                allowCredentials = true
+                maxAge = 3600
+            }
+        return UrlBasedCorsConfigurationSource().apply { registerCorsConfiguration("/**", config) }
     }
 
     // JWT의 roles 클레임(["USER"] / ["ADMIN"])을 Spring Security 권한(ROLE_USER / ROLE_ADMIN)으로 변환합니다.

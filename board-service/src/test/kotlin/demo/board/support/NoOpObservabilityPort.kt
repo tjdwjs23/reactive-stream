@@ -19,4 +19,6 @@ object NoOpObservabilityPort : ObservabilityPort {
     override fun viewCountsFlushed(boardCount: Int) = Unit
 
     override fun boardsArchived(count: Int) = Unit
+
+    override fun updateOutboxBacklog(count: Long) = Unit
 }

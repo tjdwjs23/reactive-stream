@@ -3,7 +3,11 @@ package demo.board.adapter.out.search
 import co.elastic.clients.elasticsearch._types.query_dsl.Query
 import demo.board.application.port.out.BoardSearchHit
 import demo.board.application.port.out.BoardSearchPort
+import demo.board.config.ResilienceConfig
 import demo.board.domain.model.Board
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
+import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.map
@@ -25,7 +29,12 @@ import org.springframework.stereotype.Component
 class BoardSearchAdapter(
     private val operations: ReactiveElasticsearchOperations,
     private val boardDocumentMapper: BoardDocumentMapper,
+    circuitBreakerRegistry: CircuitBreakerRegistry,
 ) : BoardSearchPort {
+    // 검색(공개 read path)에 서킷브레이커를 겁니다. ES가 반복 실패/지연하면 서킷이 열려 검색이 즉시 실패하고,
+    // 요청이 ES 타임아웃만큼 매달리지 않습니다. 색인(index/indexAll/deleteById)은 관리 재색인 경로라 대상에서 제외합니다.
+    private val breaker: CircuitBreaker = circuitBreakerRegistry.circuitBreaker(ResilienceConfig.ELASTICSEARCH_SEARCH)
+
     // upsert: 같은 _id(=게시글 id) 문서가 있으면 통째로 덮어씁니다.
     override suspend fun index(board: Board) {
         operations.save(boardDocumentMapper.toDocument(board)).awaitSingle()
@@ -82,6 +91,8 @@ class BoardSearchAdapter(
 
         return operations
             .search(nativeQuery, BoardDocument::class.java)
+            // 서킷이 열려 있으면 여기서 CallNotPermittedException으로 즉시 실패합니다(ES 왕복 없이).
+            .transformDeferred(CircuitBreakerOperator.of(breaker))
             .asFlow()
             .map { hit ->
                 BoardSearchHit(

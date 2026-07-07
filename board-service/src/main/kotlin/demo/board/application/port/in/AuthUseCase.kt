@@ -25,9 +25,9 @@ data class SignUpCommand(
     }
 }
 
-// 로그인 유즈케이스. 자격 증명을 검증하고 액세스 토큰을 발급합니다.
+// 로그인 유즈케이스. 자격 증명을 검증하고 액세스 토큰 + 리프레시 토큰을 발급합니다.
 interface LoginUseCase {
-    suspend fun login(command: LoginCommand): AuthToken
+    suspend fun login(command: LoginCommand): AuthTokens
 }
 
 // 로그인 입력은 자가 검증하지 않습니다 — 형식 검증으로 "사용자 존재/비존재"를 유추당하지 않도록,
@@ -37,9 +37,30 @@ data class LoginCommand(
     val password: String,
 )
 
-// 발급된 액세스 토큰. tokenType은 관례상 "Bearer", expiresInSeconds는 만료까지 남은 초.
+// 리프레시 유즈케이스. 유효한 리프레시 토큰을 제시하면 새 액세스+리프레시 토큰을 발급합니다(회전).
+// 이미 폐기된 토큰이 다시 제시되면(재사용) 해당 사용자의 세션을 전부 무효화합니다(탈취 대응).
+interface RefreshTokenUseCase {
+    suspend fun refresh(command: RefreshCommand): AuthTokens
+}
+
+data class RefreshCommand(
+    val refreshToken: String,
+)
+
+// 발급된 액세스 토큰(단건). AuthTokenPort.issue의 반환 타입 — 서비스가 이를 AuthTokens로 조립합니다.
+// tokenType은 관례상 "Bearer", expiresInSeconds는 만료까지 남은 초.
 data class AuthToken(
     val accessToken: String,
     val tokenType: String = "Bearer",
     val expiresInSeconds: Long,
+)
+
+// 로그인/리프레시가 클라이언트에 돌려주는 토큰 쌍. accessToken은 짧은 수명(요청 인증),
+// refreshToken은 긴 수명(access 재발급용, 불투명 랜덤 원문 — 서버는 해시만 보관).
+data class AuthTokens(
+    val accessToken: String,
+    val tokenType: String = "Bearer",
+    val expiresInSeconds: Long,
+    val refreshToken: String,
+    val refreshExpiresInSeconds: Long,
 )

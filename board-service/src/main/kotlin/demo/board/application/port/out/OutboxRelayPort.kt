@@ -9,6 +9,10 @@ interface OutboxRelayPort {
 
     // 발행에 성공한 레코드들을 발행 완료로 표시합니다(published_at 기록). 성공분만 넘어옵니다.
     suspend fun markPublished(ids: List<Long>)
+
+    // 미발행(백로그) 이벤트 총수. 릴레이가 죽거나 발행이 밀리면 이 값이 계속 커지므로, 파이프라인 건강의 핵심 SLI입니다.
+    // 관측성 게이지(board.outbox.unpublished)로 노출됩니다. 부분 인덱스(idx_board_outbox_unpublished)가 뒷받침합니다.
+    suspend fun countUnpublished(): Long
 }
 
 // 아웃박스 레코드 한 건(발행에 필요한 최소 정보).

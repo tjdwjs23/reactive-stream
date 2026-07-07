@@ -229,6 +229,64 @@ class SecurityIntegrationTest(
                 }
             }
         }
+
+        Given("CORS - 허용 오리진에서 프리플라이트를 보낼 때") {
+            When("OPTIONS 프리플라이트를 허용 오리진(http://localhost:3000)으로 보내면") {
+                Then("Access-Control-Allow-Origin이 그 오리진으로 응답된다") {
+                    client
+                        .options()
+                        .uri("/api/boards")
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "POST")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .expectHeader()
+                        .valueEquals("Access-Control-Allow-Origin", "http://localhost:3000")
+                }
+            }
+        }
+
+        Given("Refresh Token 흐름 - 로그인으로 리프레시 토큰을 받았을 때") {
+            signUp("refresh-user", "password123")
+            val refreshToken =
+                client
+                    .post()
+                    .uri("/api/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue("""{"username":"refresh-user","password":"password123"}""")
+                    .exchange()
+                    .expectStatus()
+                    .isOk
+                    .resultField("refreshToken")
+
+            When("그 리프레시 토큰으로 /api/auth/refresh를 호출하면") {
+                val rotated =
+                    client
+                        .post()
+                        .uri("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"refreshToken":"$refreshToken"}""")
+                        .exchange()
+                        .expectStatus()
+                        .isOk
+                        .resultField("refreshToken")
+
+                Then("새 액세스+리프레시 토큰이 발급되고(회전) 이전 토큰은 재사용 시 401이다") {
+                    // 회전됐으므로 새 리프레시 토큰은 이전과 다르다.
+                    (rotated != refreshToken) shouldBe true
+                    // 이미 회전(폐기)된 이전 토큰을 다시 쓰면 재사용 감지로 401.
+                    client
+                        .post()
+                        .uri("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue("""{"refreshToken":"$refreshToken"}""")
+                        .exchange()
+                        .expectStatus()
+                        .isUnauthorized
+                }
+            }
+        }
     }) {
     override fun extensions() = listOf(SpringExtension)
 

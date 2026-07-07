@@ -1,6 +1,10 @@
 package demo.board.adapter.out.redis
 
 import demo.board.application.port.out.BoardViewCountPort
+import demo.board.config.ResilienceConfig
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
+import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.stereotype.Repository
@@ -19,17 +23,25 @@ import org.springframework.stereotype.Repository
 @Repository
 class BoardViewCountRedisAdapter(
     private val redis: ReactiveStringRedisTemplate,
+    circuitBreakerRegistry: CircuitBreakerRegistry,
 ) : BoardViewCountPort {
     private companion object {
         const val PENDING = "board:views:pending"
         const val DRAINING = "board:views:draining"
     }
 
+    // 조회수 증가(hot read path)에만 서킷브레이커를 겁니다. Redis가 반복 실패/지연하면 서킷이 열려 즉시 실패하고,
+    // BoardService가 그 예외를 삼켜 DB 값으로 강등 응답합니다(조회 자체는 계속 성공). 플러시 경로(snapshot/remove)는
+    // 분산 락으로 보호되는 관리 작업이라 여기 브레이커 대상에서 제외합니다.
+    private val breaker: CircuitBreaker = circuitBreakerRegistry.circuitBreaker(ResilienceConfig.REDIS_VIEW_COUNT)
+
     override suspend fun increment(boardId: Long): Long =
-        redis
-            .opsForHash<String, String>()
-            .increment(PENDING, boardId.toString(), 1)
-            .awaitSingle()
+        breaker.executeSuspendFunction {
+            redis
+                .opsForHash<String, String>()
+                .increment(PENDING, boardId.toString(), 1)
+                .awaitSingle()
+        }
 
     override suspend fun snapshotPendingDeltas(): Map<Long, Long> {
         // 직전 플러시가 DB 반영 도중 죽어 남긴 스냅샷(DRAINING)이 있으면 그것부터 재시도합니다.

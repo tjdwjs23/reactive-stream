@@ -76,4 +76,18 @@ object AuthErrorCode {
         override val label = "사용자명 또는 비밀번호가 올바르지 않습니다."
         override val statusCode = HttpStatus.UNAUTHORIZED.value()
     }
+
+    // 짧은 시간에 로그인 실패가 임계치를 넘었을 때(brute-force 방어).
+    object TooManyLoginAttempts : ErrorCode {
+        override val code = "TOO_MANY_LOGIN_ATTEMPTS"
+        override val label = "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
+        override val statusCode = HttpStatus.TOO_MANY_REQUESTS.value()
+    }
+
+    // 리프레시 토큰이 무효/만료/재사용일 때(어느 쪽인지 구분하지 않음).
+    object InvalidRefreshToken : ErrorCode {
+        override val code = "INVALID_REFRESH_TOKEN"
+        override val label = "리프레시 토큰이 유효하지 않습니다."
+        override val statusCode = HttpStatus.UNAUTHORIZED.value()
+    }
 }

@@ -3,8 +3,10 @@ package demo.board.adapter.out.observability
 import demo.board.application.port.out.ObservabilityPort
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
+import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
+import java.util.concurrent.atomic.AtomicLong
 
 // ObservabilityPort의 Micrometer 구현. 비즈니스 사건을 메트릭으로 변환하는 "유일한" 지점입니다.
 // (여기서만 Micrometer를 알고, 서비스/도메인은 포트 인터페이스만 봅니다 — 헥사고날 의존성 방향 준수.)
@@ -35,6 +37,17 @@ class MicrometerObservabilityAdapter(
         Counter.builder("board.view-count.flush").description("플러시로 DB에 반영된 게시글 수").register(registry)
     private val archived = Counter.builder("board.archive").description("아카이브 배치로 삭제된 게시글 수").register(registry)
 
+    // 아웃박스 미발행 백로그(현재 상태 → 게이지). AtomicLong을 백킹 소스로 등록하고, 릴레이 사이클마다 갱신합니다.
+    // 릴레이가 죽거나 발행이 밀리면 커지고, 따라잡으면 0으로 수렴 — 이벤트 파이프라인 건강의 핵심 SLI입니다.
+    private val outboxBacklog = AtomicLong(0)
+
+    init {
+        Gauge
+            .builder("board.outbox.unpublished", outboxBacklog) { it.get().toDouble() }
+            .description("아웃박스 미발행(백로그) 이벤트 수")
+            .register(registry)
+    }
+
     override fun boardCreated() = created.increment()
 
     override fun boardUpdated() = updated.increment()
@@ -51,4 +64,8 @@ class MicrometerObservabilityAdapter(
     override fun viewCountsFlushed(boardCount: Int) = viewCountsFlushed.increment(boardCount.toDouble())
 
     override fun boardsArchived(count: Int) = archived.increment(count.toDouble())
+
+    override fun updateOutboxBacklog(count: Long) {
+        outboxBacklog.set(count)
+    }
 }

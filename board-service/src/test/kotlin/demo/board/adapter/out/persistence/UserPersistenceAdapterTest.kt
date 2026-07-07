@@ -75,6 +75,25 @@ class UserPersistenceAdapterTest(
                 }
             }
         }
+
+        Given("저장된 사용자의 id로 조회할 때 - findById") {
+            val saved =
+                adapter.save(
+                    User(
+                        username = "find-by-id-user",
+                        passwordHash = "hashed",
+                        role = Role.USER,
+                        createdAt = LocalDateTime.now(),
+                    ),
+                )
+
+            When("findById를 호출하면") {
+                Then("해당 사용자를 복원하고, 없는 id는 null을 반환한다") {
+                    adapter.findById(saved.id!!)!!.username shouldBe "find-by-id-user"
+                    adapter.findById(-9999L).shouldBeNull()
+                }
+            }
+        }
     }) {
     override fun extensions() = listOf(SpringExtension)
 

@@ -18,17 +18,36 @@ spring:
     url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/reactive}
     username: ${SPRING_R2DBC_USERNAME:reactive}
     password: ${SPRING_R2DBC_PASSWORD:reactive1234}
+    # 커넥션 풀(r2dbc-pool, starter-data-r2dbc에 포함)을 명시적으로 크기 지정합니다. 대용량 쓰기/조회에서
+    # 풀 크기가 처리량 상한이 되므로 기본값(10)에 기대지 않고 초기/최대 크기를 환경변수로 외부화합니다.
+    # max-acquire-time은 "커넥션을 못 얻을 때 무한 대기"를 막는 회복탄력성 상한입니다(풀 고갈 시 5초 뒤 실패).
+    pool:
+      enabled: true
+      initial-size: ${SPRING_R2DBC_POOL_INITIAL_SIZE:10}
+      max-size: ${SPRING_R2DBC_POOL_MAX_SIZE:30}
+      max-idle-time: 30m         # 유휴 커넥션을 이 시간 뒤 반납(idle 커넥션이 서버 자원을 계속 점유하지 않도록)
+      max-life-time: 60m         # 커넥션 최대 수명(오래된 커넥션의 서버측 상태 누수 방지)
+      max-acquire-time: ${SPRING_R2DBC_POOL_MAX_ACQUIRE_TIME:5s}  # 획득 타임아웃(무한 대기 차단)
+      validation-query: SELECT 1 # 반납/대여 시 커넥션 유효성 검사(끊긴 커넥션을 조용히 넘기지 않음)
 
   # 조회수 카운터용 Redis(리액티브 Lettuce). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
+      # 명령/연결 타임아웃(무한 대기 차단). Redis가 느리거나 죽어도 여기서 상한이 걸리고, 어댑터의
+      # 서킷브레이커가 반복 실패를 감지해 빠르게 열립니다(조회 경로는 DB 값으로 강등 — BoardService).
+      timeout: ${SPRING_DATA_REDIS_TIMEOUT:1s}
+      connect-timeout: ${SPRING_DATA_REDIS_CONNECT_TIMEOUT:1s}
 
   # 한글 전문검색용 Elasticsearch(Nori). WebFlux 클래스패스에서 리액티브 클라이언트가 자동 구성됩니다.
   # 로컬 k8s/컨테이너의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
+    # 연결/소켓 타임아웃(무한 대기 차단). ES가 느리거나 죽어도 검색/재색인이 매달리지 않고, 검색 어댑터의
+    # 서킷브레이커가 반복 실패 시 열려 빠르게 실패합니다.
+    connection-timeout: ${SPRING_ELASTICSEARCH_CONNECTION_TIMEOUT:1s}
+    socket-timeout: ${SPRING_ELASTICSEARCH_SOCKET_TIMEOUT:5s}
 
   # 이벤트 발행(Kafka). Transactional Outbox 릴레이가 board-changed 토픽으로 게시글 변경 이벤트를 발행하고,
   # search-indexer가 이를 소비해 ES 색인을 갱신합니다. 브로커 주소만 여기 두고, 직렬화/acks/멱등 등 프로듀서
@@ -108,6 +127,16 @@ board:
       # HS256 서명용 대칭키(≥32byte). 비우면 개발용 고정 기본값 + 기동 경고. 운영은 반드시 BOARD_JWT_SECRET 주입.
       secret: ${BOARD_JWT_SECRET:}
       access-token-ttl-minutes: ${BOARD_JWT_TTL_MINUTES:60}
+    # 브라우저 클라이언트(SPA)의 교차 오리진 호출 허용 목록(쉼표 구분). 운영은 실제 프런트 도메인을 주입합니다.
+    cors:
+      allowed-origins: ${BOARD_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    # 로그인 brute-force 방어(Redis 슬라이딩 윈도우). username별 실패가 window 안에서 max-attempts를 넘으면 429로 차단.
+    login:
+      max-attempts: ${BOARD_LOGIN_MAX_ATTEMPTS:5}
+      window-minutes: ${BOARD_LOGIN_WINDOW_MINUTES:15}
+    # Refresh Token(불투명 랜덤 + 회전). access가 만료돼도 이 토큰으로 재발급받습니다. 발급 시 회전+재사용 감지.
+    refresh-token:
+      ttl-days: ${BOARD_REFRESH_TTL_DAYS:14}
     admin:
       # 기동 시 ROLE_ADMIN 계정을 부트스트랩합니다(가입 API는 ROLE_USER만 생성).
       # password가 비어 있으면 부트스트랩을 건너뛰고 경고합니다. 운영은 BOARD_ADMIN_PASSWORD 주입.

@@ -53,6 +53,14 @@ class OutboxPersistenceAdapter(
             .collectList()
             .awaitSingle()
 
+    // 미발행 백로그 총수. 부분 인덱스(idx_board_outbox_unpublished)만 스캔하므로 미발행분이 적을수록 저렴합니다.
+    override suspend fun countUnpublished(): Long =
+        databaseClient
+            .sql("SELECT count(*) AS backlog FROM board_outbox WHERE published_at IS NULL")
+            .map { row -> row.get("backlog", java.lang.Long::class.java)!!.toLong() }
+            .one()
+            .awaitSingle()
+
     // 발행 완료 표시. IN 목록 대신 = ANY(배열) 바인딩을 씁니다(addViewCountsBatch의 unnest와 같은 이유 —
     // DatabaseClient의 컬렉션 확장에 기대지 않고 배열 파라미터로 안전하게 넘김).
     override suspend fun markPublished(ids: List<Long>) {

@@ -29,6 +29,11 @@ dependencies {
     // Kafka 소비. Boot 4는 spring-kafka만으론 자동 구성이 안 딸려오므로 KafkaConsumerConfig에서 직접 구성한다.
     implementation("org.springframework.kafka:spring-kafka")
 
+    // 회복탄력성(Resilience4j 2.x core). 색인 어댑터가 imperative(컨슈머 스레드 블로킹)라 코틀린/리액터 확장 없이
+    // core만으로 충분합니다. ES 장애가 지속되면 서킷을 열어 배치마다 재시도를 낭비하지 않고 즉시 실패 →
+    // DefaultErrorHandler가 재시도 후 DLQ 격리(기존 파이프라인과 정합).
+    implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.3.0")
+
     // 이벤트 JSON 역직렬화. Boot 4는 Jackson 3(tools.jackson) 기반이며, ObjectMapper 자동 구성과 jackson-databind는
     // 위 spring-boot-starter-webflux가 가져오는 starter-json으로 이미 충족됩니다. 여기선 Kotlin data class 역직렬화용
     // Jackson 3 Kotlin 모듈만 더합니다(java.time은 Jackson 3에 기본 내장).

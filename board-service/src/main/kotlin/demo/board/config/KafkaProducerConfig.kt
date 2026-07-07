@@ -30,6 +30,14 @@ class KafkaProducerConfig(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
                 ProducerConfig.ACKS_CONFIG to "all",
                 ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG to true,
+                // 무한 대기 차단(회복탄력성): 브로커가 죽거나 느려도 send가 매달리지 않도록 상한을 둡니다.
+                //  - MAX_BLOCK_MS: 메타데이터 대기/버퍼 확보에 send가 블록될 최대 시간.
+                //  - REQUEST_TIMEOUT_MS: 브로커 응답 1회 대기 상한.
+                //  - DELIVERY_TIMEOUT_MS: 재시도 포함 전체 발행 완료 상한(≥ request timeout). 초과 시 실패로 전파돼
+                //    릴레이가 그 지점에서 멈추고 다음 사이클에 재시도합니다(순서 보존·유실 없음). 어댑터의 서킷브레이커가 반복 실패를 감지.
+                ProducerConfig.MAX_BLOCK_MS_CONFIG to 5000,
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG to 10000,
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG to 30000,
             ),
         )
 

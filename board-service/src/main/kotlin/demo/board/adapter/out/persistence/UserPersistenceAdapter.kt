@@ -16,5 +16,7 @@ class UserPersistenceAdapter(
     override suspend fun findByUsername(username: String): User? =
         userR2dbcRepository.findByUsername(username)?.let { userMapper.toDomain(it) }
 
+    override suspend fun findById(id: Long): User? = userR2dbcRepository.findById(id)?.let { userMapper.toDomain(it) }
+
     override suspend fun existsByUsername(username: String): Boolean = userR2dbcRepository.existsByUsername(username)
 }

@@ -8,5 +8,8 @@ interface UserRepositoryPort {
 
     suspend fun findByUsername(username: String): User?
 
+    // Refresh Token 재발급 시 토큰에 담긴 user_id로 사용자를 복원하는 데 씁니다.
+    suspend fun findById(id: Long): User?
+
     suspend fun existsByUsername(username: String): Boolean
 }

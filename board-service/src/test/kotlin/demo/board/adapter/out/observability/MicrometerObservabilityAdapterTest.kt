@@ -47,4 +47,19 @@ class MicrometerObservabilityAdapterTest :
             registry.get("board.view-count.flush").counter().count() shouldBe 10.0
             registry.get("board.archive").counter().count() shouldBe 5.0
         }
+
+        "아웃박스 백로그는 최신값으로 갱신되는 게이지로 노출된다" {
+            val registry = SimpleMeterRegistry()
+            val adapter = MicrometerObservabilityAdapter(registry)
+
+            // 등록 직후 초기값은 0.
+            registry.get("board.outbox.unpublished").gauge().value() shouldBe 0.0
+
+            adapter.updateOutboxBacklog(42)
+            registry.get("board.outbox.unpublished").gauge().value() shouldBe 42.0
+
+            // 카운터가 아니라 상태 게이지이므로 따라잡으면 다시 내려간다.
+            adapter.updateOutboxBacklog(0)
+            registry.get("board.outbox.unpublished").gauge().value() shouldBe 0.0
+        }
     })

@@ -5,6 +5,8 @@ import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.exception.BoardValidationException
 import demo.board.domain.exception.DuplicateUsernameException
 import demo.board.domain.exception.InvalidCredentialsException
+import demo.board.domain.exception.InvalidRefreshTokenException
+import demo.board.domain.exception.TooManyLoginAttemptsException
 import org.springframework.beans.TypeMismatchException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -36,6 +38,16 @@ class GlobalExceptionHandler {
     // 로그인 실패(사용자 미존재/비밀번호 불일치) → 401 Unauthorized. 어느 쪽인지 구분하지 않습니다.
     @ExceptionHandler(InvalidCredentialsException::class)
     fun handleInvalidCredentialsException(): ResponseEntity<FailureResponse> = failure(AuthErrorCode.InvalidCredentials)
+
+    // 로그인 시도 과다(brute-force 방어) → 429 Too Many Requests.
+    @ExceptionHandler(TooManyLoginAttemptsException::class)
+    fun handleTooManyLoginAttemptsException(): ResponseEntity<FailureResponse> =
+        failure(AuthErrorCode.TooManyLoginAttempts)
+
+    // 리프레시 토큰 무효/만료/재사용 → 401 Unauthorized.
+    @ExceptionHandler(InvalidRefreshTokenException::class)
+    fun handleInvalidRefreshTokenException(): ResponseEntity<FailureResponse> =
+        failure(AuthErrorCode.InvalidRefreshToken)
 
     // 커맨드/쿼리의 자가 검증(init 블록 require())에서 발생하는 유효성 검사 실패
     // (CreateBoardCommand·SignUpCommand·BoardPageQuery·BoardSearchQuery·ArchiveStaleBoardsCommand 등)

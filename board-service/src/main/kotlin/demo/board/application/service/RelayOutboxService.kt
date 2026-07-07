@@ -3,6 +3,7 @@ package demo.board.application.service
 import demo.board.application.port.`in`.RelayOutboxUseCase
 import demo.board.application.port.`in`.RelayResult
 import demo.board.application.port.out.EventPublisherPort
+import demo.board.application.port.out.ObservabilityPort
 import demo.board.application.port.out.OutboxRelayPort
 import demo.board.events.BoardChangedEvent
 import kotlinx.coroutines.CancellationException
@@ -20,13 +21,19 @@ import org.springframework.stereotype.Service
 class RelayOutboxService(
     private val outboxRelayPort: OutboxRelayPort,
     private val eventPublisherPort: EventPublisherPort,
+    // 미발행 백로그를 사이클마다 게이지로 보고합니다(board.outbox.unpublished). 릴레이가 밀리는지 관측하는 핵심 SLI.
+    private val observability: ObservabilityPort,
     @Value("\${board.outbox.relay.batch-size:100}") private val batchSize: Int = 100,
 ) : RelayOutboxUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override suspend fun relay(): RelayResult {
         val batch = outboxRelayPort.readUnpublished(batchSize)
-        if (batch.isEmpty()) return RelayResult(0)
+        if (batch.isEmpty()) {
+            // 발행할 게 없어도 백로그는 0으로 갱신해, 직전에 밀렸던 게이지가 회복됐음을 반영합니다.
+            observability.updateOutboxBacklog(0)
+            return RelayResult(0)
+        }
 
         val publishedIds = ArrayList<Long>(batch.size)
         for (record in batch) {
@@ -48,6 +55,19 @@ class RelayOutboxService(
         }
 
         if (publishedIds.isNotEmpty()) outboxRelayPort.markPublished(publishedIds)
+        // 이번 사이클 반영 후 남은 백로그를 게이지에 보고합니다(따라잡았으면 0, 밀렸으면 잔여분).
+        reportBacklog()
         return RelayResult(publishedIds.size)
+    }
+
+    // 백로그 조회 실패가 릴레이 자체를 깨지 않도록 베스트에포트로 감쌉니다(메트릭은 부수효과).
+    private suspend fun reportBacklog() {
+        try {
+            observability.updateOutboxBacklog(outboxRelayPort.countUnpublished())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("failed to report outbox backlog gauge; skipping this cycle. cause={}", e.toString())
+        }
     }
 }
