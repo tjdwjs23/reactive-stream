@@ -52,3 +52,6 @@ dependencies {
 tasks.withType<Test> {
     workingDir = rootProject.projectDir
 }
+
+// Spring Boot 앱 모듈은 실행 가능한 bootJar만 산출물로 씁니다. 중복되는 plain jar(-plain.jar)는 비활성화합니다.
+tasks.named<Jar>("jar") { enabled = false }

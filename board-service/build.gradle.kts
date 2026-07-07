@@ -91,6 +91,10 @@ tasks.withType<Test> {
     workingDir = rootProject.projectDir
 }
 
+// Spring Boot 앱 모듈은 실행 가능한 bootJar만 산출물로 씁니다. 중복되는 plain jar(-plain.jar)는 비활성화해
+// build/libs에 jar가 하나만 남게 합니다(Dockerfile이 단일 jar를 안전하게 COPY).
+tasks.named<Jar>("jar") { enabled = false }
+
 kover {
     reports {
         filters {

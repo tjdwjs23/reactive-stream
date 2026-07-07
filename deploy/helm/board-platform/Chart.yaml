@@ -1,0 +1,6 @@
+apiVersion: v2
+name: board-platform
+description: 로컬 k8s(kind)용 board-platform 차트 — board-service + search-indexer + 데이터스토어(PostgreSQL/Redis/Elasticsearch/Kafka)
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"

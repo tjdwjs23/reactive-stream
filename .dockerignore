@@ -1,0 +1,9 @@
+# 이미지 빌드 컨텍스트에서 제외(빌드 산출물·IDE·VCS·부하테스트 결과 등)
+.git
+.gradle
+**/build
+.idea
+.kotlin
+*.iml
+load/results
+monitoring
