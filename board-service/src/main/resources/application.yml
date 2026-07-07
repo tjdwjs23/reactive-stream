@@ -24,7 +24,7 @@ spring:
     pool:
       enabled: true
       initial-size: ${SPRING_R2DBC_POOL_INITIAL_SIZE:10}
-      max-size: ${SPRING_R2DBC_POOL_MAX_SIZE:30}
+      max-size: ${SPRING_R2DBC_POOL_MAX_SIZE:50}
       max-idle-time: 30m         # 유휴 커넥션을 이 시간 뒤 반납(idle 커넥션이 서버 자원을 계속 점유하지 않도록)
       max-life-time: 60m         # 커넥션 최대 수명(오래된 커넥션의 서버측 상태 누수 방지)
       max-acquire-time: ${SPRING_R2DBC_POOL_MAX_ACQUIRE_TIME:5s}  # 획득 타임아웃(무한 대기 차단)
@@ -163,5 +163,7 @@ board:
   outbox:
     relay:
       enabled: ${BOARD_OUTBOX_RELAY_ENABLED:false}
-      poll-interval-ms: 1000  # 미발행 폴링 주기(ms). 이전 사이클 종료 후 간격(fixedDelay)
-      batch-size: 100         # 한 사이클에 읽어 발행할 최대 이벤트 수
+      # 폴링 주기(ms). 짧을수록 지연↓·처리량↑(단 빈 폴링 부하↑). 대용량 쓰기에서 백로그 축적을 줄이려 200ms로.
+      poll-interval-ms: ${BOARD_OUTBOX_RELAY_POLL_MS:200}
+      # 한 사이클에 읽어 발행할 최대 이벤트 수. 처리량 상한 = batch-size / poll-interval. 500/200ms = ~2500 events/s.
+      batch-size: ${BOARD_OUTBOX_RELAY_BATCH_SIZE:500}
