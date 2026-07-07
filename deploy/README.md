@@ -5,7 +5,7 @@
 ```
 deploy/
 ├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기)
-├── pf.sh                          board-service(Swagger) + Grafana를 한 번에 port-forward
+├── pf.sh                          board-service(Swagger)+Grafana+Postgres를 한 번에 port-forward
 ├── down.sh                        정리(helm uninstall + kind 삭제, --all이면 colima까지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
 ├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081/3000 매핑)
@@ -31,8 +31,9 @@ brew install colima kind helm      # 최초 1회
 ./deploy/up.sh --obs               # 관측성(LGTM)까지 함께 (colima 12G로 자동 기동)
 
 # 접근(colima에선 직결 localhost가 불안정 → port-forward 권장):
-./deploy/pf.sh                     # board-service(8080, Swagger) + Grafana(3000) 한 번에, Ctrl+C로 종료
+./deploy/pf.sh                     # board-service(8080)+Grafana(3000)+Postgres(5432) 한 번에, Ctrl+C로 종료
 #   → http://localhost:8080/swagger-ui.html , http://localhost:3000 (admin/admin, --obs일 때)
+#   → DBeaver: localhost:5432 (db=reactive user=reactive pw=reactive1234); 5432 충돌 시 PG_LOCAL_PORT=5433 ./deploy/pf.sh
 
 # 정리:
 ./deploy/down.sh                   # helm + kind 삭제  (colima까지: ./deploy/down.sh --all)
