@@ -2608,6 +2608,279 @@
       }
     },
     {
+      "id": 64,
+      "type": "timeseries",
+      "title": "DLQ 격리 (dead-letter)",
+      "description": "board_indexer_dlq_total. 재시도해도 실패한 메시지가 board-changed-dlq로 격리된 수(rate + 누적). 0보다 크면 포이즌/영속 실패 조사 신호 — 정상 상태에서는 평평(0)해야 함.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "spanNulls": true
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "격리율(/s)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate(board_indexer_dlq_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "격리율(/s)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(board_indexer_dlq_total{job=~\"$job\"})",
+          "legendFormat": "누적"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 115
+      }
+    },
+    {
+      "id": 65,
+      "type": "timeseries",
+      "title": "색인 처리량 (upsert / delete)",
+      "description": "board_indexer_indexed_total / board_indexer_deleted_total. search-indexer가 초당 실제 반영한 문서 수. 컨슈머 랙·소비 처리량과 함께 보면 '소비는 하는데 색인이 되는지'를 구분할 수 있음.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "spanNulls": true
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "삭제"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate(board_indexer_indexed_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "upsert"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate(board_indexer_deleted_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "삭제"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 115
+      }
+    },
+    {
+      "id": 66,
+      "type": "timeseries",
+      "title": "색인 배치 지연 (ES 벌크 쓰기)",
+      "description": "board_indexer_batch_milliseconds. 배치 한 번의 ES 벌크 쓰기 소요 시간. avg는 항상, p95/p99는 histogram 버킷(publishPercentileHistogram)에서. 상승 = ES 색인 병목(랙 상승의 원인 구분).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "spanNulls": true
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate(board_indexer_batch_milliseconds_sum{job=~\"$job\"}[$__rate_interval])) / clamp_min(sum(rate(board_indexer_batch_milliseconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "avg"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(board_indexer_batch_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(board_indexer_batch_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 115
+      }
+    },
+    {
       "id": 43,
       "type": "row",
       "title": "🧪 부하 테스트 — k6 (부하 세션 중에만 데이터, 기본 접힘)",
@@ -2616,7 +2889,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 116
+        "y": 124
       },
       "panels": [
         {

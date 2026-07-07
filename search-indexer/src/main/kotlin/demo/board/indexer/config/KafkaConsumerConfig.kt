@@ -1,5 +1,6 @@
 package demo.board.indexer.config
 
+import demo.board.indexer.application.port.out.IndexerObservabilityPort
 import io.micrometer.core.instrument.MeterRegistry
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
@@ -77,10 +78,17 @@ class KafkaConsumerConfig(
     //  - 역직렬화 실패(포이즌): 리스너가 BatchListenerFailedException(index)를 던져 "그 레코드만" DLQ, 나머지는 계속.
     //  - ES 색인 실패(일시적): 배치를 2초 간격 3회(총 4회) 재시도한 뒤에도 실패하면 DLQ로 격리.
     // DLQ 파티션은 브로커가 키 기반으로 선택하도록 -1로 둡니다(원본 토픽과 파티션 수가 달라도 안전).
+    //
+    // 목적지 리졸버 람다는 "실제로 DLQ로 발행되는" 레코드마다 한 번 호출되므로, 여기서 격리 카운터를 증가시킵니다
+    // (board_indexer_dlq_total). DLQ 격리는 조용한 유실은 아니지만 사람이 조사해야 할 신호라 반드시 메트릭으로 남깁니다.
     @Bean
-    fun kafkaErrorHandler(dlqKafkaTemplate: KafkaTemplate<String, String>): DefaultErrorHandler {
+    fun kafkaErrorHandler(
+        dlqKafkaTemplate: KafkaTemplate<String, String>,
+        observability: IndexerObservabilityPort,
+    ): DefaultErrorHandler {
         val recoverer =
             DeadLetterPublishingRecoverer(dlqKafkaTemplate) { _, _ ->
+                observability.messageDeadLettered()
                 TopicPartition(DLQ_TOPIC, -1)
             }
         return DefaultErrorHandler(recoverer, FixedBackOff(2000L, 3L))

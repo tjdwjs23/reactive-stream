@@ -4,6 +4,7 @@ import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
 import demo.board.indexer.application.port.`in`.ApplyBoardChangeUseCase
 import demo.board.indexer.application.port.out.BoardIndexPort
+import demo.board.indexer.application.port.out.IndexerObservabilityPort
 import demo.board.indexer.domain.IndexedBoard
 import org.springframework.stereotype.Service
 
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service
 @Service
 class BoardIndexService(
     private val boardIndexPort: BoardIndexPort,
+    private val observability: IndexerObservabilityPort,
 ) : ApplyBoardChangeUseCase {
     override fun applyAll(events: List<BoardChangedEvent>) {
         if (events.isEmpty()) return
@@ -35,8 +37,14 @@ class BoardIndexService(
             }
         }
 
-        if (toSave.isNotEmpty()) boardIndexPort.saveAll(toSave)
-        if (toDelete.isNotEmpty()) boardIndexPort.deleteAllById(toDelete)
+        // ES 벌크 쓰기 소요 시간을 타이머로 감싼다(색인 병목 관측). 카운터는 쓰기가 성공적으로 끝난 뒤에만 증가시켜,
+        // ES 실패로 배치가 재시도될 때 중복 집계되지 않게 한다(saveAll/deleteAll은 멱등이라 재시도는 안전).
+        observability.recordIndexingBatch {
+            if (toSave.isNotEmpty()) boardIndexPort.saveAll(toSave)
+            if (toDelete.isNotEmpty()) boardIndexPort.deleteAllById(toDelete)
+        }
+        observability.boardsIndexed(toSave.size)
+        observability.boardsDeleted(toDelete.size)
     }
 
     // CREATED/UPDATED 이벤트는 색인에 필요한 필드가 항상 채워져 있다(프로듀서 계약). 누락 시 계약 위반이므로 즉시 실패한다.

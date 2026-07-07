@@ -3,6 +3,7 @@ package demo.board.indexer.application.service
 import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
 import demo.board.indexer.application.port.out.BoardIndexPort
+import demo.board.indexer.application.port.out.IndexerObservabilityPort
 import demo.board.indexer.domain.IndexedBoard
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
@@ -23,6 +24,13 @@ class BoardIndexServiceTest :
 
         val createdAt = LocalDateTime.of(2026, 7, 7, 10, 0)
 
+        // 관측 포트의 테스트 더블. recordIndexingBatch는 실제로 블록을 실행해 saveAll/deleteAll이 호출되게 하고,
+        // 카운터 메서드는 relaxed로 무해하게 흡수합니다(색인 로직 검증에는 관여하지 않음).
+        fun observability(): IndexerObservabilityPort =
+            mockk<IndexerObservabilityPort>(relaxed = true).also {
+                every { it.recordIndexingBatch(any()) } answers { firstArg<() -> Unit>().invoke() }
+            }
+
         fun event(
             type: BoardChangeType,
             boardId: Long = 1L,
@@ -42,7 +50,7 @@ class BoardIndexServiceTest :
 
         Given("CREATED/UPDATED 이벤트가 섞인 배치") {
             val port = mockk<BoardIndexPort>()
-            val service = BoardIndexService(port)
+            val service = BoardIndexService(port, observability())
             every { port.saveAll(any()) } just Runs
             every { port.deleteAllById(any()) } just Runs
 
@@ -76,7 +84,7 @@ class BoardIndexServiceTest :
 
         Given("DELETED 이벤트가 섞인 배치") {
             val port = mockk<BoardIndexPort>()
-            val service = BoardIndexService(port)
+            val service = BoardIndexService(port, observability())
             every { port.saveAll(any()) } just Runs
             every { port.deleteAllById(any()) } just Runs
 
@@ -101,7 +109,7 @@ class BoardIndexServiceTest :
 
         Given("같은 게시글의 이벤트가 한 배치에 여러 건 도착") {
             val port = mockk<BoardIndexPort>()
-            val service = BoardIndexService(port)
+            val service = BoardIndexService(port, observability())
             every { port.saveAll(any()) } just Runs
             every { port.deleteAllById(any()) } just Runs
 
@@ -124,23 +132,49 @@ class BoardIndexServiceTest :
             }
         }
 
+        Given("색인/삭제가 섞인 배치의 관측") {
+            val port = mockk<BoardIndexPort>()
+            val obs = observability()
+            val service = BoardIndexService(port, obs)
+            every { port.saveAll(any()) } just Runs
+            every { port.deleteAllById(any()) } just Runs
+
+            When("applyAll하면") {
+                service.applyAll(
+                    listOf(
+                        event(BoardChangeType.CREATED, boardId = 1L),
+                        event(BoardChangeType.UPDATED, boardId = 2L),
+                        event(BoardChangeType.DELETED, boardId = 9L, title = null, content = null),
+                    ),
+                )
+
+                Then("ES 쓰기를 타이머로 감싸고, 반영된 upsert·삭제 문서 수를 기록한다") {
+                    verify(exactly = 1) { obs.recordIndexingBatch(any()) }
+                    verify(exactly = 1) { obs.boardsIndexed(2) }
+                    verify(exactly = 1) { obs.boardsDeleted(1) }
+                }
+            }
+        }
+
         Given("빈 배치") {
             val port = mockk<BoardIndexPort>()
-            val service = BoardIndexService(port)
+            val obs = observability()
+            val service = BoardIndexService(port, obs)
 
             When("applyAll하면") {
                 service.applyAll(emptyList())
 
-                Then("아무 색인도 하지 않는다") {
+                Then("아무 색인도 관측도 하지 않는다") {
                     verify(exactly = 0) { port.saveAll(any()) }
                     verify(exactly = 0) { port.deleteAllById(any()) }
+                    verify(exactly = 0) { obs.recordIndexingBatch(any()) }
                 }
             }
         }
 
         Given("CREATED인데 title이 비어 있는(계약 위반) 이벤트") {
             val port = mockk<BoardIndexPort>()
-            val service = BoardIndexService(port)
+            val service = BoardIndexService(port, observability())
 
             When("applyAll하면") {
                 Then("계약 위반으로 즉시 실패한다") {
