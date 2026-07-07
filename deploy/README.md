@@ -4,15 +4,36 @@
 
 ```
 deploy/
-├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081 매핑)
-├── helm/board-platform/           Helm 차트 (앱 2 + 데이터스토어 4)
+├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기)
+├── down.sh                        정리(helm uninstall + kind 삭제, --all이면 colima까지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
+├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081/3000 매핑)
+├── helm/board-platform/           Helm 차트 (앱 2 + 데이터스토어 4 + LGTM 5)
 └── README.md                      이 문서(런북)
 ```
 
 구성 요소: `board-service`, `search-indexer` + `PostgreSQL` · `Redis` · `Elasticsearch(Nori)` · `Kafka(KRaft)`.
 관측성 스택(LGTM: Alloy·Mimir·Loki·Tempo·Grafana)도 **이 차트에 포함**되며 `observability.enabled`로 켜고 끕니다(docker-compose는 제거됨 — 모든 인프라가 여기에).
 기본은 off(로컬 리소스 절약): 앱 OTLP export가 꺼지고 LGTM 파드도 뜨지 않습니다.
+
+---
+
+## ⚡ 한 번에 실행 (권장)
+
+`colima` · `kind` · `helm`을 설치했다면 스크립트 하나로 끝납니다(멱등 — 이미 뜬 건 재사용).
+
+```bash
+brew install colima kind helm      # 최초 1회
+
+./deploy/up.sh                     # 코어(앱 + PostgreSQL/Redis/Elasticsearch/Kafka)
+#   또는
+./deploy/up.sh --obs               # 관측성(LGTM)까지 함께 (colima 12G로 자동 기동)
+
+# 끝나면 http://localhost:8080 접속. 정리:
+./deploy/down.sh                   # helm + kind 삭제  (colima까지: ./deploy/down.sh --all)
+```
+
+`up.sh`가 실패하거나 각 단계를 직접 이해하고 싶으면 아래 수동 절차를 따라가세요.
 
 ---
 
