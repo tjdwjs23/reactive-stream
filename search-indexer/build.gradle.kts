@@ -12,8 +12,9 @@ plugins {
 dependencies {
     implementation(project(":event-contract"))
 
-    // 웹 계층 없이 뜨는 애플리케이션(컨슈머 워커). health 확인용 actuator만 얹는다.
-    implementation("org.springframework.boot:spring-boot-starter")
+    // 컨슈머 워커지만, k8s liveness/readiness가 /actuator/health를 HTTP로 확인해야 하므로 경량 웹 서버(WebFlux/Netty)를 얹습니다.
+    // (웹 스타터가 없으면 HTTP 서버가 안 떠 actuator가 노출되지 않고 프로브가 영원히 실패합니다.)
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     // 관측성(board-service와 동일한 OTLP 파이프라인 → Grafana Alloy). 이 서비스도 metrics/logs/traces를 push해
@@ -22,8 +23,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.21.0-alpha")
 
-    // Elasticsearch 색인 writer. 컨슈머 스레드가 블로킹이므로 imperative ElasticsearchOperations를 쓴다
-    // (spring-web 없이 자동 구성됨). board-service의 리액티브 검색 어댑터와 대칭이지만 이쪽은 색인 전용.
+    // Elasticsearch 색인 writer. 컨슈머 스레드가 블로킹이므로 imperative ElasticsearchOperations를 씁니다
+    // (webflux가 있어도 imperative 템플릿 빈은 그대로 제공됨 — board-service와 동일 조합). 이쪽은 색인 전용.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
     // Kafka 소비. Boot 4는 spring-kafka만으론 자동 구성이 안 딸려오므로 KafkaConsumerConfig에서 직접 구성한다.
