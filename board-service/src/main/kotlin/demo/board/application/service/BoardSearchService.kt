@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.toList
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
-// 검색(읽기)과 전체 재색인을 담당하는 서비스. 쓰기 경로의 인라인 색인은 BoardService가 처리합니다.
+// 검색(읽기)과 전체 재색인을 담당하는 reader 서비스. 쓰기 경로의 색인은 여기서 하지 않습니다
+// (BoardService가 아웃박스 이벤트를 남기면 search-indexer가 Kafka로 소비해 ES에 반영합니다).
 // 검색은 ES만 읽으므로 DB 트랜잭션(@Transactional)이 필요 없습니다.
 @Service
 class BoardSearchService(

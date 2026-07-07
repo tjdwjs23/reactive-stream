@@ -10,8 +10,9 @@ class RefreshTokenPersistenceAdapter(
     private val repository: RefreshTokenR2dbcRepository,
     private val mapper: RefreshTokenMapper,
 ) : RefreshTokenPort {
-    override suspend fun save(token: RefreshToken): RefreshToken =
-        mapper.toDomain(repository.save(mapper.toEntity(token)))
+    override suspend fun save(token: RefreshToken) {
+        repository.save(mapper.toEntity(token))
+    }
 
     override suspend fun findByHash(tokenHash: String): RefreshToken? =
         repository.findByTokenHash(tokenHash)?.let { mapper.toDomain(it) }

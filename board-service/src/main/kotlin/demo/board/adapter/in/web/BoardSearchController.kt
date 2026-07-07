@@ -42,7 +42,7 @@ class BoardSearchController(
     @Operation(
         summary = "전체 재색인",
         description =
-            "DB(정본)를 순회하며 ES 색인을 다시 채웁니다. 인덱스를 새로 만들었거나 인라인 색인 누락을 회복할 때 사용합니다. " +
+            "DB(정본)를 순회하며 ES 색인을 다시 채웁니다. 인덱스를 새로 만들었거나 이벤트 유실로 인한 색인 누락을 회복할 때 사용합니다. " +
                 "ROLE_ADMIN 권한(Bearer 토큰)이 필요합니다.",
     )
     @SecurityRequirement(name = "bearer-jwt")

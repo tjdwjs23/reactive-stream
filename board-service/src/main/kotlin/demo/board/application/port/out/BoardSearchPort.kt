@@ -7,15 +7,9 @@ import kotlinx.coroutines.flow.Flow
 // 저장소가 Elasticsearch인지 무엇인지는 도메인/서비스가 모릅니다(포트-어댑터 경계).
 // 다건 검색 결과는 프로젝트 관례대로 List가 아닌 Flow로 흘려보냅니다.
 interface BoardSearchPort {
-    // 색인(upsert): 같은 id의 문서가 있으면 덮어씁니다. 생성/수정 시 호출됩니다.
-    suspend fun index(board: Board)
-
     // 벌크 색인(upsert): 여러 건을 한 번의 요청으로 색인합니다. 전체 재색인에서 건별 왕복을 피하려고 씁니다.
-    // 반환값은 색인에 성공한 문서 수.
+    // 반환값은 색인에 성공한 문서 수. (단건 색인/삭제는 이벤트 소비자인 search-indexer가 담당하므로 이 포트에 없습니다.)
     suspend fun indexAll(boards: List<Board>): Int
-
-    // 색인에서 제거. 게시글 삭제 시 호출됩니다.
-    suspend fun deleteById(id: Long)
 
     // 키워드 전문검색. Nori로 형태소 분석된 title/content를 대상으로 매칭하고,
     // 관련도(_score) 내림차순으로 최대 size건을 흘려보냅니다.

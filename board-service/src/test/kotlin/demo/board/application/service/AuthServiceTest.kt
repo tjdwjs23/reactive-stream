@@ -58,7 +58,7 @@ private class AuthFixture {
         every { authTokenPort.issue(user) } returns AuthToken(accessToken = "jwt-token", expiresInSeconds = 3600)
         every { refreshTokenHashPort.generateToken() } returns "raw-refresh"
         every { refreshTokenHashPort.hash("raw-refresh") } returns "hash-of-raw-refresh"
-        coEvery { refreshTokenPort.save(any()) } answers { firstArg() }
+        // refreshTokenPort는 relaxed 목이라 save(Unit 반환)는 별도 스텁이 필요 없습니다.
     }
 }
 

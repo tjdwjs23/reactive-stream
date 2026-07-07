@@ -31,21 +31,22 @@ class RefreshTokenPersistenceAdapterTest(
         )
 
         Given("리프레시 토큰을 저장하면") {
-            val saved = adapter.save(token(8001L, "hash-8001"))
+            adapter.save(token(8001L, "hash-8001"))
 
             When("findByHash로 조회하면") {
                 val found = adapter.findByHash("hash-8001")
 
                 Then("id가 채번되고 활성(revokedAt=null) 상태로 복원된다") {
-                    saved.id.shouldNotBeNull()
                     found.shouldNotBeNull()
+                    found?.id.shouldNotBeNull()
                     found?.userId shouldBe 8001L
                     found?.revokedAt.shouldBeNull()
                 }
             }
 
             When("revoke(id)로 폐기하면") {
-                adapter.revoke(saved.id!!)
+                val id = adapter.findByHash("hash-8001")?.id.shouldNotBeNull()
+                adapter.revoke(id)
 
                 Then("revokedAt이 채워진다") {
                     adapter.findByHash("hash-8001")?.revokedAt.shouldNotBeNull()

@@ -123,7 +123,7 @@ export default function (data) {
     const r = http.get(`${BASE_URL}/api/boards/${id}`, { tags: { name: 'get', op: 'read', expect: 'ok' } });
     check(r, { 'read 200': (x) => x.status === 200 }, { kind: 'expectation' });
   } else if (g < 88) {
-    // 쓰기: 새 글(→ DB write + ES 인라인 색인)
+    // 쓰기: 새 글(→ DB write + 아웃박스 이벤트 기록; ES 색인은 search-indexer가 비동기 반영)
     const r = http.post(`${BASE_URL}/api/boards`, JSON.stringify(randomBoardPayload()), {
       headers: authHeaders(data.userToken),
       tags: { name: 'create', op: 'write', expect: 'ok' },

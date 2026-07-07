@@ -46,20 +46,12 @@ private class FakeBoardSearchPort(
 ) : BoardSearchPort {
     val indexedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
-    override suspend fun index(board: Board) {
-        indexedIds.add(board.id!!)
-    }
-
     override suspend fun indexAll(boards: List<Board>): Int {
         if (failOnId != null && boards.any { it.id == failOnId }) {
             throw IllegalStateException("forced bulk failure on page containing id=$failOnId")
         }
         boards.forEach { indexedIds.add(it.id!!) }
         return boards.size
-    }
-
-    override suspend fun deleteById(id: Long) {
-        indexedIds.remove(id)
     }
 
     override fun search(

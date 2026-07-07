@@ -1,6 +1,6 @@
 // ★ 메인 시나리오 — 현실적인 종합 트래픽 믹스.
 // 읽기 70% : 쓰기 20% : 검색 10% 비율로 한 서버에 동시에 부하를 줍니다.
-// 세 경로(Redis 조회수 / DB write + ES 인라인 색인 / ES 검색)가 서로 경합하는 상황을 봅니다.
+// 세 경로(Redis 조회수 / DB write + 아웃박스 이벤트 기록 / ES 검색)가 서로 경합하는 상황을 봅니다.
 //
 //   BASE_URL=http://localhost:8080 k6 run load/scenarios/mixed.js
 //
@@ -82,7 +82,7 @@ export default function (data) {
     const res = http.get(`${BASE_URL}/api/boards/${id}`, { tags: { name: 'get', op: 'read' } });
     check(res, { 'read 200': (r) => r.status === 200 });
   } else if (roll < READ_PCT + WRITE_PCT) {
-    // 쓰기: 새 글 생성(→ DB write + 인라인 ES 색인). 인증 필요 — 로드 유저 토큰을 Bearer로 전달.
+    // 쓰기: 새 글 생성(→ DB write + 아웃박스 이벤트 기록; ES 색인은 search-indexer가 비동기 반영). 인증 필요 — 로드 유저 토큰을 Bearer로 전달.
     const res = http.post(`${BASE_URL}/api/boards`, JSON.stringify(randomBoardPayload()), {
       headers: authHeaders(data.userToken),
       tags: { name: 'create', op: 'write' },

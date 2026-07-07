@@ -4,7 +4,7 @@ import demo.board.domain.model.RefreshToken
 
 // 리프레시 토큰 영속화 out-port. 저장 매체(테이블)는 어댑터가 감춥니다. 서비스는 이 포트로만 다룹니다.
 interface RefreshTokenPort {
-    suspend fun save(token: RefreshToken): RefreshToken
+    suspend fun save(token: RefreshToken)
 
     // 제시된 토큰의 해시로 조회. 없으면 null(무효 토큰).
     suspend fun findByHash(tokenHash: String): RefreshToken?

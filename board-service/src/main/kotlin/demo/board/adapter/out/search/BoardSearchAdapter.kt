@@ -12,8 +12,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactive.asFlow
-import kotlinx.coroutines.reactive.awaitFirstOrNull
-import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.elasticsearch.client.elc.NativeQuery
 import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations
@@ -32,13 +30,8 @@ class BoardSearchAdapter(
     circuitBreakerRegistry: CircuitBreakerRegistry,
 ) : BoardSearchPort {
     // 검색(공개 read path)에 서킷브레이커를 겁니다. ES가 반복 실패/지연하면 서킷이 열려 검색이 즉시 실패하고,
-    // 요청이 ES 타임아웃만큼 매달리지 않습니다. 색인(index/indexAll/deleteById)은 관리 재색인 경로라 대상에서 제외합니다.
+    // 요청이 ES 타임아웃만큼 매달리지 않습니다. 벌크 색인(indexAll)은 관리 재색인 경로라 대상에서 제외합니다.
     private val breaker: CircuitBreaker = circuitBreakerRegistry.circuitBreaker(ResilienceConfig.ELASTICSEARCH_SEARCH)
-
-    // upsert: 같은 _id(=게시글 id) 문서가 있으면 통째로 덮어씁니다.
-    override suspend fun index(board: Board) {
-        operations.save(boardDocumentMapper.toDocument(board)).awaitSingle()
-    }
 
     // 벌크 upsert: saveAll로 한 번에 색인해 건별 왕복을 줄입니다. 반환값은 색인된 문서 수.
     override suspend fun indexAll(boards: List<Board>): Int {
@@ -48,11 +41,6 @@ class BoardSearchAdapter(
             .saveAll(documents, BoardDocument::class.java)
             .asFlow()
             .count()
-    }
-
-    // 색인에서 제거. 문서가 없어도 예외 없이 조용히 완료됩니다.
-    override suspend fun deleteById(id: Long) {
-        operations.delete(id.toString(), BoardDocument::class.java).awaitFirstOrNull()
     }
 
     // 키워드 전문검색: title/content를 대상으로 multi_match. title에 가중치(^2)를 줘 제목 매칭을 더 높게 칩니다.

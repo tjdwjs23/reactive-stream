@@ -5,7 +5,6 @@ import demo.board.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContain
-import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.awaitFirstOrNull
@@ -18,7 +17,7 @@ import java.time.LocalDateTime
 import io.kotest.matchers.string.shouldContain as stringShouldContain
 
 // 실제 Elasticsearch(+Nori) 컨테이너에 색인/검색을 수행하는 통합 테스트.
-// ES는 refresh 간격 뒤에야 검색에 반영되므로, 각 색인/삭제 후 인덱스를 명시적으로 refresh해 결정적으로 검증합니다.
+// ES는 refresh 간격 뒤에야 검색에 반영되므로, 색인 후 인덱스를 명시적으로 refresh해 결정적으로 검증합니다.
 @SpringBootTest
 class BoardSearchAdapterTest(
     @Autowired private val boardSearchAdapter: BoardSearchAdapter,
@@ -41,8 +40,7 @@ class BoardSearchAdapterTest(
                     content = "연락처 동기화. 메일과는 무관합니다.",
                     createdAt = LocalDateTime.now(),
                 )
-            boardSearchAdapter.index(mailBoard)
-            boardSearchAdapter.index(contactBoard)
+            boardSearchAdapter.indexAll(listOf(mailBoard, contactBoard))
             refresh()
 
             When("'메일'로 검색하면") {
@@ -62,16 +60,6 @@ class BoardSearchAdapterTest(
                 Then("매칭 부분이 <em>으로 하이라이트된다") {
                     val contactHit = hits.first { it.board.id == 9002L }
                     contactHit.highlightedContent!!.stringShouldContain("<em>메일</em>")
-                }
-            }
-
-            When("색인에서 9001을 삭제하고 다시 검색하면") {
-                boardSearchAdapter.deleteById(9001L)
-                refresh()
-                val idsAfterDelete = boardSearchAdapter.search("메일", 10).toList().map { it.board.id }
-
-                Then("삭제된 게시글은 더 이상 검색되지 않는다") {
-                    idsAfterDelete shouldNotContain 9001L
                 }
             }
         }

@@ -21,7 +21,7 @@ data class BoardSearchQuery(
 }
 
 // 6. 전체 재색인 유즈케이스: DB(정본)를 순회하며 ES 색인을 다시 채웁니다.
-// 인라인 색인이 실패로 누락됐거나 인덱스를 새로 만들었을 때 정합성을 회복하는 용도.
+// 이벤트 유실(발행 실패/DLQ 격리)로 색인이 누락됐거나 인덱스를 새로 만들었을 때 정합성을 회복하는 용도.
 interface ReindexBoardsUseCase {
     suspend fun reindexAll(): ReindexResult
 }
