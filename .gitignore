@@ -1,9 +1,8 @@
 HELP.md
 .gradle
+# 모든 모듈의 빌드 산출물(board-service/build, search-indexer/build, event-contract/build 포함)
 build/
 !gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
 
 ### STS ###
 .apt_generated
@@ -14,8 +13,6 @@ build/
 .springBeans
 .sts4-cache
 bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
 
 ### IntelliJ IDEA ###
 .idea
@@ -23,8 +20,6 @@ bin/
 *.iml
 *.ipr
 out/
-!**/src/main/**/out/
-!**/src/test/**/out/
 
 ### NetBeans ###
 /nbproject/private/

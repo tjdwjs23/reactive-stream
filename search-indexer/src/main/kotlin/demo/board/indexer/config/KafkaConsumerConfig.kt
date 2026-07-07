@@ -41,5 +41,8 @@ class KafkaConsumerConfig(
     ): ConcurrentKafkaListenerContainerFactory<String, String> =
         ConcurrentKafkaListenerContainerFactory<String, String>().apply {
             setConsumerFactory(consumerFactory)
+            // 분산 트레이싱: 메시지 헤더의 traceparent를 추출해 board-service의 발행 span과 연결합니다
+            // (@KafkaListener observation). 이게 꺼져 있으면 두 서비스의 트레이스가 끊긴 채 따로 보입니다.
+            containerProperties.isObservationEnabled = true
         }
 }

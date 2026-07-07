@@ -13,6 +13,10 @@ class ArchitectureTest :
 
         val project = Konsist.scopeFromProject()
 
+        // 모노레포 주의: scopeFromProject()는 루트(.git/settings 기준) 아래 전 모듈을 스캔합니다. board-service의
+        // 아키텍처 규칙은 board-service만 governance해야 하므로, demo.board 접두사를 공유하는 다른 모듈
+        // (search-indexer = demo.board.indexer..)은 아래 엔티티 위치 규칙에서 resideInPackage 부정으로 제외합니다.
+
         "레이어 의존성은 안쪽으로만 향한다 (Adapter → Application → Domain)" {
             project.assertArchitecture {
                 val domain = Layer("Domain", "demo.board.domain..")
@@ -66,6 +70,7 @@ class ArchitectureTest :
             Konsist
                 .scopeFromProject()
                 .classes()
+                .filter { clazz -> !clazz.resideInPackage("demo.board.indexer..") } // 다른 모듈(search-indexer) 제외
                 .filter { clazz -> clazz.hasAnnotation { it.name == "Table" } }
                 .assertFalse { clazz -> !clazz.resideInPackage("demo.board.adapter.out.persistence..") }
         }
@@ -74,6 +79,7 @@ class ArchitectureTest :
             Konsist
                 .scopeFromProject()
                 .classes()
+                .filter { clazz -> !clazz.resideInPackage("demo.board.indexer..") } // 다른 모듈(search-indexer) 제외
                 .filter { clazz -> clazz.hasAnnotation { it.name == "Document" } }
                 .assertFalse { clazz -> !clazz.resideInPackage("demo.board.adapter.out.search..") }
         }

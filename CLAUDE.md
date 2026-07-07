@@ -2,34 +2,48 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 모노레포 구조
+
+이 저장소는 **Gradle 멀티모듈 모노레포**(`rootProject.name = "board-platform"`)입니다. 게시판 정본 서비스와,
+그 변경 이벤트를 소비해 검색 인덱스를 갱신하는 서비스를 이벤트(Kafka)로 잇습니다.
+
+| 모듈 | 역할 |
+|---|---|
+| `event-contract` | 두 서비스가 공유하는 **순수 Kotlin 이벤트 계약**(`BoardChangedEvent`, 토픽명). 프레임워크 무의존 |
+| `board-service` | 게시판 API(정본, R2DBC). 아래 Architecture 전체가 이 모듈을 설명합니다. 쓰기 시 **Transactional Outbox**로 이벤트를 기록하고 Kafka(`board-changed`)로 발행 |
+| `search-indexer` | `board-changed`를 **@KafkaListener로 소비**해 Elasticsearch 색인을 upsert/삭제하는 독립 서비스(ES writer) |
+
+루트 `subprojects{}`가 Kotlin/JDK21/ktlint 공통 컨벤션을 적용하고, 서비스별 `bootJar`/배포는 독립입니다.
+아래 문서의 소스 경로(`adapter/...`, `application/...`, `domain/...`)는 별도 언급이 없으면 **`board-service/src/main/kotlin/demo/board/` 기준**입니다.
+
 ## Commands
 
 ```bash
-# Build
+# Build (전 모듈)
 ./gradlew clean build
 
-# Run
-./gradlew bootRun
+# Run (서비스별 — 멀티모듈이라 루트 bootRun은 모호합니다)
+./gradlew :board-service:bootRun
+./gradlew :search-indexer:bootRun     # Kafka + ES 필요(board.outbox.relay.enabled=true로 board-service 릴레이도 켜야 발행됨)
 
-# Test (all)
+# Test (전 모듈)
 ./gradlew test
 
-# Test (single class)
+# Test (단일 모듈 / 클래스 / 메서드)
+./gradlew :board-service:test
 ./gradlew test --tests "demo.board.BoardApplicationTests"
-
-# Test (single method)
 ./gradlew test --tests "demo.board.BoardApplicationTests.contextLoads"
 
 # Lint (ktlint) — CI 게이트
 ./gradlew ktlintCheck
 ./gradlew ktlintFormat        # 자동 포맷
 
-# Coverage (Kover) — CI 게이트(최소 라인 92%)
+# Coverage (Kover) — CI 게이트(board-service 최소 라인 92%)
 ./gradlew koverVerify         # 기준선 검증
-./gradlew koverHtmlReport     # build/reports/kover/html/index.html
+./gradlew koverHtmlReport     # board-service/build/reports/kover/html/index.html
 ```
 
-> **Quality gates**: 아키텍처 규칙은 **Konsist**(`src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 하한 92%로 게이트(`koverVerify`)하며, 부트스트랩(`BoardApplication*`)은 집계에서 제외합니다.
+> **Quality gates**: 아키텍처 규칙은 **Konsist**(`board-service/src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 board-service 하한 92%로 게이트(`koverVerify`)하며, 부트스트랩(`BoardApplication*`)은 집계에서 제외합니다.
 
 > **Note**: The app uses **R2DBC (non-blocking) only — no JDBC anywhere**. `application.yml` configures `spring.r2dbc.*`. Schema is initialized at startup by a **`ConnectionFactoryInitializer`** bean (`adapter/out/persistence/R2dbcSchemaInitializer.kt`) that runs `db/schema.sql` over R2DBC (Flyway was removed because it requires JDBC). `db/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/reactive`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers only the r2dbc URL and uses a **log-based wait strategy** (the default readiness probe uses JDBC, which is no longer on the classpath).
 
@@ -39,7 +53,7 @@ This is a **Hexagonal Architecture (Ports and Adapters)** board API in Kotlin + 
 
 **Reactive conventions (apply everywhere):**
 - Single-value operations that touch I/O are `suspend fun`. Multi-value reads return `Flow<T>` (never `List` at the port boundary).
-- Transaction boundaries stay **narrow — DB access only**. Spring's `ReactiveTransactionManager` (auto-configured by R2DBC) works on `suspend` functions, but `BoardService` deliberately has **no class-level `@Transactional`**: external side-effects (ES indexing, Redis increment) must run *outside* (and, for writes, *after*) the DB transaction so a rollback can't leave ES ahead of DB and so a Redis round-trip doesn't hold a DB connection. Writes are single-statement (R2DBC autocommit) + best-effort index after; reads (`getBoard`, `getBoards`) are single SELECTs with **no `@Transactional`** — a read-only tx around one autocommit statement buys nothing.
+- Transaction boundaries stay **narrow — DB access only**. `BoardService` has **no class-level `@Transactional`**: external side-effects (Redis increment) run *outside* the DB path so a Redis round-trip doesn't hold a DB connection, and reads (`getBoard`, `getBoards`) are single SELECTs with no tx. The **one deliberate exception** is writes: create/update/delete wrap **`boardRepositoryPort.save/delete` + `boardEventOutboxPort.record` in a single transaction** (via the `TransactionRunnerPort` out-port, implemented by `SpringTransactionRunner` over `TransactionalOperator`) — Transactional Outbox requires the DB change and the event row to be atomic. **ES indexing is no longer done inline in the write path**; the outbox event is published to Kafka and `search-indexer` applies it to ES. (`BoardService` no longer depends on `BoardSearchPort` at all — search *query* and *reindex* still live in `BoardSearchService`.)
 - Blocking-world driving adapters (e.g. the `@Scheduled` batch trigger, which can't be `suspend`) bridge into coroutines with `runBlocking` — keep that bridge inside the adapter.
 
 The three concentric layers — with dependency arrows pointing strictly inward:
@@ -87,13 +101,15 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 
 ### Korean full-text search (Elasticsearch + Nori)
 
-한글 형태소 전문검색은 **별도 out-port(`BoardSearchPort`) + ES 어댑터**로 붙어 있습니다. R2DBC(정본)와 ES(검색 인덱스)는 분리되며, 쓰기 경로에서 **베스트에포트 인라인 색인**으로 동기화합니다(조회수 Redis 패턴과 동일 — 색인 실패는 로그만 남기고 게시글 저장은 성공).
+한글 형태소 전문검색은 **별도 out-port(`BoardSearchPort`) + ES 어댑터**로 붙어 있습니다. R2DBC(정본)와 ES(검색 인덱스)는 분리됩니다. **색인 동기화는 더 이상 쓰기 경로 인라인이 아닙니다** — board-service가 쓰기와 원자적으로 남긴 아웃박스 이벤트를 Kafka(`board-changed`)로 발행하고, **`search-indexer`가 소비해 ES에 upsert/삭제**합니다(이벤트 기반 최종 일관성). board-service의 `BoardSearchService`는 ES에 대해 **검색 쿼리(`GET /api/boards/search`)와 전체 재색인**만 담당합니다(reader). 아래 항목은 board-service의 **검색/재색인(reader)** 관점 설명이며, ES **문서 스키마·색인 생성은 search-indexer가 소유(writer)**합니다.
+
+> **알려진 tradeoff(중복)**: 같은 `boards` 인덱스를 board-service(검색/재색인 reader)와 search-indexer(이벤트 writer)가 공유하므로, `BoardDocument`와 Nori 설정 JSON(`board-settings.json`/`board-mappings.json`)이 **두 모듈에 중복**됩니다. 매핑 변경 시 양쪽을 함께 고쳐야 하며(드리프트 위험), 공유 스키마 모듈 추출은 후속 과제입니다. 또한 `reindex`는 board-service가 ES에 직접 쓰는 dual-writer 경로라, 이벤트 리플레이 기반으로 옮기는 것도 후속 과제입니다.
 
 - **버전 제약**: Spring Boot 4는 Elasticsearch **9.2.x 클라이언트**(`spring-data-elasticsearch 6.x` + `elasticsearch-java`)를 번들합니다. ES 8 서버는 프로토콜(호환 미디어 타입)이 맞지 않아 통신이 깨지므로 **서버도 ES 9.2.x**를 써야 합니다. docker-compose는 `docker/elasticsearch/Dockerfile`(공식 이미지 + `analysis-nori` 플러그인)을 빌드해 `reactive-elasticsearch-nori:9.2.2`로 띄웁니다.
 - **인덱스/분석기**: `boards` 인덱스는 기동 시 `BoardSearchIndexInitializer`(`@EventListener(ApplicationReadyEvent)` + `runBlocking` 브리지)가 멱등 생성합니다. Nori 분석기 정의는 `resources/elasticsearch/board-settings.json`(nori_tokenizer, decompound_mode=mixed + nori_part_of_speech/readingform/lowercase 필터), 필드 매핑은 `board-mappings.json`(title/content를 `korean` 분석기로). `BoardDocument`의 `@Setting`/`@Mapping`이 이 JSON을 가리키며 매핑의 최종 권위입니다.
 - **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match`(title^2, content)로 검색하고, 기본 `_score` 내림차순(관련도순)으로 정렬 + `<em>` 하이라이트를 반환합니다. 다건은 관례대로 `Flow<BoardSearchHit>`.
 - **엔티티 분리**: 도메인 `Board` ↔ `BoardDocument` 변환은 `BoardDocumentMapper`에서만. 도메인 모델에는 ES 애노테이션이 새어 들어가지 않습니다(R2DBC 엔티티 규칙과 동일).
-- **정합성 회복**: 인라인 색인 누락이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. 색인은 **페이지 단위 벌크(`BoardSearchPort.indexAll` → ES `saveAll`)**로 수행하고, 한 페이지가 실패해도 그 페이지만 건너뛰며 실패 건수를 집계합니다. 결과는 `ReindexResult(indexed, failed)`로 반환됩니다(응답 `result.reindexed`/`result.failed`). ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
+- **정합성 회복**: 이벤트 유실이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. 색인은 **페이지 단위 벌크(`BoardSearchPort.indexAll` → ES `saveAll`)**로 수행하고, 한 페이지가 실패해도 그 페이지만 건너뛰며 실패 건수를 집계합니다. 결과는 `ReindexResult(indexed, failed)`로 반환됩니다(응답 `result.reindexed`/`result.failed`). ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
 
 ### Adding a new feature
 

@@ -17,8 +17,40 @@ spring:
 server:
   port: 8081
 
+# 로그: board-service와 동일하게 콘솔을 구조화 JSON(ECS)으로 출력하고(trace/span id 포함), OTel appender로 OTLP push.
+logging:
+  structured:
+    format:
+      console: ecs
+
+# 관측성: board-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push.
+# service.name은 spring.application.name(=search-indexer)이라 board-service(reactive)와 Grafana/Tempo/Mimir에서 구분됩니다.
+# (service.namespace는 board-service와 동일한 이유로 두지 않습니다 — 상관 키를 raw service.name으로 통일.)
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    resource-attributes:
+      deployment.environment: ${DEPLOYMENT_ENV:local}
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_LOGS_ENDPOINT:http://localhost:4318/v1/logs}
+          transport: http
+  otlp:
+    metrics:
+      export:
+        url: ${OTLP_METRICS_URL:http://localhost:4318/v1/metrics}

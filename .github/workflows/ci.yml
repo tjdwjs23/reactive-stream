@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # 모든 브랜치 푸시에서 검증합니다(피처 브랜치의 큰 구조 변경이 머지 전에 CI를 통과하도록).
+    branches: ['**']
   pull_request:
     branches: [main]
 
@@ -32,7 +33,8 @@ jobs:
       - name: Run ktlint
         run: ./gradlew ktlintCheck
 
-      # 테스트(Konsist 아키텍처 규칙 포함) 실행 + 커버리지 게이트(koverVerify, 최소 85%)
+      # 전 모듈 테스트(Konsist 아키텍처 규칙 포함) 실행 + 커버리지 게이트(koverVerify, board-service 최소 92%).
+      # test는 모든 모듈로 팬아웃되고, kover 게이트는 board-service에만 적용됩니다.
       - name: Run tests & coverage
         run: ./gradlew test koverVerify koverHtmlReport
 
@@ -41,7 +43,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-report
-          path: build/reports/tests/test
+          # 멀티모듈: 각 모듈의 build/reports 아래 리포트를 모두 수집합니다(구조 보존).
+          path: '**/build/reports/tests/test'
           retention-days: 7
 
       - name: Upload coverage report
@@ -49,5 +52,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: build/reports/kover/html
+          # Kover는 board-service에만 적용됩니다.
+          path: board-service/build/reports/kover/html
           retention-days: 7

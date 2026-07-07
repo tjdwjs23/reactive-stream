@@ -35,5 +35,9 @@ class KafkaProducerConfig(
 
     @Bean
     fun kafkaTemplate(producerFactory: ProducerFactory<Any, Any>): KafkaTemplate<Any, Any> =
-        KafkaTemplate(producerFactory)
+        KafkaTemplate(producerFactory).apply {
+            // 분산 트레이싱: 발행 시 traceparent를 Kafka 메시지 헤더에 주입해, board-service의 트레이스가
+            // search-indexer 소비 span과 하나로 이어지게 합니다(Micrometer/OTel KafkaTemplate observation).
+            setObservationEnabled(true)
+        }
 }
