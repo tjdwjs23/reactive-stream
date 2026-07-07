@@ -14,7 +14,11 @@ cd "$ROOT"
 OBS=false
 if [[ "${1:-}" == "--obs" || "${1:-}" == "--observability" ]]; then OBS=true; fi
 
-if $OBS; then COLIMA_CPU=4; COLIMA_MEM=12; else COLIMA_CPU=4; COLIMA_MEM=8; fi
+# colima 자원. 환경변수로 오버라이드 가능(부하테스트 시 크게):
+#   COLIMA_CPU=10 COLIMA_MEM=24 ./deploy/up.sh
+# 미지정 시 기본(obs면 메모리↑). 맥 물리 코어보다 작게 두고, k6를 호스트에서 돌린다면 코어를 남겨두세요.
+COLIMA_CPU="${COLIMA_CPU:-4}"
+if $OBS; then COLIMA_MEM="${COLIMA_MEM:-12}"; else COLIMA_MEM="${COLIMA_MEM:-8}"; fi
 
 echo "==> [1/6] Colima (cpu=${COLIMA_CPU}, mem=${COLIMA_MEM}G)"
 if colima status >/dev/null 2>&1; then

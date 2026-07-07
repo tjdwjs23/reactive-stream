@@ -21,18 +21,73 @@ load/
 ├── scenarios/
 │   ├── smoke.js       # 최소 경로 점검(부하 X) — 본 부하 전 항상 먼저
 │   ├── mixed.js       # ★ 메인: 읽기7:쓰기2:검색1 종합 트래픽 믹스
-│   └── pagination.js  # ★ 키셋 페이지네이션 깊이무관성(shallow/mid/deep) 증명
+│   ├── pagination.js  # ★ 키셋 페이지네이션 깊이무관성(shallow/mid/deep) 증명
+│   └── signals.js     # 관측성 데모(정상+에러+포화 스파이크)
+├── run-load.sh        # ★ 로컬 k8s 고부하용 — k6를 클러스터 안 Job으로 실행(호스트 브리지 우회)
 ├── results/
-│   ├── mixed-sweep.md  # 종합 믹스 부하 스윕 결과(포트폴리오 자산)
-│   └── large-scale.md  # 대용량 키셋 깊이무관성 실측 결과
+│   ├── mixed-sweep.md            # 종합 믹스 부하 스윕 결과(포트폴리오 자산)
+│   ├── large-scale.md            # 대용량 키셋 깊이무관성 실측 결과
+│   └── k8s-load-2026-07-07.md    # k8s(Helm) 실측 + in-cluster 측정·환경 병목 규명
 └── README.md
 ```
 
 > `mixed.js`·`pagination.js`는 단독 실행이 아니라 `lib/config.js`·`lib/helpers.js`를 import합니다.
 
+> **로컬 k8s(kind)에서 고부하를 줄 거면 아래 [로컬 k8s 고부하] 섹션의 `run-load.sh`를 쓰세요.**
+> 호스트에서 `k6 run ... localhost:8080`으로 직접 때리면 ~1,000 동시 커넥션에서 colima의 호스트↔VM
+> 포트매핑(docker-proxy)이 무너져 앱·kube-API가 함께 죽습니다(측정 불가). 저부하/스모크는 호스트 실행으로 충분.
+
 ---
 
-# 혼자 부하 테스트하는 법 (처음부터 끝까지)
+# 로컬 k8s 고부하 — `run-load.sh` (권장 경로)
+
+로컬 kind에서 **높은 RPS**로 부하를 줄 땐 호스트에서 `k6 run localhost:8080`을 쓰면 안 됩니다.
+k6가 여는 수백~수천 동시 커넥션이 kind NodePort의 **호스트↔VM 포트매핑(docker-proxy)** 한계(~1,000
+커넥션)에 걸려, 앱 NodePort와 kube-API 매핑이 **동시에 무너집니다**(요청이 즉시 실패하고 `kubectl`도 끊김).
+이건 앱 문제가 아니라 로컬 VM 경계의 측정 아티팩트입니다(실 EKS엔 이 경계가 없음).
+
+**해결: k6를 클러스터 안 Job으로 띄워 ClusterIP(`board-service:8080`)를 직접 호출** — 호스트↔VM 경계를
+아예 안 건넙니다. `run-load.sh`가 이 과정(스크립트 ConfigMap 생성 → k6 Job 실행 → 로그 스트리밍)을 자동화합니다.
+
+## 준비 — 코어 넉넉히 클러스터 기동
+
+부하 생성기(k6)도 같은 VM에서 도니 colima에 코어를 넉넉히 줍니다(맥 물리 코어보다 작게).
+
+```bash
+COLIMA_CPU=10 COLIMA_MEM=24 ./deploy/up.sh          # 예: 14코어 맥에서 10코어 할당
+# 이미 떠 있으면: colima stop && colima start --cpu 10 --memory 24  (postgres PVC 데이터는 유지)
+```
+
+## 실행
+
+```bash
+PEAK_RATE=3000 ./load/run-load.sh mixed                       # 종합 믹스 3000 RPS
+PEAK_RATE=2000 ID_MAX=148000 ./load/run-load.sh pagination     # 키셋 깊이무관성
+PEAK_RATE=4000 SUSTAIN_DUR=1m K6_MEM=4Gi ./load/run-load.sh mixed   # 고RPS는 k6 메모리↑(OOM 방지)
+./load/run-load.sh smoke                                        # 경로 점검
+```
+
+- 1번째 인자 = 시나리오(`mixed`|`pagination`|`smoke`|`signals`, 기본 `mixed`).
+- 호스트에 설정한 env(`PEAK_RATE`, `READ_PCT`, `HOT_COUNT`, `ID_MAX`, `WARMUP_DUR`/`RAMP_DUR`/`SUSTAIN_DUR`/
+  `RAMPDOWN_DUR` 등)를 그대로 Job에 전달합니다(아래 [주요 환경변수] 표와 동일).
+- `BASE_URL`은 자동으로 `http://board-service:8080`(ClusterIP)로 고정됩니다.
+- k6 Job 자원: `K6_CPU`(기본 3), `K6_MEM`(기본 3Gi) — VU 수천의 고RPS에선 k6 자신이 OOM날 수 있어 `K6_MEM=4Gi` 등으로 올리세요.
+- 결과는 k6 요약이 로그로 스트리밍됩니다. 도중에 Ctrl+C해도 Job은 계속 돌며, `kubectl logs job/k6-load`로 다시 볼 수 있습니다.
+- 정리: `kubectl delete job k6-load; kubectl delete configmap k6-scripts`.
+
+> ⚠️ **램프를 너무 짧게 주지 마세요.** `RAMP_DUR`을 몇 초로 두고 높은 `PEAK_RATE`를 주면 스파이크 충격으로
+> 실제보다 일찍 붕괴한 것처럼 보입니다(warm-up·커넥션 확보 시간 부족). knee 측정은 `RAMP_DUR`을 10s+로.
+
+**실측 참고**(colima 10코어, in-cluster, replicas=1): mixed 2000·3000 RPS 정상(p95 4~9ms), 4000 붕괴 →
+knee ≈ 3,000~4,000 RPS. 호스트 NodePort 경로(knee 1,500)의 약 2배. 자세한 건
+[`results/k8s-load-2026-07-07.md`](results/k8s-load-2026-07-07.md).
+
+---
+
+# 혼자 부하 테스트하는 법 (호스트에서 직접 — 저부하/개발용)
+
+> 아래는 **호스트에서 `k6 run`** 하는 방식입니다. 저부하·스모크·개발엔 간편하지만, 로컬 k8s에서 고부하를
+> 줄 땐 위 `run-load.sh`를 쓰세요(호스트↔VM 브리지 한계). BASE_URL을 실 서버로 바꾸면 그대로 원격 부하도 됩니다.
 
 ## 0. 한 번만 — 설치
 
