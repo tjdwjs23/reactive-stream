@@ -286,15 +286,16 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 ### Prerequisites
 JDK 21+, `colima` · `kind` · `helm`(+ `docker` CLI). `brew install colima kind helm`.
 
-### 요약 (상세는 deploy/README.md)
+### 한 번에 실행
 ```bash
-colima start --cpu 4 --memory 8                                   # 관측성까지 켜려면 12~14GB
-kind create cluster --config deploy/kind/kind-config.yaml
-./deploy/build-and-load.sh                                        # 이미지 3종 빌드 + kind 주입
-helm upgrade --install board-platform deploy/helm/board-platform  # 전 스택 배포
-kubectl get pods -w
+brew install colima kind helm       # 최초 1회
+./deploy/up.sh                      # colima → kind → 이미지 빌드/주입 → helm → 롤아웃 대기, 한 방에 (멱등)
+#   관측성(LGTM)까지 함께:  ./deploy/up.sh --obs
+kubectl get pods -w                 # 6개(코어) 또는 11개(--obs) Ready 대기
 ```
-`board-service`는 kind 포트 매핑으로 **호스트 `localhost:8080`** 에서 열립니다. 데이터스토어(PostgreSQL/Redis/Elasticsearch/Kafka)와 앱이 모두 클러스터 안에 뜨고, 관측성(LGTM)은 `--set observability.enabled=true`로 함께 배포됩니다.
+끝나면 `board-service`가 kind 포트 매핑으로 **호스트 `localhost:8080`** 에 열립니다(데이터스토어 PostgreSQL/Redis/Elasticsearch/Kafka + 앱이 모두 클러스터 안). 정리는 `./deploy/down.sh`. 단계별 수동 절차·values 튜닝·end-to-end curl 예시는 [`deploy/README.md`](./deploy/README.md).
+
+> `--obs`를 주면 관측성(LGTM: Alloy/Mimir/Loki/Tempo/Grafana)까지 클러스터에 함께 뜨고(파드 11개, colima 12G 권장), Grafana는 `http://localhost:3000`. 기본은 코어만(6개)이라 앱 OTLP export는 꺼집니다.
 
 > `board-service`는 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`(멱등 `CREATE TABLE IF NOT EXISTS`)을 R2DBC로 실행합니다(Flyway는 JDBC 의존이라 제거). 모든 설정은 `${ENV:default}`로 외부화돼 Helm이 ConfigMap/Secret으로 주입합니다.
 

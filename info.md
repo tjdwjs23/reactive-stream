@@ -229,3 +229,40 @@ board-service                                                  search-indexer
 | **트리거** | @Scheduled(30초) | @Scheduled(cron, opt-in) | @Scheduled 릴레이(opt-in) + @KafkaListener |
 
 > 한 줄 요약: ①은 **버퍼로 흡수**, ②는 **스트림으로 분해**, ③은 **원자적 이벤트로 잇기**. 세 가지 모두 "실패를 가정하고, 유실 대신 재시도"라는 같은 태도로 설계됐습니다.
+
+---
+
+# 🚀 이 조각들, 로컬에서 어떻게 다 띄우나 (k8s 한 눈에)
+
+지금까지 이야기한 게 실제로 돌려면 **여러 프로그램이 동시에** 떠 있어야 합니다: 게시판 앱, 검색 색인 앱, 그리고 그들이 쓰는 DB·Redis·Elasticsearch·Kafka. 예전엔 docker-compose로 한꺼번에 띄웠지만, 지금은 **로컬 쿠버네티스(k8s)** 로 옮겼습니다. 실제 배포 환경과 같은 방식으로 연습하려는 것입니다.
+
+## 아파트 한 동에 세대를 들이는 것과 같다
+
+```
+[ 내 Mac ]
+   └─ Colima (컨테이너 런타임 = 아파트 부지)
+        └─ kind (쿠버네티스 클러스터 = 아파트 한 동)
+             ├─ board-service   (게시판 앱)      ← localhost:8080 로 노출
+             ├─ search-indexer  (색인 앱)
+             ├─ postgres · redis · elasticsearch · kafka   (데이터스토어 = 각 세대)
+             └─ (선택) alloy·mimir·loki·tempo·grafana        (관측성 = 관리사무소)
+```
+
+- **파드(Pod)** = 각 프로그램이 사는 집 한 채. 위 조각 하나하나가 파드입니다.
+- **서비스(Service)** = 집 주소(DNS). 앱은 `kafka:9092`, `postgres:5432`처럼 **이름으로** 서로를 찾습니다(IP를 몰라도 됨).
+- **Helm** = 이 모든 세대의 입주 계획서(차트). 명령 하나로 전부 배치합니다.
+
+## 명령 하나로
+
+```bash
+./deploy/up.sh          # 코어 6개(앱 2 + DB/Redis/ES/Kafka)만 — 가볍게
+./deploy/up.sh --obs    # 관측성(LGTM 5개)까지 = 11개 — 모니터링 화면까지
+```
+
+`up.sh`가 순서대로 해줍니다: **Colima 켜기 → kind 클러스터 만들기 → 앱 이미지 빌드해 클러스터에 넣기 → Helm으로 배포 → 다 뜰 때까지 대기.** 끝나면 `localhost:8080`이 게시판, `--obs`면 `localhost:3000`이 Grafana입니다. 정리는 `./deploy/down.sh`.
+
+## 왜 굳이 k8s로?
+
+docker-compose도 "여러 개를 같이 띄우기"는 하지만, 쿠버네티스는 한 발 더 나아가 **떨어지면 다시 세우고(자가 치유), 준비될 때까지 트래픽을 안 보내고(readiness), 설정을 Secret으로 분리**합니다 — 실제 서비스가 굴러가는 방식 그대로입니다. 그래서 앞의 세 시스템(조회수·아카이브·아웃박스)이 "실패를 가정하고 재시도"하도록 만든 것처럼, **배포도 같은 태도**로 연습하는 셈입니다.
+
+> 실제 명령·헬스 확인·문제 진단(로그 보기 등)은 [`deploy/README.md`](./deploy/README.md)에 정리돼 있습니다.

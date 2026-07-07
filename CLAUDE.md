@@ -47,6 +47,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Note**: The app uses **R2DBC (non-blocking) only — no JDBC anywhere**. `application.yml` configures `spring.r2dbc.*`. Schema is initialized at startup by a **`ConnectionFactoryInitializer`** bean (`adapter/out/persistence/R2dbcSchemaInitializer.kt`) that runs `db/schema.sql` over R2DBC (Flyway was removed because it requires JDBC). `db/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/reactive`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`), which registers only the r2dbc URL and uses a **log-based wait strategy** (the default readiness probe uses JDBC, which is no longer on the classpath).
 
+## 로컬 실행 / 배포 (Colima + kind + Helm)
+
+**docker-compose는 제거됐고**, 로컬 실행은 **k8s(Helm)** 로 통일됐습니다(클라우드 미연결). 모든 인프라와 두 서비스가 kind 클러스터 안에서 뜹니다. 자산은 `deploy/`에 있습니다.
+
+- **원클릭**: `./deploy/up.sh`(코어 = 앱 2 + PostgreSQL/Redis/Elasticsearch/Kafka = 6파드, 멱등) / `./deploy/up.sh --obs`(+ LGTM 관측성 5파드 = 11, colima 12G). 정리 `./deploy/down.sh`(`--all`이면 colima까지).
+- **차트**: `deploy/helm/board-platform`(Chart/values/templates). 데이터스토어·앱은 항상, LGTM(Alloy/Mimir/Loki/Tempo/Grafana)은 `observability.enabled`로 토글(기본 off — 앱 OTLP export도 함께 꺼짐). LGTM 설정은 `files/`(compose에서 이관, 서비스명이 같아 그대로 재사용).
+- **앱 설정 주입**: ConfigMap/Secret env — `SPRING_R2DBC_URL`=postgres, `SPRING_DATA_REDIS_HOST`=redis, `SPRING_ELASTICSEARCH_URIS`=http://elasticsearch:9200, `KAFKA_BOOTSTRAP_SERVERS`=kafka:9092, `BOARD_OUTBOX_RELAY_ENABLED`=true.
+- **이미지**: `board-service/Dockerfile`·`search-indexer/Dockerfile`(멀티스테이지, 빌드 컨텍스트=레포 루트). `deploy/build-and-load.sh`가 빌드→`kind load`(로컬 이미지라 pull 불가, `imagePullPolicy: IfNotPresent`). 두 앱 모듈은 plain jar 비활성(`tasks.named<Jar>("jar")`)이라 `build/libs`에 bootJar 하나만 남습니다.
+- **접근**: board-service `localhost:8080`(NodePort 30080), search-indexer `localhost:8081`, Grafana `localhost:3000`(--obs). 코드 변경 반영은 재빌드+load 후 `kubectl rollout restart deploy/<svc>`.
+- 빠른 개발 반복은 `:board-service:bootRun`도 되지만 데이터스토어를 `kubectl port-forward`로 당겨야 합니다. 상세 런북: `deploy/README.md`.
+
 ## Architecture
 
 This is a **Hexagonal Architecture (Ports and Adapters)** board API in Kotlin + Spring Boot 4 / JDK 21, on a **reactive stack: Spring WebFlux + Kotlin coroutines + Spring Data R2DBC**.
