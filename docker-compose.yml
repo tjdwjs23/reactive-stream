@@ -17,6 +17,7 @@
 #   PostgreSQL     localhost:5432  (db/user=reactive, pw=reactive1234)
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200  (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
+#   Kafka          localhost:9092  (KRaft 단일 노드, board-changed 토픽 — Outbox 릴레이 → search-indexer)
 #   Grafana        http://localhost:3000  (admin / admin) — 메트릭·로그·트레이스 3종 데이터소스 자동 등록
 #   Alloy          OTLP 수신 4318(HTTP)·4317(gRPC) — 앱이 여기로 push / 디버그 UI http://localhost:12345
 #   Mimir          http://localhost:9009  (메트릭 저장/조회, Alloy가 OTLP로 전달)
@@ -76,6 +77,34 @@ services:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    # 이벤트 브로커(KRaft 단일 노드 — Zookeeper 불필요). board-service의 Outbox 릴레이가 board-changed 토픽으로
+    # 게시글 변경 이벤트를 발행하고, search-indexer가 소비해 ES 색인을 갱신합니다.
+    # 호스트에서 bootRun으로 뜨는 앱이 localhost:9092로 붙도록 advertised listener를 localhost로 둡니다.
+    image: apache/kafka:3.9.0
+    container_name: reactive-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      # 단일 노드라 복제 계수/ISR을 1로. board-changed 토픽은 첫 발행 시 자동 생성됩니다.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

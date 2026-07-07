@@ -1,22 +1,20 @@
 package demo.board.indexer.adapter.`in`.messaging
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import demo.board.events.BoardChangedEvent
+import demo.board.indexer.application.port.`in`.ApplyBoardChangeUseCase
 import org.slf4j.LoggerFactory
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
+import tools.jackson.databind.ObjectMapper
 
-/**
- * board-changed 토픽 컨슈머(드라이빙 어댑터).
- *
- * @KafkaListener 컨테이너는 자체 스레드에서 폴링하는 blocking 세계다 — board-service의 @Scheduled 배치와
- * 같은 성격이라, 코루틴이 필요한 후속 색인 처리는 어댑터 안에서 runBlocking으로 브리지한다(프로젝트 공통 컨벤션).
- *
- * 현재는 수신·역직렬화·로그까지. 다음 단계에서 ES 색인 out-port 호출을 여기에 연결한다.
- */
+// board-changed 토픽 컨슈머(드라이빙 어댑터). 웹 컨트롤러가 UseCase에 의존하듯, 이 어댑터도 UseCase에만 의존합니다.
+//
+// @KafkaListener 컨테이너는 자체 스레드에서 블로킹 폴링하므로(board-service의 @Scheduled 배치와 같은 성격),
+// 여기서 역직렬화 후 유스케이스를 동기 호출합니다. 역직렬화는 Boot 4의 Jackson 3(tools.jackson) ObjectMapper로 합니다.
 @Component
 class BoardChangedListener(
     private val objectMapper: ObjectMapper,
+    private val applyBoardChangeUseCase: ApplyBoardChangeUseCase,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -29,6 +27,6 @@ class BoardChangedListener(
             event.boardId,
             event.type,
         )
-        // TODO(next): BoardSearchPort로 색인 갱신(CREATED/UPDATED) / 삭제(DELETED) — 멱등 처리(eventId)
+        applyBoardChangeUseCase.apply(event)
     }
 }

@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "title": {
+      "type": "text",
+      "analyzer": "korean"
+    },
+    "content": {
+      "type": "text",
+      "analyzer": "korean"
+    },
+    "createdAt": {
+      "type": "date"
+    },
+    "viewCount": {
+      "type": "long"
+    }
+  }
+}

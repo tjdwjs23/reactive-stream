@@ -16,18 +16,33 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
-    // Kafka 소비. @KafkaListener 컨테이너가 별도 스레드에서 폴링하고, 어댑터가 runBlocking으로 브리지한다.
+    // Elasticsearch 색인 writer. 컨슈머 스레드가 블로킹이므로 imperative ElasticsearchOperations를 쓴다
+    // (spring-web 없이 자동 구성됨). board-service의 리액티브 검색 어댑터와 대칭이지만 이쪽은 색인 전용.
+    implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
+
+    // Kafka 소비. Boot 4는 spring-kafka만으론 자동 구성이 안 딸려오므로 KafkaConsumerConfig에서 직접 구성한다.
     implementation("org.springframework.kafka:spring-kafka")
 
-    // 이벤트 JSON ↔ Kotlin data class 역직렬화(Instant 포함)
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    // java.time(Instant) (역)직렬화. 이게 있어야 JacksonAutoConfiguration이 jsr310 모듈을 등록한다.
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    // 이벤트 JSON 역직렬화. Boot 4는 Jackson 3(tools.jackson) 기반이라 starter-json이 ObjectMapper를 자동 구성하고,
+    // Kotlin data class 역직렬화를 위해 Jackson 3 Kotlin 모듈을 더한다(java.time은 Jackson 3에 기본 내장).
+    implementation("org.springframework.boot:spring-boot-starter-json")
+    implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")
+    testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
+    testImplementation("io.kotest:kotest-assertions-core:5.9.1")
     testImplementation("io.mockk:mockk:1.13.13")
+    // end-to-end 통합테스트: 인-JVM Kafka(@EmbeddedKafka, spring-kafka-test) + 실제 ES(Nori, Testcontainers)로
+    // 이벤트 발행→소비→색인 전 구간을 검증. Kafka는 컨테이너 대신 임베디드 브로커라 빠르고 버전 궁합 이슈가 없다.
+    testImplementation("org.testcontainers:testcontainers-elasticsearch")
+    testImplementation("org.awaitility:awaitility")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+// ES Testcontainer가 빌드하는 Nori Dockerfile 경로(docker/elasticsearch/Dockerfile)는 모노레포 루트 기준입니다.
+// Gradle 기본 테스트 작업 디렉터리는 서브모듈이라, 루트로 맞춰 상대경로가 그대로 해석되게 합니다(board-service와 동일).
+tasks.withType<Test> {
+    workingDir = rootProject.projectDir
 }

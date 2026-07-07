@@ -1,6 +1,7 @@
 package demo.board.events
 
 import java.time.Instant
+import java.time.LocalDateTime
 
 /**
  * board-service의 게시글 상태 변화를 검색 색인 등 하위 소비자에게 알리는 도메인 이벤트.
@@ -21,9 +22,14 @@ data class BoardChangedEvent(
     val title: String? = null,
     val content: String? = null,
     val authorId: Long? = null,
-    /** 게시글 원본의 생성 시각(CREATED/UPDATED에서 채워짐). */
-    val createdAt: Instant? = null,
-    /** 이 변경이 발생/기록된 시각. 순서가 어긋난 이벤트를 소비자가 판별할 때 쓸 수 있다. */
+    /** 색인 문서 복원용 조회수(쓰기 시점의 DB 누적값). 검색 히트에서 도메인 Board를 그대로 복원하는 데 쓰인다. */
+    val viewCount: Long = 0,
+    /**
+     * 게시글 원본의 생성 시각(CREATED/UPDATED에서 채워짐).
+     * 도메인 Board·색인 문서(BoardDocument)와 동일하게 LocalDateTime으로 두어, 소비자가 존 변환 없이 그대로 색인한다.
+     */
+    val createdAt: LocalDateTime? = null,
+    /** 이 변경이 발생/기록된 시각(실제 instant). 순서가 어긋난 이벤트를 소비자가 판별할 때 쓸 수 있다. */
     val occurredAt: Instant,
 ) {
     companion object {

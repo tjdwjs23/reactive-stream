@@ -180,7 +180,8 @@ class BoardService(
     }
 
     // 저장된 게시글을 색인 소비자가 그대로 반영할 수 있는 변경 이벤트로 변환합니다.
-    // eventId는 소비자 멱등 키(중복 발행 무시), 시각은 주입된 Clock 기준입니다(LocalDateTime→Instant는 Clock의 zone으로).
+    // eventId는 소비자 멱등 키(중복 발행 무시). createdAt/viewCount는 색인 문서 복원용으로 그대로 싣습니다
+    // (createdAt은 도메인·문서와 동일한 LocalDateTime이라 존 변환이 필요 없습니다). occurredAt만 실제 instant.
     private fun Board.toChangedEvent(type: BoardChangeType): BoardChangedEvent =
         BoardChangedEvent(
             eventId = UUID.randomUUID().toString(),
@@ -189,7 +190,8 @@ class BoardService(
             title = title,
             content = content,
             authorId = authorId,
-            createdAt = createdAt.atZone(clock.zone).toInstant(),
+            viewCount = viewCount,
+            createdAt = createdAt,
             occurredAt = Instant.now(clock),
         )
 
