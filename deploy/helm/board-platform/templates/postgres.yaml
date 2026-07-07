@@ -66,6 +66,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-data
+  annotations:
+    # helm uninstall(=down.sh 기본) 시에도 PVC(DB 데이터)를 삭제하지 않고 보존.
+    # 다음 helm upgrade --install(up.sh)에서 같은 릴리스가 이 PVC를 다시 채택해 데이터가 유지됩니다.
+    # 데이터까지 완전히 지우려면 down.sh --all(kind delete cluster)로 노드를 통째로 제거.
+    "helm.sh/resource-policy": keep
   labels:
     app: postgres
     app.kubernetes.io/part-of: board-platform

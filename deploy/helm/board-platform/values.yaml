@@ -30,8 +30,10 @@ postgres:
   db: reactive
   user: reactive
   password: reactive1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
-  # 영속성: PVC를 쓰면 파드 재시작·rollout restart·colima 재시작에도 데이터 유지.
-  # (단 down.sh의 kind delete cluster로 클러스터를 지우면 PVC도 함께 사라짐)
+  # 영속성: PVC를 쓰면 파드 재시작·rollout restart·colima 재시작은 물론
+  # helm uninstall(=down.sh 기본)에도 데이터가 유지됩니다.
+  # (PVC에 helm.sh/resource-policy: keep 부여 — postgres.yaml. up.sh가 기존 PVC에 재연결)
+  # 데이터까지 완전히 지우려면 down.sh --all (kind delete cluster로 노드째 제거).
   # false면 emptyDir로 되돌아가 파드가 사라질 때마다 초기화됩니다.
   persistence:
     enabled: true

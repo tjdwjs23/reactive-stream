@@ -6,7 +6,7 @@
 deploy/
 ├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기)
 ├── pf.sh                          board-service(Swagger)+Grafana+Postgres를 한 번에 port-forward
-├── down.sh                        정리(helm uninstall + kind 삭제, --all이면 colima까지)
+├── down.sh                        정리(helm uninstall — 데이터/클러스터 유지, --all이면 kind 삭제+colima 정지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
 ├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081/3000 매핑)
 ├── helm/board-platform/           Helm 차트 (앱 2 + 데이터스토어 4 + LGTM 5)
@@ -36,7 +36,8 @@ brew install colima kind helm      # 최초 1회
 #   → DBeaver: localhost:5432 (db=reactive user=reactive pw=reactive1234); 5432 충돌 시 PG_LOCAL_PORT=5433 ./deploy/pf.sh
 
 # 정리:
-./deploy/down.sh                   # helm + kind 삭제  (colima까지: ./deploy/down.sh --all)
+./deploy/down.sh                   # helm uninstall만 — DB 데이터·kind 클러스터 유지(다음 up.sh에서 복구)
+./deploy/down.sh --all             # + kind 클러스터 삭제 + colima 정지 (⚠ DB 데이터도 삭제)
 ```
 
 > **접근 방식**: Mimir/Loki/Tempo/Alloy는 개별로 열지 않습니다 — Grafana 안에서 모두 조회합니다(로그=Loki, 트레이스=Tempo, 메트릭=Mimir). 그래서 일상적으로 열어둘 건 **board-service + Grafana** 둘뿐입니다. DB/Redis/ES/Kafka는 필요할 때 `kubectl exec`로 확인하세요.
@@ -139,15 +140,21 @@ helm upgrade board-platform deploy/helm/board-platform --set kafka.enabled=false
 ## 정리(teardown)
 
 ```bash
-helm uninstall board-platform
-kind delete cluster --name board-platform
-colima stop
+# 기본: 앱만 내리고 DB 데이터(postgres PVC)와 kind 클러스터는 유지 → 다음 up.sh에서 데이터 복구
+./deploy/down.sh
+
+# 완전 삭제: 데이터까지 초기화
+./deploy/down.sh --all         # = helm uninstall + kind delete cluster + colima stop
 ```
+
+> **DB 데이터가 언제 살아남나**: postgres PVC(`postgres-data`)는 `helm.sh/resource-policy: keep`라
+> `down.sh`(기본, helm uninstall)로는 지워지지 않고, 파드 재시작·`rollout restart`·colima 재시작에도 유지됩니다.
+> PVC 데이터는 kind 노드(도커 컨테이너) 안에 있으므로 **`down.sh --all`의 `kind delete cluster`로만 소멸**합니다.
 
 ---
 
 ### 참고/한계
-- 데이터스토어 볼륨은 `emptyDir`라 **파드 재생성 시 데이터가 초기화**됩니다(로컬 개발 전용). 영속이 필요하면 PVC로 교체하세요.
+- PostgreSQL은 PVC(`postgres.persistence.enabled=true`, 기본 on)로 **데이터가 유지**됩니다(파드 재생성·`down.sh` 기본에도 보존, `down.sh --all`에서만 소멸). Redis/Elasticsearch/Kafka는 `emptyDir`라 파드 재생성 시 초기화됩니다(검색 인덱스는 `POST /api/boards/search/reindex`로 재구축, 조회수 버퍼는 휘발성).
 - 코드 변경 반영: 이미지를 다시 빌드·load한 뒤 `kubectl rollout restart deploy/board-service`(또는 search-indexer). `imagePullPolicy: IfNotPresent`라 태그가 같으면 새로 pull하지 않으므로 **load 후 rollout restart**가 필요합니다.
 - 스키마는 board-service 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`을 실행해 만듭니다(파드/부트런 어디서 뜨든 자동, 별도 마이그레이션 잡 불필요).
 - 이미지 태그가 `:local`로 고정이라, 갱신 시 `--set boardService.image=board-service:local2`처럼 태그를 바꾸면 rollout이 확실합니다.
