@@ -161,6 +161,7 @@ curl -s localhost:8080/actuator/metrics/jvm.threads.live    | jq '.measurements'
 
 - **조회수(Redis)**: `mixed.js`는 teardown에서 `POST /api/admin/view-counts/flush`를 쳐서 누적 델타를
   DB로 write-back합니다. 부하 후 게시글 `viewCount`가 실제 조회 횟수와 맞는지 확인하세요.
-- **검색 색인(ES)**: 인라인 색인이 best-effort라 누락이 있을 수 있습니다. 부하 후
+- **검색 색인(ES)**: 색인은 아웃박스→Kafka→search-indexer 경로의 **비동기 최종 일관성**이라, 릴레이/컨슈머
+  지연이나 DLQ 격리로 색인이 원본보다 뒤처질 수 있습니다. 부하 후
   `POST /api/boards/search/reindex`(admin 토큰)로 DB→ES 전체 재색인하면 정합성을 회복합니다.
 - ES refresh 간격(~1s) 탓에 **색인 직후 검색엔 지연**이 있습니다(smoke가 검색 전 대기하는 이유).

@@ -14,8 +14,7 @@ data class RefreshToken(
     val createdAt: LocalDateTime,
 ) {
     // now가 만료 시각 이상이면 만료(경계 포함 — 만료 시각 정각은 만료로 본다).
+    // 재발급(AuthService.refresh)은 "폐기됨(재사용 감지)"과 "만료됨"을 서로 다르게 처리해야 하므로
+    // isActive 같은 합성 판정 대신 revokedAt/isExpired를 개별로 검사합니다.
     fun isExpired(now: LocalDateTime): Boolean = !now.isBefore(expiresAt)
-
-    // 폐기되지 않았고 만료도 아니면 유효.
-    fun isActive(now: LocalDateTime): Boolean = revokedAt == null && !isExpired(now)
 }
