@@ -49,12 +49,14 @@ spec:
               value: "true"
           ports:
             - containerPort: 9092
+          # 포트가 열렸는지만 확인하는 가벼운 TCP 체크. kafka-topics.sh는 JVM을 띄워 몇 초 걸리는데
+          # probe 기본 timeoutSeconds=1이라 매번 타임아웃 → 영원히 not-ready가 됩니다. tcpSocket으로 회피.
           readinessProbe:
-            exec:
-              command: ["/bin/sh", "-c", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+            tcpSocket:
+              port: 9092
             initialDelaySeconds: 15
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 12
           resources:
             {{- toYaml .Values.kafka.resources | nindent 12 }}
 ---
