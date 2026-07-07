@@ -5,6 +5,7 @@
 ```
 deploy/
 ├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기)
+├── pf.sh                          board-service(Swagger) + Grafana를 한 번에 port-forward
 ├── down.sh                        정리(helm uninstall + kind 삭제, --all이면 colima까지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
 ├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081/3000 매핑)
@@ -29,9 +30,15 @@ brew install colima kind helm      # 최초 1회
 #   또는
 ./deploy/up.sh --obs               # 관측성(LGTM)까지 함께 (colima 12G로 자동 기동)
 
-# 끝나면 http://localhost:8080 접속. 정리:
+# 접근(colima에선 직결 localhost가 불안정 → port-forward 권장):
+./deploy/pf.sh                     # board-service(8080, Swagger) + Grafana(3000) 한 번에, Ctrl+C로 종료
+#   → http://localhost:8080/swagger-ui.html , http://localhost:3000 (admin/admin, --obs일 때)
+
+# 정리:
 ./deploy/down.sh                   # helm + kind 삭제  (colima까지: ./deploy/down.sh --all)
 ```
+
+> **접근 방식**: Mimir/Loki/Tempo/Alloy는 개별로 열지 않습니다 — Grafana 안에서 모두 조회합니다(로그=Loki, 트레이스=Tempo, 메트릭=Mimir). 그래서 일상적으로 열어둘 건 **board-service + Grafana** 둘뿐입니다. DB/Redis/ES/Kafka는 필요할 때 `kubectl exec`로 확인하세요.
 
 `up.sh`가 실패하거나 각 단계를 직접 이해하고 싶으면 아래 수동 절차를 따라가세요.
 

@@ -51,10 +51,9 @@ kubectl get pods
 
 cat <<EOF
 
-접속:
-  board-service   http://localhost:8080     (예: curl -s localhost:8080/actuator/health)
-  search-indexer  http://localhost:8081/actuator/health
-$($OBS && echo "  Grafana         http://localhost:3000     (admin / admin)")
+접속 — colima 네트워크 특성상 직결 localhost가 불안정하므로 port-forward를 권장:
+  ./deploy/pf.sh          # board-service(8080, Swagger) $($OBS && echo "+ Grafana(3000)") 를 한 번에 열고 URL 출력 (Ctrl+C로 종료)
+  그 뒤 http://localhost:8080/swagger-ui.html $($OBS && echo ", http://localhost:3000 (admin/admin)")
 
 end-to-end 확인 스크립트/컬은 deploy/README.md 참고.
 정리: ./deploy/down.sh   (colima까지 끄려면 ./deploy/down.sh --all)
