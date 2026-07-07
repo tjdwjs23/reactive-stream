@@ -4,14 +4,18 @@ import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
 import demo.board.indexer.adapter.out.search.BoardDocument
 import demo.board.indexer.support.ElasticsearchTestContainer
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.producer.ProducerRecord
+import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -33,7 +37,7 @@ import java.util.Properties
 //
 // 임베디드 브로커의 주소를 앱의 spring.kafka.bootstrap-servers로 주입합니다(플레이스홀더는 브로커 기동 후 지연 해석).
 @SpringBootTest
-@EmbeddedKafka(topics = [BoardChangedEvent.TOPIC], partitions = 1)
+@EmbeddedKafka(topics = [BoardChangedEvent.TOPIC, "board-changed-dlq"], partitions = 1)
 @TestPropertySource(properties = ["spring.kafka.bootstrap-servers=\${spring.embedded.kafka.brokers}"])
 class BoardChangedConsumerIT {
     @Autowired
@@ -84,6 +88,25 @@ class BoardChangedConsumerIT {
         }
     }
 
+    @Test
+    fun `역직렬화 불가한 포이즌 메시지는 board-changed-dlq로 격리된다`() {
+        // 유효한 JSON이 아닌 메시지 — 아무리 재시도해도 역직렬화가 안 되므로 DLQ로 가야 한다(조용한 유실 금지).
+        val poison = "{ 이건 유효한 JSON이 아닙니다"
+        publishRaw(key = "9999", value = poison)
+
+        dlqConsumer().use { consumer ->
+            consumer.subscribe(listOf("board-changed-dlq"))
+            // 에러 핸들러가 backoff로 몇 차례 재시도한 뒤 DLQ로 보내므로 여유 있게 대기한다.
+            await().atMost(Duration.ofSeconds(30)).untilAsserted {
+                val found =
+                    consumer
+                        .poll(Duration.ofMillis(500))
+                        .any { it.value() == poison }
+                assertTrue(found, "포이즌 메시지가 board-changed-dlq에 격리되어야 한다")
+            }
+        }
+    }
+
     private fun createdEvent(
         boardId: Long,
         title: String,
@@ -113,6 +136,12 @@ class BoardChangedConsumerIT {
     private fun publish(
         boardId: Long,
         event: BoardChangedEvent,
+    ) = publishRaw(boardId.toString(), objectMapper.writeValueAsString(event))
+
+    // board-changed 토픽에 원문 문자열을 그대로 발행합니다(포이즌 메시지 재현용).
+    private fun publishRaw(
+        key: String,
+        value: String,
     ) {
         val props =
             Properties().apply {
@@ -121,11 +150,21 @@ class BoardChangedConsumerIT {
                 put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name)
             }
         KafkaProducer<String, String>(props).use { producer ->
-            producer
-                .send(
-                    ProducerRecord(BoardChangedEvent.TOPIC, boardId.toString(), objectMapper.writeValueAsString(event)),
-                ).get()
+            producer.send(ProducerRecord(BoardChangedEvent.TOPIC, key, value)).get()
         }
+    }
+
+    // board-changed-dlq를 처음부터 읽는 테스트용 컨슈머.
+    private fun dlqConsumer(): KafkaConsumer<String, String> {
+        val props =
+            Properties().apply {
+                put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, embeddedKafka.brokersAsString)
+                put(ConsumerConfig.GROUP_ID_CONFIG, "dlq-verify-${System.nanoTime()}")
+                put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+                put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer::class.java.name)
+                put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer::class.java.name)
+            }
+        return KafkaConsumer(props)
     }
 
     companion object {

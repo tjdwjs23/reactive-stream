@@ -47,6 +47,10 @@ spec:
               value: "0"
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
               value: "true"
+            # 자동 생성되는 토픽(board-changed, board-changed-dlq)의 기본 파티션 수.
+            # search-indexer가 concurrency만큼 병렬 소비하려면 파티션이 그만큼 있어야 실질 병렬성이 납니다.
+            - name: KAFKA_NUM_PARTITIONS
+              value: "3"
           ports:
             - containerPort: 9092
           # 포트가 열렸는지만 확인하는 가벼운 TCP 체크. kafka-topics.sh는 JVM을 띄워 몇 초 걸리는데

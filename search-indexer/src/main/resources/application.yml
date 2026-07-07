@@ -8,6 +8,10 @@ spring:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: ${KAFKA_CONSUMER_GROUP_ID:search-indexer}
+    listener:
+      # 배치 리스너의 병렬 소비 스레드 수. 실질 병렬성은 토픽 파티션 수로 상한이 걸립니다
+      # (파티션 3 + concurrency 3 → 파티션당 스레드 1). 파티션 수는 배포(Helm)의 브로커 설정에서 지정합니다.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
 
   # 색인 대상 Elasticsearch(Nori). board-service와 동일한 boards 인덱스를 공유하며, 이 서비스가 writer입니다.
   elasticsearch:
