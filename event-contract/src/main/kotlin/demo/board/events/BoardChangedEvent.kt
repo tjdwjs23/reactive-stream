@@ -1,0 +1,39 @@
+package demo.board.events
+
+import java.time.Instant
+
+/**
+ * board-service의 게시글 상태 변화를 검색 색인 등 하위 소비자에게 알리는 도메인 이벤트.
+ *
+ * board-service(정본, R2DBC)와 search-indexer(ES)는 물리적으로 분리돼 있고, 이 이벤트가 둘을 잇는
+ * 유일한 계약이다. Transactional Outbox로 게시글 쓰기와 원자적으로 기록된 뒤 Kafka(`board-changed`)로
+ * 발행되며, 소비자는 이 페이로드만으로 색인을 갱신/삭제할 수 있어야 한다(추가 DB 조회 불필요).
+ *
+ * 순수 Kotlin data class — 직렬화 형식(JSON)이나 전송(Kafka)에 대한 지식은 어댑터가 가진다.
+ */
+data class BoardChangedEvent(
+    /** 이벤트 고유 id(프로듀서가 발행 시 부여). 소비자 멱등 처리(중복 소비 무시)의 키. */
+    val eventId: String,
+    /** 대상 게시글 id. Kafka 메시지 key로도 쓰여 같은 게시글 이벤트의 파티션 순서를 보장한다. */
+    val boardId: Long,
+    val type: BoardChangeType,
+    /** CREATED/UPDATED에서 채워진다. DELETED에서는 null(색인에서 제거만 하면 되므로). */
+    val title: String? = null,
+    val content: String? = null,
+    val authorId: Long? = null,
+    /** 게시글 원본의 생성 시각(CREATED/UPDATED에서 채워짐). */
+    val createdAt: Instant? = null,
+    /** 이 변경이 발생/기록된 시각. 순서가 어긋난 이벤트를 소비자가 판별할 때 쓸 수 있다. */
+    val occurredAt: Instant,
+) {
+    companion object {
+        /** Kafka 토픽명. 프로듀서/컨슈머가 이 상수를 공유해 토픽명 오타로 인한 단절을 막는다. */
+        const val TOPIC = "board-changed"
+    }
+}
+
+enum class BoardChangeType {
+    CREATED,
+    UPDATED,
+    DELETED,
+}

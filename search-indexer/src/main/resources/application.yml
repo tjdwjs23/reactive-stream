@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: search-indexer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: search-indexer
+      # 신규 컨슈머 그룹은 토픽의 처음부터 소비(초기 색인 백필). 이후엔 커밋된 오프셋을 따라간다.
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+# 웹 서버 없이 뜨는 컨슈머지만, actuator health 확인용으로 관리 포트만 연다.
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
