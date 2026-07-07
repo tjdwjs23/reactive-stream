@@ -17,7 +17,7 @@
 |---|---|---|
 | **`event-contract`** | 두 서비스가 공유하는 **이벤트 계약**(`BoardChangedEvent`, 토픽명). 순수 Kotlin, 프레임워크 무의존 | Kotlin only |
 | **`board-service`** | 게시판 API(정본, R2DBC) + 검색 쿼리/재색인 + **Transactional Outbox 프로듀서** | WebFlux · R2DBC · Redis · ES(reader) · Security · Kafka |
-| **`search-indexer`** | `board-changed`를 소비해 ES 색인을 갱신하는 **컨슈머(ES writer)** | Spring Kafka · Elasticsearch |
+| **`search-indexer`** | `board-changed`를 소비해 ES 색인을 갱신하는 **컨슈머(ES writer)** | Spring Kafka · Elasticsearch · WebFlux/Netty(actuator) · OTLP 관측성 |
 
 ```
                                    ┌──────────────── event-contract (BoardChangedEvent) ────────────────┐
@@ -163,7 +163,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 
 ## 📝 API Specification (board-service)
 
-`search-indexer`는 공개 HTTP API가 없는 **컨슈머**입니다(actuator health/info만 8081에 노출). 아래는 `board-service`(8080)의 엔드포인트입니다.
+`search-indexer`는 **공개 비즈니스 API가 없는 컨슈머**입니다 — `@RestController`는 없고, k8s liveness/readiness 프로브를 위해 경량 WebFlux/Netty 서버로 actuator(`/actuator/health`, 8081)만 노출합니다. 아래는 `board-service`(8080)의 엔드포인트입니다.
 
 ### 인증 (Auth)
 

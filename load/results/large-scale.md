@@ -51,7 +51,7 @@
 
 ## 재현 방법
 
-전제: 인프라(`docker compose up -d`) + 앱(`./gradlew bootRun`)이 떠 있고, `board`에 대용량 데이터가 시드돼 있어야 한다.
+전제: 인프라 + 앱이 떠 있어야 한다(로컬 k8s는 `./deploy/up.sh`로 전체 기동, `board-service`는 `localhost:8080`). 빠른 개발 실행은 데이터스토어를 `kubectl port-forward`로 당긴 뒤 `./gradlew :board-service:bootRun`. 그리고 `board`에 대용량 데이터가 시드돼 있어야 한다.
 
 ```bash
 # 대용량 데이터가 없다면(권장 10만+): mixed.js를 높은 쓰기 비중으로 잠깐 돌려 채우거나 별도 시드.

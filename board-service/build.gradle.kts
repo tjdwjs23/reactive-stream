@@ -47,7 +47,7 @@ dependencies {
     // (Boot 3.x식 micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 조합은 Boot 4에선
     //  자동구성이 딸려오지 않아 Tracer가 활성화되지 않습니다.)
     // → metrics/logs/traces를 모두 OTLP로 단일 수집기 Grafana Alloy(:4318)에 push하고, Alloy가
-    //   Mimir/Loki/Tempo로 팬아웃합니다(application.yml + monitoring/alloy/config.alloy).
+    //   Mimir/Loki/Tempo로 팬아웃합니다(application.yml + deploy/helm/board-platform/files/alloy/config.alloy).
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     // 로그도 OTLP로 내보내 3종 신호(metrics/logs/traces)를 단일 파이프라인(→ Grafana Alloy)으로 통합합니다.
     // 이 appender가 logback 로그를 OTel LogRecord로 변환하고, Boot가 구성한 OTLP log exporter가 Alloy로 push합니다.

@@ -141,5 +141,5 @@ colima stop
 ### 참고/한계
 - 데이터스토어 볼륨은 `emptyDir`라 **파드 재생성 시 데이터가 초기화**됩니다(로컬 개발 전용). 영속이 필요하면 PVC로 교체하세요.
 - 코드 변경 반영: 이미지를 다시 빌드·load한 뒤 `kubectl rollout restart deploy/board-service`(또는 search-indexer). `imagePullPolicy: IfNotPresent`라 태그가 같으면 새로 pull하지 않으므로 **load 후 rollout restart**가 필요합니다.
-- board-service `bootRun`이 기동 시 `db/schema.sql`을 실행해 스키마를 만듭니다(별도 마이그레이션 잡 불필요).
+- 스키마는 board-service 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`을 실행해 만듭니다(파드/부트런 어디서 뜨든 자동, 별도 마이그레이션 잡 불필요).
 - 이미지 태그가 `:local`로 고정이라, 갱신 시 `--set boardService.image=board-service:local2`처럼 태그를 바꾸면 rollout이 확실합니다.

@@ -32,11 +32,12 @@
           "refId": "job"
         },
         "refresh": 2,
-        "includeAll": false,
-        "multi": false,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
         "current": {
-          "text": "reactive",
-          "value": "reactive"
+          "text": "All",
+          "value": "$__all"
         },
         "label": "서비스(job)",
         "sort": 1

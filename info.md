@@ -161,7 +161,7 @@ board-service                                                  search-indexer
   │  board_outbox 테이블 INSERT (이벤트 사본)       │
   └──────────────────────────────────────────────┘
       │
-      ▼  집배원: OutboxRelayScheduler (30초 등 주기 폴링)
+      ▼  집배원: OutboxRelayScheduler (~1초 주기 폴링, fixedDelay)
    발송함(board_outbox)에서 "아직 안 보낸" 행을 id 순으로 꺼내
    Kafka로 발행 → 성공한 것만 "보냄" 표시(published_at)
       │

@@ -1,7 +1,6 @@
 // search-indexer = board-changed 이벤트를 소비해 Elasticsearch 색인을 갱신하는 독립 서비스.
 // board-service와 물리적으로 분리되며, event-contract만 공유한다.
-// Kafka 리스너는 board-service의 @Scheduled 배치와 같은 "blocking 드라이빙 어댑터" 성격이라,
-// 어댑터 안에서 runBlocking으로 코루틴 경계로 브리지한다(프로젝트 공통 컨벤션).
+// @KafkaListener는 컨테이너 스레드에서 동기로 처리하고 ES 접근도 imperative라, 코루틴 브리지 없이 동작한다.
 // Kotlin JVM / ktlint / JDK21 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
 plugins {
     kotlin("plugin.spring")
@@ -30,9 +29,9 @@ dependencies {
     // Kafka 소비. Boot 4는 spring-kafka만으론 자동 구성이 안 딸려오므로 KafkaConsumerConfig에서 직접 구성한다.
     implementation("org.springframework.kafka:spring-kafka")
 
-    // 이벤트 JSON 역직렬화. Boot 4는 Jackson 3(tools.jackson) 기반이라 starter-json이 ObjectMapper를 자동 구성하고,
-    // Kotlin data class 역직렬화를 위해 Jackson 3 Kotlin 모듈을 더한다(java.time은 Jackson 3에 기본 내장).
-    implementation("org.springframework.boot:spring-boot-starter-json")
+    // 이벤트 JSON 역직렬화. Boot 4는 Jackson 3(tools.jackson) 기반이며, ObjectMapper 자동 구성과 jackson-databind는
+    // 위 spring-boot-starter-webflux가 가져오는 starter-json으로 이미 충족됩니다. 여기선 Kotlin data class 역직렬화용
+    // Jackson 3 Kotlin 모듈만 더합니다(java.time은 Jackson 3에 기본 내장).
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 

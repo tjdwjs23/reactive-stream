@@ -9,7 +9,7 @@
 - 대상 서버와 분리된 단독 바이너리 → `k6 run <script>.js` 한 방
 - Go 엔진이라 단일 노드에서 고동시성(수천 VU) 부하가 가볍다
 - `thresholds`로 p95 지연·에러율 합격 기준을 스크립트에 박아두면 = 그대로 CI 게이트
-- 이 레포의 monitoring 스택(LGTM — Mimir/Loki/Tempo/Grafana)에 그대로 물릴 수 있다(아래 참고)
+- 관측성(LGTM — Alloy/Mimir/Loki/Tempo/Grafana)을 함께 띄우면(`./deploy/up.sh --obs`) 부하 중 지표를 Grafana에서 볼 수 있다(아래 참고)
 
 ## 디렉토리 구성 (최소 세트)
 

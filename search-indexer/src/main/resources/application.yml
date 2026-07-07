@@ -13,7 +13,8 @@ spring:
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
 
-# 웹 서버 없이 뜨는 컨슈머지만, actuator health 확인용으로 관리 포트만 연다.
+# 공개 비즈니스 API는 없지만(순수 컨슈머), k8s liveness/readiness가 /actuator/health를 HTTP로 확인해야 하므로
+# 경량 WebFlux/Netty 서버를 8081에 띄웁니다(메인=관리 포트 동일).
 server:
   port: 8081
 
