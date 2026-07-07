@@ -1,23 +1,22 @@
-# 📖 대용량 처리, 쉽게 이해하기 (info.md)
+# 📖 대용량·분산 처리, 쉽게 이해하기 (info.md)
 
-> 이 문서는 이 프로젝트의 두 가지 "대용량 처리" 코드가 **어떻게, 왜 그렇게 동작하는지**를
-> 처음 보는 사람도 이해할 수 있게 비유와 흐름도로 풀어 설명합니다.
->
-> 1. **조회수 카운터** (Redis Write-Back) — *쓰기가 몰리는 문제*
-> 2. **오래된 게시글 아카이브 배치** (`ArchiveStaleBoardsService`) — *읽고 지울 게 너무 많은 문제*
+> 이 문서는 처음 보는 사람도 이해할 수 있게, 이 프로젝트의 까다로운 세 가지를 **비유와 그림**으로 풀어 씁니다.
+> ① 조회수 카운터(Redis Write-Back), ② 오래된 게시글 아카이브 배치, 그리고 ③ **검색 색인 분리(Kafka Transactional Outbox)**.
+> README가 "무엇을/어떻게"를 정식으로 설명한다면, 여기서는 "왜 이렇게 만들었는지"를 천천히 그려 보입니다.
 
 ---
 
 ## 0. 먼저, 큰 그림
 
-두 기능은 겉보기엔 비슷한 "대용량"이지만 **정반대 방향의 문제**를 풉니다.
+세 시스템은 서로 다른 종류의 어려움을 풉니다.
 
-| | 조회수 카운터 | 아카이브 배치 |
-|---|---|---|
-| 문제 | **쓰기(UPDATE)가 너무 자주** 몰린다 | **읽고 지울 데이터가 너무 많다** |
-| 아이디어 | 몰아서 나중에 한 번에 반영 (버퍼링) | 조금씩 흘려보내며 병렬로 처리 (스트리밍) |
-| 핵심 도구 | Redis(임시 장부) + 주기적 반영 | 큐(컨베이어 벨트) + 여러 작업자 |
-| 비유 | 카페 주문을 포스트잇에 모았다 한 번에 정산 | 공장 컨베이어 벨트에서 여러 명이 나눠 포장 |
+| | ① 조회수 카운터 | ② 아카이브 배치 | ③ 검색 색인 분리 |
+|---|---|---|---|
+| **문제** | 인기 글에 쓰기(UPDATE)가 폭주 | 삭제할 게 너무 많아 한 번에 못 읽음 | 두 저장소(DB·검색엔진)를 어긋나지 않게 |
+| **핵심 아이디어** | 빠른 곳(Redis)에 **모았다가** 몰아 반영 | **조금씩 흘려보내며** 나눠 처리 | 쓰기와 **원자적으로** 이벤트를 남겨 나중에 전달 |
+| **방향** | 쓰기 홍수를 버퍼로 흡수 | 대량 읽기를 스트림으로 분해 | 서비스 사이를 이벤트로 잇기 |
+
+①②는 **한 서비스 안의 성능/자원 문제**, ③은 **서비스 사이의 정합성 문제**입니다.
 
 ---
 
@@ -25,349 +24,208 @@
 
 ## 무엇이 문제인가?
 
-게시글 하나가 인기글이 돼서 **1초에 1,000번** 조회된다고 해봅시다.
-"조회수 +1"을 그때마다 DB에 쓴다면:
+인기 글 하나가 **1초에 1,000번** 조회된다고 합시다. 순진하게 만들면 조회 1번마다 DB에 `UPDATE board SET view_count = view_count + 1`을 날립니다 → **1초에 1,000번의 DB 쓰기**. DB가 비명을 지릅니다. 😱
 
-```
-조회 → UPDATE board SET view_count = view_count + 1 WHERE id = 7
-조회 → UPDATE ...   ← 1초에 1,000번의 DB 쓰기 😱
-조회 → UPDATE ...
-```
+## 핵심 아이디어: 포스트잇에 모았다가 회계장부에 옮기기
 
-1. 상세조회 요청 → Redis PENDING의 {boardId} 필드를 +1                                                                                                                                                                                                                                                         
-2. 리턴값 = DB 확정값 + Redis 델타 (둘을 합친 값)                                                                                                                                                                                                                                                                       
-3. 30초마다:                                                                                                                                                                                                                                                                                                            
-   - 앱이 Redis PENDING을 DRAINING으로 RENAME(이름 변경, 새 조회는 새 PENDING으로 격리)                                                                                                                                                                                                                                  
-   - 앱이 DRAINING을 읽어 메모리 Map으로 가져옴 (DB가 Redis를 보는 게 아님)                                                                                                                                                                                                                                              
-   - 앱이 그 Map을 DB에 넘겨 UPDATE ... view_count = view_count + delta 실행                                                                                                                                                                                                                                             
-   - DB 반영에 성공한 청크만 DRAINING에서 HDEL(commit-then-delete). 반영 전 크래시 시 DRAINING이 남아 다음 플러시가 재시도(유실 없음)
-
-DB 쓰기는 비싼 작업이라, 이게 몰리면 DB가 휘청입니다.
-정작 조회수는 "정확히 실시간"일 필요까진 없는데 말이죠.
-
-## 핵심 아이디어: "포스트잇에 모았다가 나중에 장부에 옮기기"
-
-카페 사장이 주문 하나하나를 회계장부에 적지 않고, **포스트잇(Redis)** 에 바를 정(正)자로
-모아뒀다가, 한가할 때 **회계장부(DB)** 에 몰아서 옮겨 적는 것과 같습니다.
-
-- **포스트잇 = Redis** : 빠르고, 잠깐 쌓아두는 용도
-- **회계장부 = DB** : 느리지만 영구 보관
-- **옮겨 적기 = Write-Back(플러시)** : 주기적으로 한 번에
-
-> Redis는 메모리 기반이라 `+1`(INCR) 연산이 DB `UPDATE`보다 수십~수백 배 빠릅니다.
+카페 사장이 주문 하나하나를 회계장부에 적지 않고, **포스트잇(Redis)** 에 바를 정(正)자로 모아뒀다가, 한가할 때 **회계장부(DB)** 에 몰아서 옮겨 적는 것과 같습니다.
 
 ## 자료구조: Redis Hash 하나
 
 ```
-Key: "board:views:pending"   ← 아직 DB에 반영 안 된 조회수들이 모이는 곳
- ┌─────────┬────────┐
- │ field   │ value  │   field = 게시글 id, value = 쌓인 조회수(델타)
- ├─────────┼────────┤
- │ "7"     │ 152    │   ← 7번 글이 마지막 반영 후 152번 조회됨
- │ "42"    │ 8      │
- │ "1003"  │ 1      │
- └─────────┴────────┘
+board:views:pending   (Redis Hash)
+ ├─ "42"  → 17     ← 42번 글이 아직 DB에 반영 안 된 조회 +17
+ ├─ "101" → 3
+ └─ ...
 ```
 
----
-
-## 흐름 ① : 게시글을 조회할 때 (`GET /api/boards/{id}`)
+## 흐름 ① : 게시글을 조회할 때 (GET /api/boards/{id})
 
 ```
-  사용자
-    │  GET /api/boards/7
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ BoardService.getBoard(7)                                       │
-│                                                                │
-│  (1) DB에서 글 읽기      findById(7)  ──►  view_count = 1000    │  ← 지금까지 "확정"된 조회수
-│                                                                │
-│  (2) Redis에 +1         HINCRBY board:views:pending 7 1        │  ← 원자적 증가
-│                              └─► 반환값 = 153 (미반영 누적 델타) │
-│                                                                │
-│  (3) 응답 = DB값 + 미반영델타 = 1000 + 153 = 1153              │  ← 실시간 값처럼 보여줌
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼  { "viewCount": 1153 }
+ ┌── DB에서 확정값 읽기 (SELECT만!)  view_count = 1,000
+ │
+ ├── Redis:  HINCRBY board:views:pending 42 1   → 누적 델타 18 반환
+ │
+ └── 응답 = DB값(1,000) + 미반영 델타(18) = 1,018   ← 실시간처럼 보임
 ```
 
-**포인트**
-- DB엔 안 씀! Redis에 `+1`만. (쓰기 부담을 Redis가 흡수)
-- 그런데도 사용자에겐 **DB 확정값(1000) + 아직 안 옮긴 델타(153)** 를 더해 실시간처럼 보여줌.
-- `HINCRBY`는 **원자적**이라 1,000명이 동시에 조회해도 정확히 1,000 증가 (증가 유실 없음).
+- `HINCRBY`는 **원자적**입니다 — 1,000명이 동시에 눌러도 정확히 +1,000, 유실 없음.
+- DB 쓰기는 여기서 **한 번도** 일어나지 않습니다.
 
 ### 만약 Redis가 죽으면? (Graceful Degradation)
 
-조회수는 **부가 기능**이지 핵심이 아닙니다. Redis 장애가 게시글 조회 자체를 막으면 안 되죠.
-
-```
-  (2) Redis에 +1  ──►  ❌ Redis 다운 / 응답 없음
-                          │
-                          ▼  withTimeout(200ms) 안에 실패하면
-  (3) 델타 = 0 으로 강등  ──►  응답 = DB값(1000) 그대로, HTTP 200 정상 조회 ✅
-```
-
-즉 "조회수가 잠깐 안 오르는" 것으로 끝나고, **조회는 성공**합니다.
-`withTimeout`이 없으면 Redis가 "느리게 살아있는" 상태에서 조회가 수십 초 매달릴 수 있어
-시간 상한(예산)을 둡니다. (`board.view-count.increment-timeout-ms`)
-
----
+조회수 하나 때문에 글 조회 전체가 실패하면 안 됩니다. `withTimeout(200ms)`로 예산을 두고, Redis가 느리거나 죽으면 **델타 0으로 강등**해 DB값(1,000)으로 정상 200 응답합니다. ✅ 조회는 살아 있고, 조회수만 잠깐 안 오를 뿐입니다.
 
 ## 흐름 ② : 주기적 반영 (Write-Back / 플러시)
 
-`@Scheduled`가 **30초마다** 포스트잇(Redis)의 내용을 장부(DB)로 옮깁니다.
-
-여기서 제일 중요한 트릭은 **`RENAME`으로 "통째로 스냅샷"** 뜨는 것입니다.
+`@Scheduled`로 **30초마다** 포스트잇을 회계장부에 옮깁니다.
 
 ```
-플러시 시작 (30초마다)
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ (1) RENAME  board:views:pending  →  board:views:draining               │
-│                                                                        │
-│     ┌ pending ┐  이름만 바꾸면 (원자적, 순식간)  ┌ draining ┐          │
-│     │ 7  → 153│  ──────────────────────────────► │ 7  → 153 │  스냅샷!  │
-│     │ 42 → 8  │                                    │ 42 → 8   │          │
-│     └─────────┘                                    └──────────┘          │
-│                                                                        │
-│     ★ 이 순간 이후 들어오는 조회는 "새로 생기는" pending에 쌓인다        │
-│       ┌ pending(새것) ┐                                                │
-│       │ 7  → 2 (신규) │  ← 플러시 도중에 온 조회도 안전하게 여기 쌓임    │
-│       └───────────────┘                                                │
-│                                                                        │
-│ (2) draining 전체를 읽어서 Map으로:  { 7→153, 42→8 }                    │
-│     ★ 아직 지우지 않는다 — DB 반영 성공분만 나중에 지운다(commit-then-delete)│
-└──────────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ (3) DB에 반영 — 청크(예: 1000개)씩 묶어 "단 한 번의 UPDATE"로            │
-│                                                                        │
-│   UPDATE board AS b                                                     │
-│   SET view_count = b.view_count + d.delta                              │
-│   FROM unnest(:ids, :deltas) AS d(id, delta)   ← id/delta 배열을 펼쳐   │
-│   WHERE b.id = d.id                             ← 한 방에 조인 반영     │
-│                                                                        │
-│ (4) 반영에 성공한 청크만 draining에서 HDEL로 제거                        │
-│     ← 반영 전 크래시 시 draining이 남아 다음 플러시가 재시도(유실 없음)  │
-└──────────────────────────────────────────────────────────────────────┘
+ ┌── RENAME  board:views:pending → board:views:draining      ← 원자적 스냅샷!
+ │      (이 순간부터 새 조회는 새 pending에 쌓임 — 섞이지 않음)
+ │
+ ├── draining을 Map으로 읽어서
+ │      UPDATE board AS b SET view_count = b.view_count + d.delta
+ │      FROM unnest(:ids, :deltas) AS d(id, delta) WHERE b.id = d.id   ← 청크 배치 UPDATE
+ │
+ └── 성공한 청크만 draining에서 HDEL  ← commit-then-delete
 ```
 
 ### 왜 `RENAME`을 쓸까? (델타 유실 방지)
-
-만약 `RENAME` 없이 "pending을 읽는 중에 하나씩 지운다"면, **읽는 도중에 들어온 조회**가
-지워질 수 있습니다. `RENAME`은 순식간에 이름표만 바꾸는 원자적 연산이라:
-
-- 옮길 대상은 `draining`으로 **딱 잠긴 스냅샷**이 되고,
-- 그 이후 조회는 **새 `pending`** 에 쌓이므로,
-- **어느 쪽도 유실되지 않습니다.** ✅
+그냥 "읽고 나서 지우면" 읽는 사이에 들어온 조회가 사라집니다. `RENAME`으로 **통째로 옮겨** 스냅샷을 만들면, 반영 대상은 draining에 고정되고 새 조회는 새 pending에 안전하게 쌓입니다.
 
 ### 왜 청크로 나눠 배치 UPDATE 할까?
+5만 개를 하나씩 UPDATE하면 **5만 번 왕복(~13초)**. `unnest`로 1,000개씩 묶으면 **50번 왕복(~0.25초)** — 약 **50배** 빠릅니다.
 
-반영할 게시글이 5만 개라면, 하나씩 `UPDATE ... WHERE id=?`를 5만 번 하면 DB 왕복도 5만 번 →
-매우 느립니다(실측 약 13초). `unnest`로 **1,000개씩 묶어** 한 번에 UPDATE하면 왕복이
-`5만 / 1000 = 50번`으로 줄어 **약 50배 빨라집니다**(실측 약 0.25초).
+### commit-then-delete = 유실 대신 재시도(at-least-once)
+DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 draining이 남아 다음 플러시가 재시도합니다. 최악의 경우 중복 계수(약간 더 셈)일 뿐, **유실은 없습니다**.
 
-> 튜닝 노브: `board.view-count.*`
-> - `flush-interval-ms` : 반영 주기(짧을수록 정합성↑, 쓰기 부하↑)
-> - `flush-chunk-size` : 한 UPDATE에 묶을 개수
-> - `flush-enabled` : 스케줄 반영 on/off
+> 튜닝: `board.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
 
-### 관련 파일
-- 읽기/증가: `application/service/BoardService.kt` (`getBoard`)
-- Redis 버퍼: `adapter/out/redis/BoardViewCountRedisAdapter.kt` (`increment`, `snapshotPendingDeltas`, `removeDrained`)
-- 반영 로직: `application/service/FlushBoardViewCountsService.kt` (`flush`)
-- 반영 스케줄러: `adapter/in/batch/BoardViewCountFlushScheduler.kt`
-- 배치 UPDATE SQL: `adapter/out/persistence/BoardPersistenceAdapter.kt` (`addViewCountsBatch`)
+**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+`application/service/BoardService.getBoard`, `adapter/out/redis/BoardViewCountRedisAdapter`, `application/service/FlushBoardViewCountsService`, `adapter/in/batch/BoardViewCountFlushScheduler`, `adapter/out/persistence/BoardPersistenceAdapter.addViewCountsBatch`.
 
 ---
 
-# 2️⃣ 오래된 게시글 아카이브 배치 (`ArchiveStaleBoardsService`)
+# 2️⃣ 오래된 게시글 아카이브 배치 (ArchiveStaleBoardsService)
 
 ## 무엇이 문제인가?
 
-"365일 지난 게시글을 전부 삭제"해야 하는데, 대상이 **수백만 건**이라고 해봅시다.
+365일 지난 게시글을 지우는데 대상이 **수백만 건**입니다. 순진하게 `SELECT * FROM board WHERE ...`로 전부 리스트에 담으면 → 💥 **OutOfMemory**. 한 트랜잭션으로 수백만 건을 지우면 락과 커넥션을 너무 오래 붙잡습니다.
 
-가장 단순한 방법은 이렇습니다 — 그리고 **이게 왜 위험한지**가 핵심입니다.
+## 핵심 아이디어: 공장 컨베이어 벨트
+
+```
+ [생산자]  DB를 조금씩 읽어(스트리밍)  →  [벨트(바운드 채널)]  →  [작업자 1..N] 청크 삭제
+   키셋 페이지네이션                       가득 차면 생산자가 멈춤          동시 처리
+```
+
+## 4가지 핵심 장치
+
+### ① 스트리밍 읽기 — 키셋 페이지네이션
+전부 메모리에 안 올리고 `Flow`로 흘려보냅니다. OFFSET 대신 **"마지막으로 읽은 id 다음"** 을 조건으로 다음 페이지를 읽습니다.
+```
+❌ OFFSET 100000 LIMIT 500   → 앞 10만 건을 매번 세고 버림(뒤로 갈수록 느림)
+✅ WHERE created_at < :before AND id > :lastId ORDER BY id LIMIT 500   → 깊이 무관 일정 속도
+```
+`idx_board_created_at` 인덱스가 범위 필터를 받쳐 줍니다.
+
+### ② 바운드 채널 = 큐 + 백프레셔
+`Channel(capacity = concurrency)`. 벨트가 가득 차면 생산자의 `send`가 **suspend**되어 DB 읽기를 멈춥니다. **핵심**: 소비자가 밀리면 그 압력이 벨트를 거쳐 생산자, 나아가 DB 읽기까지 자동으로 전파됩니다 → 메모리가 일정하게 유지됩니다(벨트 몇 칸 + 페이지 하나).
+
+### ③ 워커 N개 = 동시 처리
+`List(concurrency) { launch { for (chunk in channel) processChunk(chunk) } }`. 코루틴이라 가볍고, 실제 동시성 상한은 DB 커넥션 풀이 정합니다.
+
+### ④ 청크 커밋 + 내결함성
+- 삭제 전 `Board.isStale()`로 **다시 확인**(SQL 사전 필터가 아니라 **도메인이 최종 권위**).
+- 청크마다 `deleteByIds`로 짧게 커밋.
+- 한 청크가 실패해도 `try/catch`로 건너뛰고 계속(`failedChunks++`, skip-and-continue). **전체가 실패**하면 `IllegalStateException`으로 신호(스케줄러가 성공으로 착각하지 않게). 상위 취소(`CancellationException`)는 삼키지 않고 재전파.
+
+> 튜닝: `board.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
+
+**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+`application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`, `adapter/out/persistence/BoardR2dbcRepository`(findStalePage, deleteByIds), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
+
+---
+
+# 3️⃣ 검색 색인 분리 (Kafka Transactional Outbox → search-indexer)
+
+## 무엇이 문제인가?
+
+게시글은 **PostgreSQL(정본)** 에, 검색은 **Elasticsearch** 에 있습니다. 글을 쓰면 두 곳을 다 맞춰야 합니다. 예전엔 이렇게 했습니다:
 
 ```
 ❌ 순진한 방법:
-   val all = SELECT * FROM board WHERE created_at < :threshold   ← 수백만 건을
-   메모리에 전부 리스트로 로딩  →  💥 OutOfMemory (메모리 폭발)
+   1. DB에 게시글 저장
+   2. 곧바로 ES에 색인
+   → 1번은 성공했는데 2번 직전에 서버가 죽으면?  💥 검색엔진에 영영 안 올라감(유실)
+   → ES가 느리면 글쓰기 응답도 같이 느려짐
 ```
 
-▎ "수백만 건을 한 번에 메모리에 올리면 터지니까, ① 한 페이지씩 흘려 읽어(스트리밍) 메모리를 일정하게 유지하고, ② 벨트(바운드 채널)가 꽉 차면 읽기를 자동으로 늦추며(백프레셔), ③ 그 벨트에서 워커 여러 명이 청크를 나눠 병렬 삭제한다."
+두 저장소에 각각 쓰는 것을 **이중 쓰기(dual write)** 라 하고, 중간에 죽으면 둘이 어긋납니다. 이건 분산 시스템의 고전적 함정입니다.
 
-수백만 개 객체를 한꺼번에 메모리에 올리면 앱이 터집니다.
-그래서 **"조금씩 읽어서 → 조금씩 처리"** 하는 스트리밍 구조가 필요합니다.
+## 핵심 아이디어: 우체통에 사본을 같이 넣어둔다
 
-## 핵심 아이디어: "공장 컨베이어 벨트"
-
-```
-   [생산자]          [컨베이어 벨트]           [작업자 4명]
-  DB에서 페이지를  →  큐(Channel, 칸 제한)  →  각자 청크를 꺼내 삭제
-  조금씩 읽어 올림     (꽉 차면 벨트 멈춤)       (동시에 병렬로)
-```
-
-- **생산자(Producer)** : DB에서 데이터를 **페이지 단위**로 읽어 벨트에 올립니다.
-- **벨트(Channel)** : 칸이 정해진 큐. 꽉 차면 생산자가 잠시 멈춥니다 (← 이게 백프레셔!).
-- **작업자(Worker) N명** : 벨트에서 청크를 꺼내 **동시에** 삭제합니다.
-
----
+편지를 **금고(DB)** 에 넣는 **바로 그 순간**, 같은 손동작으로 **발송함(outbox 테이블)** 에도 사본을 넣습니다. 둘은 한 번의 행동(같은 트랜잭션)이라 **절대 따로 놀 수 없습니다** — 금고에 들어갔으면 발송함에도 반드시 있습니다. 그리고 **집배원(릴레이)** 이 주기적으로 발송함을 비워 **우편(Kafka)** 으로 보냅니다. 받는 사람(search-indexer)이 그걸 받아 검색엔진에 정리합니다.
 
 ## 전체 흐름도
 
 ```
-StaleBoardArchivingScheduler (@Scheduled, cron)
-        │  runBlocking (코루틴 세계로 진입)
-        ▼
-ArchiveStaleBoardsService.archiveStaleBoards(retentionDays=365, chunkSize=500, concurrency=4)
-        │
-        ▼  coroutineScope { ... }  ← 생산자와 작업자를 한 울타리에 묶음
-┌──────────────────────────────────────────────────────────────────────────┐
-│                                                                            │
-│   Channel<List<Board>>(capacity = 4)   ← 벨트: 최대 4칸까지만 쌓임          │
-│                                                                            │
-│  ┌── 생산자 1명 (launch) ──────────┐        ┌── 작업자 4명 (launch) ─────┐  │
-│  │                                 │        │                            │  │
-│  │ findStaleBoards() 를 Flow로     │        │ for (chunk in channel) {   │  │
-│  │ 한 페이지(500건)씩 흘려받아      │  send  │   processChunk(chunk)      │  │
-│  │ 500개 모이면 → channel.send() ──┼───────►│ }                          │  │
-│  │                                 │(꽉차면 │                            │  │
-│  │ 다 읽으면 channel.close()        │ 대기)  │  ├ isStale() 재확인         │  │
-│  └─────────────────────────────────┘        │  └ deleteByIds() 벌크 삭제  │  │
-│                                              │     (청크마다 짧게 커밋)    │  │
-│                                              └────────────────────────────┘  │
-│                                                                            │
-└──────────────────────────────────────────────────────────────────────────┘
-        │  producer.join(); workers.joinAll()  ← 다 끝날 때까지 기다림
-        ▼
-   ArchiveResult(scanned=훑은 수, deleted=삭제 수, failedChunks=실패 청크 수)
+board-service                                                  search-indexer
+─────────────                                                  ──────────────
+[POST /api/boards]
+      │
+      ▼  하나의 트랜잭션 (원자적 — 둘 다 되거나 둘 다 롤백)
+  ┌──────────────────────────────────────────────┐
+  │  boards 테이블 INSERT                          │
+  │  board_outbox 테이블 INSERT (이벤트 사본)       │
+  └──────────────────────────────────────────────┘
+      │
+      ▼  집배원: OutboxRelayScheduler (30초 등 주기 폴링)
+   발송함(board_outbox)에서 "아직 안 보낸" 행을 id 순으로 꺼내
+   Kafka로 발행 → 성공한 것만 "보냄" 표시(published_at)
+      │
+      ▼  Kafka topic "board-changed"   (key = boardId)
+      ═══════════════════════════════════════════════════════▶
+                                                          │
+                                                          ▼  @KafkaListener
+                                            CREATED/UPDATED → ES upsert
+                                            DELETED         → ES delete
 ```
+
+## 왜 이렇게까지?
+
+### ① 원자성 = 유실 제거
+"게시글 저장"과 "이벤트 기록"이 **같은 DB 트랜잭션**입니다. 그래서 "저장은 됐는데 이벤트가 없음"이 **원천적으로 불가능**합니다. 발행이 잠깐 늦어질 수는 있어도(집배원이 아직 안 옴), 사라지진 않습니다.
+> 이 프로젝트는 평소 트랜잭션을 거의 안 씁니다(단일 문장 오토커밋). **딱 이 쓰기 경로 하나**만 트랜잭션을 쓰며, 그 경계조차 `TransactionRunnerPort`로 감싸 서비스는 Spring 트랜잭션 기술을 모릅니다.
+
+### ② 순서 보존 = 앞 편지를 앞질러 보내지 않기
+집배원은 발송함을 **id 순(먼저 넣은 것 먼저)** 으로 보내다가, **한 통이라도 실패하면 거기서 멈춥니다**. 뒤 편지를 먼저 보내버리면 순서가 꼬이니까요. 다음 순회 때 실패한 지점부터 다시 시작합니다. Kafka도 `key = boardId`라 **같은 글의 이벤트는 같은 줄(파티션)** 에 서서 순서가 지켜집니다.
+
+### ③ 최소 한 번 전달 + 멱등 = 중복은 괜찮게 설계
+발행은 됐는데 "보냄" 표시 직전에 죽으면? 다음 순회가 **다시 보냅니다**(유실 대신 중복 선택 = at-least-once). 받는 쪽은 **글 id를 문서 id로 덮어쓰기(upsert)/삭제**라 같은 이벤트를 두 번 받아도 결과가 똑같습니다(**멱등**). 그래서 중복을 걱정하지 않아도 됩니다.
+
+### ④ 최종 일관성 = 잠깐 다를 수 있지만 결국 같아진다
+글을 쓰고 아주 잠깐(집배원 주기 + ES refresh ~1s)은 검색에 안 나올 수 있습니다. 하지만 **결국 반드시** 반영됩니다. 이걸 최종 일관성(eventual consistency)이라 하고, 검색 같은 기능엔 충분한 보장입니다.
+
+> 만약 이벤트가 유실되거나 인덱스를 새로 만들면? `POST /api/boards/search/reindex`가 DB를 처음부터 훑어 전부 다시 색인합니다(안전망).
+
+**관련 파일**:
+- board-service: `db/schema.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
+- event-contract: `demo.board.events/BoardChangedEvent`
+- search-indexer: `adapter/in/messaging/BoardChangedListener`, `application/service/BoardIndexService`, `adapter/out/search/ElasticsearchBoardIndexAdapter`
 
 ---
 
-## 4가지 핵심 장치 (하나씩 뜯어보기)
+# 4️⃣ 용어 사전
 
-### ① 스트리밍 읽기 — 키셋(Keyset) 페이지네이션
-
-전체를 한 번에 읽지 않고 **한 페이지(500건)씩** `Flow`로 흘려받습니다.
-"책을 통째로 복사하지 않고, 한 페이지씩 넘겨 읽는" 것과 같습니다.
-
-이때 페이지를 넘기는 방식이 중요합니다. `OFFSET`이 아니라 **"마지막으로 본 id 다음부터"** 를 씁니다.
-
-```
-❌ OFFSET 방식:  ... ORDER BY id LIMIT 500 OFFSET 1000000
-   → DB가 앞의 100만 건을 세고 버림. 뒤로 갈수록 점점 느려짐 😱
-
-✅ 키셋 방식:    ... WHERE id > :마지막본id ORDER BY id LIMIT 500
-   → 인덱스로 그 지점만 콕 찍음. 100만 번째 페이지도 첫 페이지만큼 빠름 ✅
-```
-
-```
-1페이지: WHERE id > 0      LIMIT 500  →  id 1..500 반환   (마지막 id = 500)
-2페이지: WHERE id > 500    LIMIT 500  →  id 501..1000     (마지막 id = 1000)
-3페이지: WHERE id > 1000   LIMIT 500  →  ...
-```
-
-> `created_at < :threshold` 조건이 대용량에서 느리지 않도록 `idx_board_created_at` 인덱스를 둡니다.
-
-### ② 바운드 채널 = 큐 + 백프레셔 (가장 중요한 개념)
-
-`Channel(capacity = 4)`는 **칸이 4개인 벨트**입니다. 여기서 **백프레셔(Back-pressure)** 가 나옵니다.
-
-```
-작업자(삭제)가 빠르면:        작업자(삭제)가 느리면(밀리면):
-
- 생산자 ─send→ [■][■][ ][ ]     생산자 ─send→ [■][■][■][■]  ← 4칸 꽉 참!
-                 ▲                              │
-            작업자가 계속 빼감              send()가 "대기(suspend)" 상태로 멈춤
-                                                │
-                                          생산자가 DB 페이지를 더 안 읽음!
-                                          → 메모리에 데이터가 안 쌓임 ✅
-```
-
-**핵심**: 소비자가 밀리면 그 압력이 벨트를 거쳐 **생산자, 나아가 DB 읽기까지 자동으로 전파**됩니다.
-그래서 메모리에 올라오는 건 항상 "벨트 4칸 + 읽는 중인 페이지 하나" 정도로 **일정하게 유지**됩니다.
-(만약 무한 큐였다면 이 안전장치가 사라져 메모리가 폭발할 수 있습니다.)
-
-### ③ 워커 N개 = 동시 처리
-
-`concurrency`(기본 4)만큼 작업자 코루틴을 만들어 **동시에** 삭제합니다.
-
-```
-val workers = List(concurrency) {      // 4개 생성
-    launch { for (chunk in channel) processChunk(chunk) }
-}
-```
-
-- 작업자는 **스레드가 아니라 코루틴**이라 가볍습니다(수천 개도 가능).
-- R2DBC가 논블로킹이라 삭제를 기다리는 동안 스레드를 붙잡지 않습니다.
-- 단, 실제 동시 DB 작업 수의 상한은 **커넥션 풀 크기**에 걸립니다.
-
-### ④ 청크 커밋 + 내결함성
-
-```
-processChunk(500건):
-   ├─ (재확인) isStale() 로 도메인 규칙으로 삭제 대상 확정  ← SQL 필터는 1차, 도메인이 최종 권위
-   ├─ deleteByIds(ids)  ← 500건을 한 번의 DELETE로 (청크마다 짧게 커밋)
-   └─ try/catch: 한 청크가 실패해도 전체 중단 X, 건너뛰고 계속 (failedChunks++)
-```
-
-- **왜 청크마다 커밋?** 수백만 건을 한 트랜잭션으로 묶으면 락·커넥션을 너무 오래 잡습니다.
-  청크(500건)마다 짧게 커밋하면 부담이 분산됩니다.
-- **왜 실패를 건너뛰나?** 청크 하나 삭제가 실패했다고 밤새 돌던 배치 전체를 버리면 아깝습니다.
-  실패는 기록(`failedChunks`)하고 나머지는 계속 진행합니다.
-- 단, `CancellationException`(코루틴 취소 신호)만은 삼키지 않고 다시 던져 정상적으로 멈춥니다.
-
-> 튜닝 노브: `board.archiving.*`
-> - `enabled` : 배치 on/off (기본 off)
-> - `cron` : 실행 시각 (예: 매일 04:00)
-> - `retention-days` : 며칠 지난 글이 대상인지
-> - `chunk-size` : 한 번에 처리할 청크(=페이지) 크기
-> - `concurrency` : 작업자 수 (= 벨트 칸 수)
-
-### 관련 파일
-- 배치 로직: `application/service/ArchiveStaleBoardsService.kt`
-- 스트리밍 조회/벌크삭제: `adapter/out/persistence/BoardBatchPersistenceAdapter.kt`
-- 키셋 SQL: `adapter/out/persistence/BoardR2dbcRepository.kt` (`findStalePage`, `deleteByIdIn`)
-- 도메인 규칙: `domain/model/Board.kt` (`isStale`)
-- 스케줄러: `adapter/in/batch/StaleBoardArchivingScheduler.kt`
-
----
-
-# 3️⃣ 용어 사전 (한 줄 정리)
-
-| 용어 | 쉬운 설명 |
+| 용어 | 뜻 |
 |---|---|
-| **Write-Back** | 매번 원본(DB)에 안 쓰고, 임시 저장소(Redis)에 모았다가 나중에 몰아서 반영 |
-| **HINCRBY** | Redis Hash의 특정 필드 값을 원자적으로 +N. 동시에 여러 명이 해도 안 꼬임 |
-| **원자적(Atomic)** | 중간에 끼어들 수 없는 "한 번에 딱" 실행. 동시성 문제(유실)를 막음 |
-| **RENAME 스냅샷** | 버퍼 이름을 순식간에 바꿔 "옮길 대상"을 딱 잠그고, 새 조회는 새 버퍼로 |
-| **키셋(Seek) 페이지네이션** | `OFFSET` 대신 "마지막 본 id 다음부터" 읽어 뒤 페이지도 빠른 방식 |
-| **스트리밍(Flow)** | 전체를 메모리에 안 올리고 한 조각씩 흘려보내며 처리 |
-| **채널(Channel)** | 코루틴 사이의 큐(벨트). 생산자→소비자로 데이터를 넘김 |
-| **바운드(Bounded)** | 칸 수가 정해진. 꽉 차면 넣는 쪽이 대기 → 백프레셔의 근원 |
-| **백프레셔(Back-pressure)** | 소비자가 밀리면 그 압력이 생산자까지 전파돼 생산 속도를 자동으로 늦춤 |
-| **청크(Chunk)** | 대량 데이터를 처리하기 좋게 나눈 한 묶음(예: 500건, 1000건) |
-| **내결함성(Fault-tolerance)** | 일부가 실패해도 전체를 멈추지 않고 계속 진행하는 성질 |
-| **코루틴(Coroutine)** | 스레드보다 훨씬 가벼운 "동시성 단위". 수천 개도 부담 적음 |
-| **논블로킹(Non-blocking)** | I/O(DB/Redis)를 기다리는 동안 스레드를 붙잡지 않음 |
+| **Write-Back** | 빠른 저장소(Redis)에 모았다가 느린 저장소(DB)에 나중에 몰아 반영 |
+| **HINCRBY** | Redis Hash 필드를 원자적으로 증가 |
+| **Atomic(원자적)** | 중간에 끼어들 수 없는 하나의 동작 — 되거나 안 되거나, 반쪽은 없음 |
+| **RENAME 스냅샷** | Redis 키를 통째로 옮겨, 반영 대상을 고정하고 새 유입과 분리 |
+| **키셋(seek) 페이지네이션** | OFFSET 대신 "마지막 id 다음"으로 다음 페이지 — 깊이 무관 일정 속도 |
+| **스트리밍 / Flow** | 전부 메모리에 올리지 않고 조금씩 흘려보내기 |
+| **Channel / bounded / 백프레셔** | 코루틴 큐 / 용량 제한 / 소비가 밀리면 생산까지 눌림 |
+| **청크 커밋** | 한 번에 다 말고 덩어리로 나눠 짧게 커밋 |
+| **Transactional Outbox** | 업무 데이터와 **같은 트랜잭션**으로 이벤트를 테이블에 남기고, 릴레이가 브로커로 발행 |
+| **Kafka / 토픽 / 파티션** | 이벤트 브로커 / 이벤트 종류별 통로 / 순서가 지켜지는 하위 줄(같은 key는 같은 파티션) |
+| **at-least-once** | 최소 한 번 전달 — 유실 대신 중복을 허용 |
+| **멱등(idempotent)** | 같은 요청을 여러 번 해도 결과가 같음(upsert/삭제) |
+| **최종 일관성** | 잠깐은 다를 수 있어도 결국 같아지는 보장 |
 
 ---
 
-# 4️⃣ 두 시스템 핵심 비교
+# 5️⃣ 세 시스템 핵심 비교
 
-| | 조회수 Write-Back | 아카이브 배치 |
-|---|---|---|
-| 방향 | 쓰기 몰림을 **버퍼로 흡수** | 대량 읽기+삭제를 **스트리밍+병렬** |
-| 데이터 흐름 | 한 번에 다 꺼내서(RENAME) 청크 UPDATE | 한 페이지씩 흘려보내며 청크 DELETE |
-| 동시성 | 단일 순차 패스(분산 락으로 클러스터 전역 직렬화) | 생산자 1 + 작업자 N (채널 팬아웃) |
-| 안전장치 | RENAME(유실 방지) + 장애 시 강등 | 바운드 채널 백프레셔 + 청크 커밋 |
-| 실패 대응 | 청크별 건너뛰기 | 청크별 건너뛰기 |
-| 트리거 | 30초 주기 스케줄 | cron 스케줄 (기본 off) |
+| | ① 조회수 | ② 아카이브 | ③ 검색 색인 분리 |
+|---|---|---|---|
+| **다루는 문제** | 쓰기 폭주 흡수 | 대량 삭제를 메모리 안전하게 | 두 저장소 정합성(이중쓰기) |
+| **데이터 흐름** | Redis 버퍼 → 주기 배치로 DB 반영 | DB 스트림 → 벨트 → 워커 삭제 | DB+아웃박스(원자) → Kafka → ES |
+| **동시성/분산** | 단일 순차 플러시(분산 락으로 클러스터 직렬화) | 생산자 1 + 워커 N 팬아웃 | 서비스 분리, 파티션 순서 보존 |
+| **안전장치** | commit-then-delete(유실 방지) | 청크 커밋 + skip-and-continue | 원자적 outbox + at-least-once + 멱등 |
+| **실패해도** | 다음 플러시가 재시도 | 실패 청크만 건너뜀 | 다음 릴레이가 재발행 / reindex 안전망 |
+| **트리거** | @Scheduled(30초) | @Scheduled(cron, opt-in) | @Scheduled 릴레이(opt-in) + @KafkaListener |
 
-**한 줄 요약**
-> - **조회수**: "자주 쓰는 걸 Redis에 모았다가 → 가끔 DB에 한 방에 옮긴다" (RENAME으로 안전하게)
-> - **아카이브**: "많은 걸 한 페이지씩 읽어 → 벨트(큐)에 올리고 → 여러 명이 나눠 지운다" (벨트가 꽉 차면 자동으로 속도 조절)
+> 한 줄 요약: ①은 **버퍼로 흡수**, ②는 **스트림으로 분해**, ③은 **원자적 이벤트로 잇기**. 세 가지 모두 "실패를 가정하고, 유실 대신 재시도"라는 같은 태도로 설계됐습니다.
