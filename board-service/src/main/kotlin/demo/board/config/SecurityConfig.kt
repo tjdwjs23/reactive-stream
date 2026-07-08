@@ -82,6 +82,12 @@ class SecurityConfig(
                     .hasRole("ADMIN")
                     .requestMatchers("/api/admin/**")
                     .hasRole("ADMIN")
+                    // 상품 쓰기/재색인은 ROLE_ADMIN(관리자 관리형 카탈로그). 조회/검색/자동완성(GET)은 공개(anyRequest permitAll).
+                    // reindex는 /api/products 하위 POST라 일반 상품 POST 규칙보다 앞에 둘 필요는 없습니다(둘 다 ADMIN).
+                    .requestMatchers(HttpMethod.POST, "/api/products/**")
+                    .hasRole("ADMIN")
+                    .requestMatchers(HttpMethod.DELETE, "/api/products/**")
+                    .hasRole("ADMIN")
                     // 게시글 쓰기는 인증 필요(역할 무관 — 수정/삭제는 인증된 사용자면 누구나, 소유권은 서비스가 검사).
                     .requestMatchers(HttpMethod.POST, "/api/boards/**")
                     .authenticated()

@@ -6,6 +6,7 @@ import demo.board.domain.exception.BoardValidationException
 import demo.board.domain.exception.DuplicateUsernameException
 import demo.board.domain.exception.InvalidCredentialsException
 import demo.board.domain.exception.InvalidRefreshTokenException
+import demo.board.domain.exception.ProductNotFoundException
 import demo.board.domain.exception.TooManyLoginAttemptsException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -25,6 +26,18 @@ class GlobalExceptionHandler {
     @ExceptionHandler(BoardNotFoundException::class)
     fun handleBoardNotFoundException(e: BoardNotFoundException): ResponseEntity<FailureResponse> =
         failure(BoardErrorCode.NotFound, e.message)
+
+    // 없는 상품 조회/삭제 → 404. 상품 전용 코드/메시지로 응답합니다(게시글과 구분).
+    @ExceptionHandler(ProductNotFoundException::class)
+    fun handleProductNotFoundException(e: ProductNotFoundException): ResponseEntity<FailureResponse> =
+        failure(
+            DynamicErrorCode(
+                code = "PRODUCT_NOT_FOUND",
+                label = "상품을 찾을 수 없습니다.",
+                statusCode = HttpStatus.NOT_FOUND.value(),
+            ),
+            e.message,
+        )
 
     // CreateBoardCommand.init 또는 Board.update()에서 발생하는 입력값 검증 실패
     @ExceptionHandler(BoardValidationException::class)

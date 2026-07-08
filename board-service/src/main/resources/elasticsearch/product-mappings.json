@@ -1,0 +1,26 @@
+{
+  "properties": {
+    "name": {
+      "type": "text",
+      "analyzer": "korean",
+      "fields": {
+        "chosung": {
+          "type": "text",
+          "analyzer": "product_chosung",
+          "search_analyzer": "product_chosung_search"
+        },
+        "ngram": {
+          "type": "text",
+          "analyzer": "product_ngram",
+          "search_analyzer": "standard"
+        }
+      }
+    },
+    "price": {
+      "type": "long"
+    },
+    "createdAt": {
+      "type": "date"
+    }
+  }
+}
