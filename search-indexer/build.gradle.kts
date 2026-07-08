@@ -1,5 +1,5 @@
 // search-indexer = board-changed 이벤트를 소비해 Elasticsearch 색인을 갱신하는 독립 서비스.
-// board-service와 물리적으로 분리되며, event-contract만 공유한다.
+// search-service와 물리적으로 분리되며, event-contract만 공유한다.
 // @KafkaListener는 컨테이너 스레드에서 동기로 처리하고 ES 접근도 imperative라, 코루틴 브리지 없이 동작한다.
 // Kotlin JVM / ktlint / JDK21 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
 plugins {
@@ -16,7 +16,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
-    // 관측성(board-service와 동일한 OTLP 파이프라인 → Grafana Alloy). 이 서비스도 metrics/logs/traces를 push해
+    // 관측성(search-service와 동일한 OTLP 파이프라인 → Grafana Alloy). 이 서비스도 metrics/logs/traces를 push해
     // 분산 시스템의 first-class citizen이 됩니다. starter-opentelemetry가 Tracer + OTLP exporter + micrometer-registry-otlp를,
     // logback-appender가 로그→OTel LogRecord 변환을 제공합니다. @KafkaListener observation의 트레이스도 이 위에서 export됩니다.
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
@@ -53,7 +53,7 @@ dependencies {
 }
 
 // ES Testcontainer가 빌드하는 Nori Dockerfile 경로(docker/elasticsearch/Dockerfile)는 모노레포 루트 기준입니다.
-// Gradle 기본 테스트 작업 디렉터리는 서브모듈이라, 루트로 맞춰 상대경로가 그대로 해석되게 합니다(board-service와 동일).
+// Gradle 기본 테스트 작업 디렉터리는 서브모듈이라, 루트로 맞춰 상대경로가 그대로 해석되게 합니다(search-service와 동일).
 tasks.withType<Test> {
     workingDir = rootProject.projectDir
 }

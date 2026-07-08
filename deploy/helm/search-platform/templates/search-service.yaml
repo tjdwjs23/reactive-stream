@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-service
+  labels:
+    app: search-service
+    app.kubernetes.io/part-of: search-platform
+spec:
+  replicas: {{ .Values.searchService.replicas }}
+  selector:
+    matchLabels:
+      app: search-service
+  template:
+    metadata:
+      labels:
+        app: search-service
+        app.kubernetes.io/part-of: search-platform
+    spec:
+      # Flyway 마이그레이션(기동 시 실행)이 DB를 필요로 하므로 postgres 준비를 기다립니다.
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "until nc -z postgres 5432; do echo waiting for postgres; sleep 2; done"]
+      containers:
+        - name: search-service
+          image: {{ .Values.searchService.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.searchService.port }}
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/{{ .Values.postgres.db }}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: {{ .Values.postgres.user | quote }}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: POSTGRES_PASSWORD
+            - name: SPRING_DATA_REDIS_HOST
+              value: "redis"
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_ELASTICSEARCH_URIS
+              value: "http://elasticsearch:9200"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            # 로컬 k8s에서는 아웃박스 릴레이를 켜 이벤트가 실제로 흐르게 합니다.
+            - name: SEARCH_OUTBOX_RELAY_ENABLED
+              value: "true"
+            - name: SEARCH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: SEARCH_JWT_SECRET
+            - name: SEARCH_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: SEARCH_ADMIN_PASSWORD
+            {{- include "search-platform.observabilityEnv" . | nindent 12 }}
+          # readiness는 의존성(jdbc/redis/es) 준비까지 기다립니다. liveness는 프로세스 생존만 봅니다
+          # (의존성 장애로 인한 재시작 루프 방지).
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.searchService.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.searchService.port }}
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.searchService.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-service
+  labels:
+    app: search-service
+    app.kubernetes.io/part-of: search-platform
+spec:
+  # kind extraPortMapping(nodePort → host 8080)으로 호스트에서 바로 접근합니다.
+  type: NodePort
+  selector:
+    app: search-service
+  ports:
+    - port: {{ .Values.searchService.port }}
+      targetPort: {{ .Values.searchService.port }}
+      nodePort: {{ .Values.searchService.nodePort }}

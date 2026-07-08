@@ -1,0 +1,87 @@
+{
+  "index": {
+    "max_ngram_diff": 19,
+    "analysis": {
+      "tokenizer": {
+        "korean_nori_tokenizer": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed"
+        }
+      },
+      "char_filter": {
+        "hangul_decompose": {
+          "type": "icu_normalizer",
+          "name": "nfkc",
+          "mode": "decompose"
+        },
+        "strip_non_choseong": {
+          "type": "pattern_replace",
+          "pattern": "[^\\u1100-\\u1112]",
+          "replacement": ""
+        }
+      },
+      "filter": {
+        "edge_1_20": {
+          "type": "edge_ngram",
+          "min_gram": 1,
+          "max_gram": 20
+        }
+      },
+      "analyzer": {
+        "korean": {
+          "type": "custom",
+          "tokenizer": "korean_nori_tokenizer",
+          "filter": [
+            "nori_part_of_speech",
+            "nori_readingform",
+            "lowercase"
+          ]
+        },
+        "product_chosung": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose",
+            "strip_non_choseong"
+          ],
+          "tokenizer": "keyword",
+          "filter": [
+            "edge_1_20"
+          ]
+        },
+        "product_chosung_search": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose",
+            "strip_non_choseong"
+          ],
+          "tokenizer": "keyword"
+        },
+        "product_jamo": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose"
+          ],
+          "tokenizer": "keyword",
+          "filter": [
+            "edge_1_20"
+          ]
+        },
+        "product_jamo_search": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose"
+          ],
+          "tokenizer": "keyword"
+        },
+        "product_ngram": {
+          "type": "custom",
+          "tokenizer": "keyword",
+          "filter": [
+            "lowercase",
+            "edge_1_20"
+          ]
+        }
+      }
+    }
+  }
+}

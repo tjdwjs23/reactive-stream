@@ -1,18 +1,18 @@
 // 루트 빌드 = 모노레포 공통 컨벤션. 실제 애플리케이션 코드는 각 서브모듈에 있다.
 // 플러그인 버전은 여기서 한 번만 선언(apply false)하고, 각 모듈이 버전 없이 apply 한다.
 plugins {
-    kotlin("jvm") version "2.2.21" apply false
-    kotlin("plugin.spring") version "2.2.21" apply false
+    kotlin("jvm") version "2.4.0" apply false
+    kotlin("plugin.spring") version "2.4.0" apply false
     // JPA @Entity에 no-arg 생성자 + allopen(프록시 상속 가능)을 자동 부여. R2DBC→JPA 전환으로 추가.
-    kotlin("plugin.jpa") version "2.2.21" apply false
+    kotlin("plugin.jpa") version "2.4.0" apply false
     id("org.springframework.boot") version "4.0.1" apply false
     id("io.spring.dependency-management") version "1.1.7" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.2" apply false
-    id("org.jetbrains.kotlinx.kover") version "0.9.1" apply false
+    id("org.jetbrains.kotlinx.kover") version "0.9.8" apply false
 }
 
 allprojects {
-    group = "demo.board"
+    group = "demo.search"
     version = "0.0.1-SNAPSHOT"
 
     repositories {
@@ -36,17 +36,17 @@ subprojects {
 
     extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
         compilerOptions {
-            // 런타임/툴체인은 JDK 25지만, Kotlin 2.2.x가 아직 바이트코드 타깃 25를 지원하지 않아 24로 맞춥니다
-            // (Java 컴파일과 타깃을 일치시켜 "Inconsistent JVM target" 오류 방지). 가상 스레드·JEP 491(피닝 해결)은
-            // 런타임 기능이라, JDK 25에서 실행되면 바이트코드 타깃과 무관하게 그대로 적용됩니다.
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
-            freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
+            // Kotlin 2.4는 바이트코드 타깃 25를 지원하므로(2.2 시절의 24 우회 제거), 툴체인 JDK 25와 타깃을 일치시킵니다.
+            // 가상 스레드·JEP 491(피닝 해결)은 런타임 기능이라 JDK 25 실행 시 그대로 적용됩니다.
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+            // -Xannotation-default-target=param-property는 Kotlin 2.4에서 기본값이 돼 제거(redundant 경고 해소).
+            freeCompilerArgs.addAll("-Xjsr305=strict")
         }
     }
 
-    // Java 컴파일도 바이트코드 24로 맞춥니다(Kotlin 타깃과 일치). 툴체인(JDK 25)에서 --release 24로 컴파일합니다.
+    // Java 컴파일도 바이트코드 25로 맞춥니다(Kotlin 타깃과 일치). 툴체인(JDK 25)에서 --release 25로 컴파일합니다.
     tasks.withType<JavaCompile>().configureEach {
-        options.release.set(24)
+        options.release.set(25)
     }
 
     extensions.configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {

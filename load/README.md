@@ -46,7 +46,7 @@ k6가 여는 수백~수천 동시 커넥션이 kind NodePort의 **호스트↔VM
 커넥션)에 걸려, 앱 NodePort와 kube-API 매핑이 **동시에 무너집니다**(요청이 즉시 실패하고 `kubectl`도 끊김).
 이건 앱 문제가 아니라 로컬 VM 경계의 측정 아티팩트입니다(실 EKS엔 이 경계가 없음).
 
-**해결: k6를 클러스터 안 Job으로 띄워 ClusterIP(`board-service:8080`)를 직접 호출** — 호스트↔VM 경계를
+**해결: k6를 클러스터 안 Job으로 띄워 ClusterIP(`search-service:8080`)를 직접 호출** — 호스트↔VM 경계를
 아예 안 건넙니다. `run-load.sh`가 이 과정(스크립트 ConfigMap 생성 → k6 Job 실행 → 로그 스트리밍)을 자동화합니다.
 
 ## 준비 — 코어 넉넉히 클러스터 기동
@@ -70,7 +70,7 @@ PEAK_RATE=4000 SUSTAIN_DUR=1m K6_MEM=4Gi ./load/run-load.sh mixed   # 고RPS는 
 - 1번째 인자 = 시나리오(`mixed`|`pagination`|`smoke`|`signals`, 기본 `mixed`).
 - 호스트에 설정한 env(`PEAK_RATE`, `READ_PCT`, `HOT_COUNT`, `ID_MAX`, `WARMUP_DUR`/`RAMP_DUR`/`SUSTAIN_DUR`/
   `RAMPDOWN_DUR` 등)를 그대로 Job에 전달합니다(아래 [주요 환경변수] 표와 동일).
-- `BASE_URL`은 자동으로 `http://board-service:8080`(ClusterIP)로 고정됩니다.
+- `BASE_URL`은 자동으로 `http://search-service:8080`(ClusterIP)로 고정됩니다.
 - k6 Job 자원: `K6_CPU`(기본 3), `K6_MEM`(기본 3Gi) — VU 수천의 고RPS에선 k6 자신이 OOM날 수 있어 `K6_MEM=4Gi` 등으로 올리세요.
 - 결과는 k6 요약이 로그로 스트리밍됩니다. 도중에 Ctrl+C해도 Job은 계속 돌며, `kubectl logs job/k6-load`로 다시 볼 수 있습니다.
 - 정리: `kubectl delete job k6-load; kubectl delete configmap k6-scripts`.
@@ -99,8 +99,8 @@ brew install k6
 
 부하는 "이미 떠 있는 서버"에 줍니다(BASE_URL 기본 `http://localhost:8080`). 서버를 먼저 올립니다.
 
-- **로컬 k8s(권장)**: `deploy/README.md`대로 Helm 배포 후 `board-service`가 `localhost:8080`에 열립니다(kind 포트 매핑).
-- **빠른 개발 실행**: 인프라(PostgreSQL/Redis/Elasticsearch/Kafka)를 `kubectl port-forward`로 당긴 뒤 `./gradlew :board-service:bootRun`.
+- **로컬 k8s(권장)**: `deploy/README.md`대로 Helm 배포 후 `search-service`가 `localhost:8080`에 열립니다(kind 포트 매핑).
+- **빠른 개발 실행**: 인프라(PostgreSQL/Redis/Elasticsearch/Kafka)를 `kubectl port-forward`로 당긴 뒤 `./gradlew :search-service:bootRun`.
 
 ```bash
 # 예: 로컬 k8s에 배포돼 있으면 그대로 localhost:8080 사용. 앱이 떴는지 확인:

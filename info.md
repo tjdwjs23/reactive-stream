@@ -80,9 +80,9 @@ board:views:pending   (Redis Hash)
 ### commit-then-delete = 유실 대신 재시도(at-least-once)
 DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 draining이 남아 다음 플러시가 재시도합니다. 최악의 경우 중복 계수(약간 더 셈)일 뿐, **유실은 없습니다**.
 
-> 튜닝: `board.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
+> 튜닝: `search.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
 
-**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/search/`):
 `application/service/BoardService.getBoard`, `adapter/out/redis/BoardViewCountRedisAdapter`, `application/service/FlushBoardViewCountsService`, `adapter/in/batch/BoardViewCountFlushScheduler`, `adapter/out/persistence/BoardPersistenceAdapter.addViewCountsBatch`.
 
 ---
@@ -121,9 +121,9 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 - 청크마다 `deleteByIds`로 짧게 커밋.
 - 한 청크가 실패해도 `try/catch`로 건너뛰고 계속(`failedChunks++`, skip-and-continue). **전체가 실패**하면 `IllegalStateException`으로 신호(스케줄러가 성공으로 착각하지 않게). 상위 취소(`CancellationException`)는 삼키지 않고 재전파.
 
-> 튜닝: `board.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
+> 튜닝: `search.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
 
-**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/search/`):
 `application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`(findStalePage, deleteByIds — Kotlin JDSL/JPA), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
 
 ---
@@ -151,7 +151,7 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 ## 전체 흐름도
 
 ```
-board-service                                                  search-indexer
+search-service                                                  search-indexer
 ─────────────                                                  ──────────────
 [POST /api/boards]
       │
@@ -191,8 +191,8 @@ board-service                                                  search-indexer
 > 만약 이벤트가 유실되거나 인덱스를 새로 만들면? `POST /api/boards/search/reindex`가 DB를 처음부터 훑어 전부 다시 색인합니다(안전망).
 
 **관련 파일**:
-- board-service: `db/migration/V1__init.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
-- event-contract: `demo.board.events/BoardChangedEvent`
+- search-service: `db/migration/V1__init.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
+- event-contract: `demo.search.events/BoardChangedEvent`
 - search-indexer: `adapter/in/messaging/BoardChangedListener`, `application/service/BoardIndexService`, `adapter/out/search/ElasticsearchBoardIndexAdapter`
 
 ---
@@ -242,7 +242,7 @@ board-service                                                  search-indexer
 [ 내 Mac ]
    └─ Colima (컨테이너 런타임 = 아파트 부지)
         └─ kind (쿠버네티스 클러스터 = 아파트 한 동)
-             ├─ board-service   (게시판 앱)      ← localhost:8080 로 노출
+             ├─ search-service   (게시판 앱)      ← localhost:8080 로 노출
              ├─ search-indexer  (색인 앱)
              ├─ postgres · redis · elasticsearch · kafka   (데이터스토어 = 각 세대)
              └─ (선택) alloy·mimir·loki·tempo·grafana        (관측성 = 관리사무소)

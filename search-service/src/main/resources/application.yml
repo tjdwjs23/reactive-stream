@@ -1,0 +1,190 @@
+spring:
+  application:
+    # service.name(관측성 상관 키)·기동 로그의 앱 이름. 형제 서비스 search-indexer와 대칭으로 search-service.
+    name: search-service
+
+  # 가상 스레드(JDK 25). Tomcat 요청 처리와 @Async/스케줄 실행이 요청마다 가상 스레드에서 돌아,
+  # 블로킹 I/O(JPA/Redis/ES) 동안 플랫폼 스레드를 점유하지 않습니다. JDK 24(JEP 491)에서 synchronized 피닝이
+  # 제거돼 25 LTS에서 안정적입니다 — WebFlux+R2DBC를 걷어내고도 높은 동시성을 유지하는 핵심 스위치.
+  threads:
+    virtual:
+      enabled: true
+
+  # @Scheduled 작업 실행 스레드 풀. 기본값은 1이라 아카이브 배치(장시간)와 조회수 플러시(30초 주기)가
+  # 한 스레드를 두고 경합해, 긴 배치가 도는 동안 플러시가 통째로 밀립니다. 두 스케줄이 서로를 막지 않도록 2로 둡니다.
+  task:
+    scheduling:
+      pool:
+        size: 2
+
+  # 애플리케이션 DB 접근은 JDBC(JPA/Hibernate) + HikariCP 풀. 가상 스레드 위에서 블로킹 JDBC를 씁니다.
+  # 접속 정보는 환경변수로 외부화합니다(운영은 Vault/K8s Secret로 주입, 로컬은 아래 기본값 사용).
+  # 비밀번호를 소스에 평문으로 커밋하지 않기 위해 ${ENV:default} 형태를 씁니다.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/search}
+    username: ${SPRING_DATASOURCE_USERNAME:search}
+    password: ${SPRING_DATASOURCE_PASSWORD:search1234}
+    driver-class-name: org.postgresql.Driver
+    # HikariCP 풀. 대용량 쓰기/조회에서 풀 크기가 처리량 상한이 되므로 기본값(10)에 기대지 않고 외부화합니다.
+    # connection-timeout은 "커넥션을 못 얻을 때 무한 대기"를 막는 회복탄력성 상한(풀 고갈 시 5초 뒤 실패)입니다.
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_POOL_MAX_SIZE:50}
+      minimum-idle: ${SPRING_DATASOURCE_POOL_MIN_IDLE:10}
+      connection-timeout: ${SPRING_DATASOURCE_POOL_CONNECTION_TIMEOUT_MS:5000}
+      max-lifetime: 1800000      # 커넥션 최대 수명(30m). 오래된 커넥션의 서버측 상태 누수 방지
+      validation-timeout: 3000
+
+  # JPA/Hibernate. 스키마는 Flyway가 소유하므로 ddl-auto=validate(엔티티↔테이블 매핑 불일치를 기동 시 감지).
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false          # OSIV 비활성 — 트랜잭션 밖 지연로딩을 막아 커넥션 점유를 좁게 유지(BoardService 원칙과 정합)
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 1000       # 아웃박스 벌크 INSERT/조회수 배치 UPDATE의 JDBC 배치 크기
+        order_inserts: true
+        order_updates: true
+
+  # 스키마 마이그레이션(Flyway). db/migration/V*.sql을 순서대로 적용하고 flyway_schema_history로 이력을 추적합니다.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true    # 기존 데이터가 있는 DB(시드 148k행 등)에도 baseline 후 이어서 적용
+
+  # 조회수 카운터용 Redis(Lettuce, 블로킹 StringRedisTemplate). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      # 명령/연결 타임아웃(무한 대기 차단). Redis가 느리거나 죽어도 여기서 상한이 걸리고, 어댑터의
+      # 서킷브레이커가 반복 실패를 감지해 빠르게 열립니다(조회 경로는 DB 값으로 강등 — BoardService).
+      timeout: ${SPRING_DATA_REDIS_TIMEOUT:1s}
+      connect-timeout: ${SPRING_DATA_REDIS_CONNECT_TIMEOUT:1s}
+
+  # 한글 전문검색용 Elasticsearch(Nori). MVC 스택이라 블로킹 클라이언트(ElasticsearchOperations)가 자동 구성됩니다.
+  # 로컬 k8s/컨테이너의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
+  elasticsearch:
+    uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
+    # 연결/소켓 타임아웃(무한 대기 차단). ES가 느리거나 죽어도 검색/재색인이 매달리지 않고, 검색 어댑터의
+    # 서킷브레이커가 반복 실패 시 열려 빠르게 실패합니다.
+    connection-timeout: ${SPRING_ELASTICSEARCH_CONNECTION_TIMEOUT:1s}
+    socket-timeout: ${SPRING_ELASTICSEARCH_SOCKET_TIMEOUT:5s}
+
+  # 이벤트 발행(Kafka). Transactional Outbox 릴레이가 board-changed 토픽으로 게시글 변경 이벤트를 발행하고,
+  # search-indexer가 이를 소비해 ES 색인을 갱신합니다. 브로커 주소만 여기 두고, 직렬화/acks/멱등 등 프로듀서
+  # 상세는 KafkaProducerConfig에서 명시적으로 구성합니다(Boot 4는 spring-kafka만으론 자동 구성이 딸려오지 않음).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+# 로그: 콘솔/stdout을 구조화 JSON(ECS)으로 출력합니다(Spring Boot 4 네이티브 구조화 로깅, 추가 의존성 없음).
+# Micrometer Tracing이 MDC에 넣는 trace.id/span.id가 ECS 필드로 함께 실려 로그↔트레이스 상관이 가능합니다.
+# (Loki push는 test 프로필에서 꺼지도록 logback-spring.xml에서 게이트합니다. 콘솔 JSON은 모든 환경 공통.)
+logging:
+  structured:
+    format:
+      console: ecs
+
+# 관측성(LGTM 스택 + 단일 수집기 Grafana Alloy). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
+# push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(Alloy 설정: deploy/helm/search-platform/files/alloy/config.alloy).
+# 앱이 백엔드마다 다른 프로토콜/주소로 직접 붙던 것을 단일 OTLP 엔드포인트로 통합한 구조입니다.
+# - /actuator/health : 애플리케이션/의존성 상태(db(JDBC)/redis/es 헬스 포함)
+# - /actuator/metrics : 로컬 디버깅용 Micrometer 메트릭(JSON) 노출. 저장/조회는 Mimir가 담당(스크레이프 없음)
+# - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Mimir로 전달(이름/접미사는 Mimir가 처리)
+# - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Loki로 전달(trace_id는 구조화 메타데이터)
+# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Alloy에 export → Alloy가 Tempo로 전달.
+#   스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘는 trace 컨텍스트 전파는 Micrometer Tracing이 처리합니다(context-propagation).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # 로컬/개발은 전량 샘플링. 운영은 MANAGEMENT_TRACING_SAMPLING_PROBABILITY로 낮춰 오버헤드를 제어합니다.
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  # Spring Boot 4에서 OTLP 트레이싱/로깅 export 설정은 management.opentelemetry.*.export.otlp.* 로 모였습니다
+  # (Boot 3.x의 management.otlp.tracing.endpoint 아님). 둘 다 Alloy의 OTLP/HTTP 수신(4318)으로 push합니다.
+  opentelemetry:
+    # 3종 신호(metrics/logs/traces)가 공유하는 리소스 속성 = 레이블의 단일 소스입니다.
+    # Boot 4에서는 이 한 곳이 OTel SDK(트레이스/로그)와 Micrometer OTLP 레지스트리(메트릭)에 모두 적용돼
+    # 세 신호가 동일한 리소스로 나갑니다(기동 로그로 확인). service.name은 spring.application.name(=search-service).
+    # deployment.environment로 서비스 단위 상관/필터를 통일합니다.
+    # (주의: service.namespace를 넣으면 Prometheus job / Loki service_name이 "ns/name"으로 합성돼
+    #  Tempo의 raw service.name(=search-service)과 갈라져 상관 키가 어긋나므로, 상관 키는 service.name으로 통일합니다.)
+    resource-attributes:
+      deployment.environment: ${DEPLOYMENT_ENV:local}
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+    # 로그 OTLP export. OTel logback appender(logback-spring.xml)가 만든 LogRecord를 여기 엔드포인트로 push합니다.
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_LOGS_ENDPOINT:http://localhost:4318/v1/logs}
+          transport: http
+  # 메트릭 OTLP export(Micrometer OTLP 레지스트리)는 별도 네임스페이스(management.otlp.metrics.export.*)입니다.
+  # 앱은 호스트, Alloy는 docker(4318 노출)라 localhost로 push합니다.
+  otlp:
+    metrics:
+      export:
+        url: ${OTLP_METRICS_URL:http://localhost:4318/v1/metrics}
+        # Mimir는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다(Alloy가 그대로 전달).
+
+# 오래된 게시글 일괄 아카이브 배치 설정
+
+search:
+  # 인증/인가(자체 발급 JWT + 관리자 부트스트랩).
+  security:
+    jwt:
+      # HS256 서명용 대칭키(≥32byte). 비우면 개발용 고정 기본값 + 기동 경고. 운영은 반드시 SEARCH_JWT_SECRET 주입.
+      secret: ${SEARCH_JWT_SECRET:}
+      access-token-ttl-minutes: ${SEARCH_JWT_TTL_MINUTES:60}
+    # 브라우저 클라이언트(SPA)의 교차 오리진 호출 허용 목록(쉼표 구분). 운영은 실제 프런트 도메인을 주입합니다.
+    cors:
+      allowed-origins: ${SEARCH_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    # 로그인 brute-force 방어(Redis 슬라이딩 윈도우). username별 실패가 window 안에서 max-attempts를 넘으면 429로 차단.
+    login:
+      max-attempts: ${SEARCH_LOGIN_MAX_ATTEMPTS:5}
+      window-minutes: ${SEARCH_LOGIN_WINDOW_MINUTES:15}
+    # Refresh Token(불투명 랜덤 + 회전). access가 만료돼도 이 토큰으로 재발급받습니다. 발급 시 회전+재사용 감지.
+    refresh-token:
+      ttl-days: ${SEARCH_REFRESH_TTL_DAYS:14}
+    admin:
+      # 기동 시 ROLE_ADMIN 계정을 부트스트랩합니다(가입 API는 ROLE_USER만 생성).
+      # password가 비어 있으면 부트스트랩을 건너뛰고 경고합니다. 운영은 SEARCH_ADMIN_PASSWORD 주입.
+      username: ${SEARCH_ADMIN_USERNAME:admin}
+      password: ${SEARCH_ADMIN_PASSWORD:}
+
+  archiving:
+    enabled: false            # 운영에서 켤 때만 true
+    cron: "0 0 4 * * *"       # 매일 04:00
+    retention-days: 365       # 365일 지난 게시글이 대상
+    chunk-size: 500           # 한 번에 삭제할 청크 크기 = 스트리밍 페이지 크기
+    concurrency: 4            # 동시 처리 워커 수 = 바운드 채널 용량(백프레셔 상한)
+
+  # 조회수 write-back 플러시: Redis에 쌓인 델타를 주기적으로 DB에 반영
+  view-count:
+    flush-enabled: true       # 끄면 스케줄 플러시를 건너뜀(델타는 Redis에 계속 누적)
+    flush-interval-ms: 30000  # 플러시 주기(ms). 짧을수록 DB 정합성↑, 쓰기 부하↑
+    flush-chunk-size: 1000    # 한 번의 배치 UPDATE에 묶을 게시글 수(DB 왕복 = ceil(N/chunk))
+    flush-lock-ttl-ms: 300000 # 분산 플러시 락 TTL(ms). 홀더가 죽어도 이 시간 뒤 자동 해제. 최대 플러시 소요보다 넉넉히
+
+  # Transactional Outbox 릴레이: board_outbox의 미발행 이벤트를 주기 폴링해 Kafka(board-changed)로 발행.
+  # 아카이브 배치처럼 기본 OFF(opt-in) — enabled=true일 때만 스케줄러 빈이 등록됩니다(테스트/로컬은 Kafka 없이 조용).
+  outbox:
+    relay:
+      enabled: ${SEARCH_OUTBOX_RELAY_ENABLED:false}
+      # 폴링 주기(ms). 짧을수록 지연↓·처리량↑(단 빈 폴링 부하↑). 대용량 쓰기에서 백로그 축적을 줄이려 200ms로.
+      poll-interval-ms: ${SEARCH_OUTBOX_RELAY_POLL_MS:200}
+      # 한 사이클에 읽어 발행할 최대 이벤트 수. 처리량 상한 = batch-size / poll-interval. 500/200ms = ~2500 events/s.
+      batch-size: ${SEARCH_OUTBOX_RELAY_BATCH_SIZE:500}

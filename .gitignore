@@ -1,6 +1,6 @@
 HELP.md
 .gradle
-# 모든 모듈의 빌드 산출물(board-service/build, search-indexer/build, event-contract/build 포함)
+# 모든 모듈의 빌드 산출물(search-service/build, search-indexer/build, event-contract/build 포함)
 build/
 !gradle/wrapper/gradle-wrapper.jar
 

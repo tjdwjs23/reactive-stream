@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# board-platform 로컬 k8s 전체 부트스트랩: colima → kind → 이미지 빌드/주입 → helm → 롤아웃 대기 → 접속 안내.
+# search-platform 로컬 k8s 전체 부트스트랩: colima → kind → 이미지 빌드/주입 → helm → 롤아웃 대기 → 접속 안내.
 # 멱등: colima/클러스터가 이미 있으면 재사용합니다.
 #
 # 사용법:
@@ -7,7 +7,7 @@
 #   ./deploy/up.sh --obs      # 관측성(LGTM: Alloy/Mimir/Loki/Tempo/Grafana)까지 함께
 set -euo pipefail
 
-CLUSTER="board-platform"
+CLUSTER="search-platform"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -44,10 +44,10 @@ echo "==> [4/6] Helm 배포 (observability=${OBS})"
 HELM_OBS=""
 if $OBS; then HELM_OBS="--set observability.enabled=true"; fi
 # shellcheck disable=SC2086
-helm upgrade --install board-platform deploy/helm/board-platform ${HELM_OBS}
+helm upgrade --install search-platform deploy/helm/search-platform ${HELM_OBS}
 
 echo "==> [5/6] 롤아웃 대기 (Elasticsearch 기동으로 최대 수 분 걸릴 수 있음)"
-kubectl rollout status deployment/board-service --timeout=600s
+kubectl rollout status deployment/search-service --timeout=600s
 kubectl rollout status deployment/search-indexer --timeout=600s
 
 echo "==> [6/6] 완료 — 현재 상태:"
@@ -56,7 +56,7 @@ kubectl get pods
 cat <<EOF
 
 접속 — colima 네트워크 특성상 직결 localhost가 불안정하므로 port-forward를 권장:
-  ./deploy/pf.sh          # board-service(8080, Swagger) $($OBS && echo "+ Grafana(3000)") 를 한 번에 열고 URL 출력 (Ctrl+C로 종료)
+  ./deploy/pf.sh          # search-service(8080, Swagger) $($OBS && echo "+ Grafana(3000)") 를 한 번에 열고 URL 출력 (Ctrl+C로 종료)
   그 뒤 http://localhost:8080/swagger-ui.html $($OBS && echo ", http://localhost:3000 (admin/admin)")
 
 end-to-end 확인 스크립트/컬은 deploy/README.md 참고.

@@ -1,0 +1,80 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    app.kubernetes.io/part-of: search-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        app.kubernetes.io/part-of: search-platform
+    spec:
+      containers:
+        - name: kafka
+          image: {{ .Values.kafka.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # KRaft 단일 노드. 클러스터 내 다른 파드는 Service DNS "kafka:9092"로 접속하므로 그렇게 advertise 합니다.
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            # 자동 생성되는 토픽(board-changed, board-changed-dlq)의 기본 파티션 수.
+            # search-indexer가 concurrency만큼 병렬 소비하려면 파티션이 그만큼 있어야 실질 병렬성이 납니다.
+            - name: KAFKA_NUM_PARTITIONS
+              value: "3"
+          ports:
+            - containerPort: 9092
+          # 포트가 열렸는지만 확인하는 가벼운 TCP 체크. kafka-topics.sh는 JVM을 띄워 몇 초 걸리는데
+          # probe 기본 timeoutSeconds=1이라 매번 타임아웃 → 영원히 not-ready가 됩니다. tcpSocket으로 회피.
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.kafka.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    app.kubernetes.io/part-of: search-platform
+spec:
+  selector:
+    app: kafka
+  ports:
+    - port: 9092
+      targetPort: 9092
+{{- end }}

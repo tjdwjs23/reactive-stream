@@ -9,7 +9,7 @@ COPY gradlew ./
 COPY gradle ./gradle
 COPY settings.gradle.kts build.gradle.kts ./
 COPY event-contract ./event-contract
-COPY board-service ./board-service
+COPY search-service ./search-service
 COPY search-indexer ./search-indexer
 RUN chmod +x gradlew && ./gradlew --no-daemon :search-indexer:bootJar -x test
 

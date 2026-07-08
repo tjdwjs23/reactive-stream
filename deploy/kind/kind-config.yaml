@@ -1,12 +1,12 @@
-# kind 단일 노드 클러스터. board-service를 호스트에서 바로 열 수 있게 NodePort(30080)를 host 8080으로 매핑합니다.
-#   kind create cluster --name board-platform --config deploy/kind/kind-config.yaml
+# kind 단일 노드 클러스터. search-service를 호스트에서 바로 열 수 있게 NodePort(30080)를 host 8080으로 매핑합니다.
+#   kind create cluster --name search-platform --config deploy/kind/kind-config.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: board-platform
+name: search-platform
 nodes:
   - role: control-plane
     extraPortMappings:
-      # board-service Service(type: NodePort, nodePort 30080) → 호스트 localhost:8080
+      # search-service Service(type: NodePort, nodePort 30080) → 호스트 localhost:8080
       - containerPort: 30080
         hostPort: 8080
         protocol: TCP
