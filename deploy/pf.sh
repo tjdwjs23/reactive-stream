@@ -9,7 +9,7 @@
 #   ./deploy/pf.sh status    # 실행 여부 확인
 #   ./deploy/pf.sh stop      # 백그라운드 인스턴스 종료(모든 port-forward 정리)
 #
-# 열어두는 대상: board-service(Swagger/API) + Grafana(대시보드·Loki 로그·Tempo 트레이스) + Postgres(DBeaver 등).
+# 열어두는 대상: search-service(Swagger/API) + Grafana(대시보드·Loki 로그·Tempo 트레이스) + Postgres(DBeaver 등).
 # Mimir/Loki/Tempo/Alloy는 개별로 열지 않습니다 — 전부 Grafana 안에서 조회합니다.
 #
 # Postgres 로컬 포트는 PG_LOCAL_PORT로 바꿀 수 있습니다(로컬에 이미 Postgres가 5432를 쓸 때):
@@ -18,8 +18,8 @@
 set -uo pipefail
 
 PG_LOCAL_PORT="${PG_LOCAL_PORT:-5432}"
-PIDFILE="${PF_PIDFILE:-${TMPDIR:-/tmp}/board-platform-pf.pid}"
-LOGFILE="${PF_LOGFILE:-${TMPDIR:-/tmp}/board-platform-pf.log}"
+PIDFILE="${PF_PIDFILE:-${TMPDIR:-/tmp}/search-platform-pf.pid}"
+LOGFILE="${PF_LOGFILE:-${TMPDIR:-/tmp}/search-platform-pf.log}"
 
 pids=()
 cleanup() {
@@ -38,7 +38,7 @@ pf() { # svc  localPort:targetPort  label  url
 run_forwards() {
   trap cleanup EXIT INT TERM
   echo "port-forward 시작:"
-  pf board-service 8080:8080 "board-service" "http://localhost:8080/swagger-ui.html"
+  pf search-service 8080:8080 "search-service" "http://localhost:8080/swagger-ui.html"
   pf postgres "${PG_LOCAL_PORT}:5432" "postgres" "localhost:${PG_LOCAL_PORT}  (db=board user=board pw=board1234)"
 
   # Grafana는 --obs(observability.enabled=true)로 띄웠을 때만 존재합니다.
@@ -74,7 +74,7 @@ case "${1:-fg}" in
     echo $! >"$PIDFILE"
     sleep 1
     echo "백그라운드로 port-forward 시작 (pid=$(cat "$PIDFILE")):"
-    echo "  board-service   http://localhost:8080/swagger-ui.html"
+    echo "  search-service   http://localhost:8080/swagger-ui.html"
     echo "  postgres        localhost:${PG_LOCAL_PORT}  (db=board user=board pw=board1234)"
     kubectl get svc grafana >/dev/null 2>&1 && echo "  grafana         http://localhost:3000  (admin/admin)"
     echo

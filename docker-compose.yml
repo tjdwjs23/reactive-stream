@@ -1,7 +1,7 @@
 # 로컬 개발용 인프라 스택 (IntelliJ bootRun 병행용)
 #
-# 앱(board-service:8080 / search-indexer:8081)은 이 compose에 넣지 않습니다.
-#   - 앱은 IntelliJ 또는 ./gradlew :board-service:bootRun 으로 "호스트에서" 실행합니다.
+# 앱(search-service:8080 / search-indexer:8081)은 이 compose에 넣지 않습니다.
+#   - 앱은 IntelliJ 또는 ./gradlew :search-service:bootRun 으로 "호스트에서" 실행합니다.
 #   - 따라서 모든 데이터스토어를 호스트 포트로 노출하고, 앱은 application.yml 기본값(localhost:*)으로 붙습니다.
 #     (postgres localhost:5432 / redis 6379 / elasticsearch 9200 / kafka 9092)
 #
@@ -31,7 +31,7 @@ services:
   # ─────────────────────────── 코어 데이터스토어 (항상 실행) ───────────────────────────
   postgres:
     image: postgres:16
-    container_name: board-postgres
+    container_name: search-postgres
     environment:
       POSTGRES_DB: board
       POSTGRES_USER: board
@@ -48,7 +48,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: board-redis
+    container_name: search-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -58,12 +58,14 @@ services:
       retries: 5
 
   elasticsearch:
-    # 공식 이미지 + Nori(analysis-nori)를 구운 커스텀 이미지를 빌드해서 씁니다(한글 형태소 검색 필수).
+    # 공식 이미지 + Nori(analysis-nori) + ICU(analysis-icu)를 구운 커스텀 이미지를 빌드해서 씁니다.
+    #   - Nori: 한글 형태소 전문검색(게시글/상품).  - ICU: 상품 초성 자동완성(name.chosung, icu_normalizer).
     # docker/elasticsearch/Dockerfile 참고. 버전은 Spring Boot 4의 ES 클라이언트(9.2.x)와 맞춥니다(ES 8 비호환).
+    # ※ 초성 검색을 쓰려면 ICU가 포함된 이 이미지로 재빌드해야 합니다: docker compose build elasticsearch (또는 up --build).
     build:
       context: ./docker/elasticsearch
-    image: board-elasticsearch-nori:9.2.2
-    container_name: board-elasticsearch
+    image: search-elasticsearch-nori:9.2.2
+    container_name: search-elasticsearch
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
@@ -85,7 +87,7 @@ services:
   kafka:
     # Apache Kafka(KRaft 모드, ZooKeeper 없음) 단일 노드. Transactional Outbox → board-changed → search-indexer.
     image: apache/kafka:3.9.0
-    container_name: board-kafka
+    container_name: search-kafka
     ports:
       - "9092:9092"
     environment:
@@ -113,44 +115,44 @@ services:
       retries: 10
 
   # ─────────────────────── 관측성 LGTM (docker compose --profile obs) ───────────────────────
-  # 설정은 Helm 차트로 이관된 정본(deploy/helm/board-platform/files/)을 그대로 재사용합니다(서비스명이 동일).
+  # 설정은 Helm 차트로 이관된 정본(deploy/helm/search-platform/files/)을 그대로 재사용합니다(서비스명이 동일).
   mimir:
     image: grafana/mimir:2.14.3
-    container_name: board-mimir
+    container_name: search-mimir
     profiles: ["obs"]
     command: -config.file=/etc/mimir/mimir.yml
     ports:
       - "9009:9009"
     volumes:
-      - ./deploy/helm/board-platform/files/mimir/mimir.yml:/etc/mimir/mimir.yml:ro
+      - ./deploy/helm/search-platform/files/mimir/mimir.yml:/etc/mimir/mimir.yml:ro
       - mimir-data:/data
 
   loki:
     image: grafana/loki:3.3.2
-    container_name: board-loki
+    container_name: search-loki
     profiles: ["obs"]
     command: -config.file=/etc/loki/loki-config.yml
     ports:
       - "3100:3100"
     volumes:
-      - ./deploy/helm/board-platform/files/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./deploy/helm/search-platform/files/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
 
   tempo:
     image: grafana/tempo:2.7.1
-    container_name: board-tempo
+    container_name: search-tempo
     profiles: ["obs"]
     command: -config.file=/etc/tempo/tempo.yml
     ports:
       - "3200:3200"
     volumes:
-      - ./deploy/helm/board-platform/files/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - ./deploy/helm/search-platform/files/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
       - tempo-data:/var/tempo
 
   alloy:
     # 단일 OTLP 수집기. 호스트의 앱이 localhost:4318로 push → Alloy가 Mimir/Loki/Tempo로 팬아웃.
     image: grafana/alloy:v1.5.1
-    container_name: board-alloy
+    container_name: search-alloy
     profiles: ["obs"]
     command:
       - run
@@ -162,7 +164,7 @@ services:
       - "4318:4318"
       - "12345:12345"
     volumes:
-      - ./deploy/helm/board-platform/files/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./deploy/helm/search-platform/files/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy-data:/var/lib/alloy/data
     depends_on:
       - mimir
@@ -171,7 +173,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: board-grafana
+    container_name: search-grafana
     profiles: ["obs"]
     ports:
       - "3000:3000"
@@ -180,8 +182,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       # 데이터소스(Mimir/Loki/Tempo)와 대시보드를 provisioning으로 자동 등록.
-      - ./deploy/helm/board-platform/files/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./deploy/helm/board-platform/files/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/helm/search-platform/files/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/helm/search-platform/files/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - mimir

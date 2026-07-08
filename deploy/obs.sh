@@ -17,7 +17,7 @@ case "$ACTION" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RELEASE="board-platform"
+RELEASE="search-platform"
 kubectl config use-context "kind-${RELEASE}" >/dev/null 2>&1 || true
 
 if ! helm status "$RELEASE" >/dev/null 2>&1; then
@@ -26,10 +26,10 @@ fi
 
 echo "==> 관측성 ${ACTION} (helm upgrade, 앱 이미지 재빌드 없음)"
 # --reuse-values: 기존에 적용된 값은 그대로 두고 observability.enabled만 바꿉니다.
-helm upgrade "$RELEASE" "${ROOT}/deploy/helm/board-platform" --reuse-values --set observability.enabled="${VAL}"
+helm upgrade "$RELEASE" "${ROOT}/deploy/helm/search-platform" --reuse-values --set observability.enabled="${VAL}"
 
 # OTLP env 변경으로 앱이 롤아웃됩니다.
-kubectl rollout status deployment/board-service --timeout=180s 2>&1 | tail -1 || true
+kubectl rollout status deployment/search-service --timeout=180s 2>&1 | tail -1 || true
 kubectl rollout status deployment/search-indexer --timeout=180s 2>&1 | tail -1 || true
 
 if [ "$VAL" = "true" ]; then

@@ -12,7 +12,7 @@ plugins {
 }
 
 allprojects {
-    group = "demo.board"
+    group = "demo.search"
     version = "0.0.1-SNAPSHOT"
 
     repositories {

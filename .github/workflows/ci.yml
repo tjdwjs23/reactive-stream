@@ -33,8 +33,8 @@ jobs:
       - name: Run ktlint
         run: ./gradlew ktlintCheck
 
-      # 전 모듈 테스트(Konsist 아키텍처 규칙 포함) 실행 + 커버리지 게이트(koverVerify, board-service 최소 92%).
-      # test는 모든 모듈로 팬아웃되고, kover 게이트는 board-service에만 적용됩니다.
+      # 전 모듈 테스트(Konsist 아키텍처 규칙 포함) 실행 + 커버리지 게이트(koverVerify, search-service 최소 92%).
+      # test는 모든 모듈로 팬아웃되고, kover 게이트는 search-service에만 적용됩니다.
       - name: Run tests & coverage
         run: ./gradlew test koverVerify koverHtmlReport
 
@@ -52,6 +52,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          # Kover는 board-service에만 적용됩니다.
-          path: board-service/build/reports/kover/html
+          # Kover는 search-service에만 적용됩니다.
+          path: search-service/build/reports/kover/html
           retention-days: 7

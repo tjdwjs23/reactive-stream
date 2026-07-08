@@ -13,7 +13,7 @@ spring:
       # (파티션 3 + concurrency 3 → 파티션당 스레드 1). 파티션 수는 배포(Helm)의 브로커 설정에서 지정합니다.
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
 
-  # 색인 대상 Elasticsearch(Nori). board-service와 동일한 boards 인덱스를 공유하며, 이 서비스가 writer입니다.
+  # 색인 대상 Elasticsearch(Nori). search-service와 동일한 boards 인덱스를 공유하며, 이 서비스가 writer입니다.
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}
     # 연결/소켓 타임아웃(무한 대기 차단). ES가 느리면 색인 배치가 매달리지 않고, 색인 어댑터의
@@ -26,15 +26,15 @@ spring:
 server:
   port: 8081
 
-# 로그: board-service와 동일하게 콘솔을 구조화 JSON(ECS)으로 출력하고(trace/span id 포함), OTel appender로 OTLP push.
+# 로그: search-service와 동일하게 콘솔을 구조화 JSON(ECS)으로 출력하고(trace/span id 포함), OTel appender로 OTLP push.
 logging:
   structured:
     format:
       console: ecs
 
-# 관측성: board-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push.
-# service.name은 spring.application.name(=search-indexer)이라 board-service와 Grafana/Tempo/Mimir에서 구분됩니다.
-# (service.namespace는 board-service와 동일한 이유로 두지 않습니다 — 상관 키를 raw service.name으로 통일.)
+# 관측성: search-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push.
+# service.name은 spring.application.name(=search-indexer)이라 search-service와 Grafana/Tempo/Mimir에서 구분됩니다.
+# (service.namespace는 search-service와 동일한 이유로 두지 않습니다 — 상관 키를 raw service.name으로 통일.)
 management:
   endpoints:
     web:

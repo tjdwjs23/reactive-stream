@@ -1,0 +1,94 @@
+# search-platform 로컬 k8s(kind) 기본값.
+# 이미지는 로컬에서 빌드해 `kind load docker-image`로 클러스터에 주입하므로 pullPolicy는 IfNotPresent.
+
+image:
+  pullPolicy: IfNotPresent
+
+# ── 애플리케이션 ──
+boardService:
+  image: search-service:local
+  replicas: 1
+  port: 8080
+  nodePort: 30080 # kind extraPortMapping(30080→host 8080)과 일치
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { memory: "1Gi" }
+
+searchIndexer:
+  image: search-indexer:local
+  replicas: 1
+  port: 8081
+  nodePort: 30081
+  resources:
+    requests: { cpu: "150m", memory: "384Mi" }
+    limits: { memory: "768Mi" }
+
+# ── 데이터스토어(로컬 단일 노드, 데이터는 emptyDir라 파드 재생성 시 초기화) ──
+postgres:
+  enabled: true
+  image: postgres:16
+  db: board
+  user: board
+  password: board1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
+  # 영속성: PVC를 쓰면 파드 재시작·rollout restart·colima 재시작은 물론
+  # helm uninstall(=down.sh 기본)에도 데이터가 유지됩니다.
+  # (PVC에 helm.sh/resource-policy: keep 부여 — postgres.yaml. up.sh가 기존 PVC에 재연결)
+  # 데이터까지 완전히 지우려면 down.sh --all (kind delete cluster로 노드째 제거).
+  # false면 emptyDir로 되돌아가 파드가 사라질 때마다 초기화됩니다.
+  persistence:
+    enabled: true
+    storageClass: standard # kind 기본 동적 프로비저너(local-path)
+    size: 5Gi
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits: { memory: "512Mi" }
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  resources:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits: { memory: "256Mi" }
+
+elasticsearch:
+  enabled: true
+  # Nori 플러그인 포함 커스텀 이미지 — docker/elasticsearch/Dockerfile로 빌드 후 kind load 필요
+  image: search-elasticsearch-nori:9.2.2
+  javaOpts: "-Xms512m -Xmx512m"
+  resources:
+    requests: { cpu: "250m", memory: "1Gi" }
+    limits: { memory: "1536Mi" }
+
+kafka:
+  enabled: true
+  image: apache/kafka:3.9.0
+  resources:
+    requests: { cpu: "150m", memory: "512Mi" }
+    limits: { memory: "1Gi" }
+
+# ── 보안(로컬 전용 기본값) ──
+security:
+  jwtSecret: "local-dev-jwt-secret-please-change-me-32bytes-min"
+  adminPassword: "admin1234"
+
+# ── 관측성 (LGTM 스택) ──
+# 기본은 off(로컬 리소스 절약): 앱의 OTLP export가 꺼지고, 아래 LGTM 파드도 배포되지 않습니다.
+# true로 켜면 클러스터 내 Alloy → Mimir/Loki/Tempo/Grafana가 함께 배포되고, 앱이 alloy:4318로 push합니다.
+#   helm upgrade search-platform deploy/helm/search-platform --set observability.enabled=true
+#   ⚠ 파드가 11개로 늘어 메모리 부담이 큽니다 — colima를 12~14GB로 띄우세요.
+observability:
+  enabled: false
+  otlpEndpointBase: "http://alloy:4318" # 앱이 push할 클러스터 내 Alloy OTLP/HTTP 엔드포인트
+  alloy:
+    image: grafana/alloy:v1.5.1
+  mimir:
+    image: grafana/mimir:2.14.3
+  loki:
+    image: grafana/loki:3.3.2
+  tempo:
+    image: grafana/tempo:2.7.1
+  grafana:
+    image: grafana/grafana:11.4.0
+    adminUser: admin
+    adminPassword: admin
+    nodePort: 30030 # kind 매핑(30030→host 3000)과 일치 — http://localhost:3000

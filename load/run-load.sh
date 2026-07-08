@@ -3,7 +3,7 @@
 #
 # 왜 in-cluster인가: k6를 호스트에서 NodePort(localhost:8080)로 때리면 ~1,000 동시 커넥션에서
 # colima의 호스트↔VM 포트매핑(docker-proxy)이 무너져 앱·kube-API가 동시에 죽습니다(측정 불가).
-# k6를 클러스터 안 Job으로 돌려 ClusterIP(board-service:8080)를 직접 호출하면 이 경계를 우회합니다.
+# k6를 클러스터 안 Job으로 돌려 ClusterIP(search-service:8080)를 직접 호출하면 이 경계를 우회합니다.
 #
 # 사용법:
 #   ./load/run-load.sh <scenario> [k6 옵션 env...]
@@ -29,7 +29,7 @@ case "$SCENARIO" in
 esac
 
 command -v kubectl >/dev/null || { echo "kubectl 없음"; exit 1; }
-kubectl get svc board-service -n "$NS" >/dev/null 2>&1 || { echo "board-service 서비스 없음 — 먼저 배포하세요(./deploy/up.sh)"; exit 1; }
+kubectl get svc search-service -n "$NS" >/dev/null 2>&1 || { echo "search-service 서비스 없음 — 먼저 배포하세요(./deploy/up.sh)"; exit 1; }
 
 echo "==> k6 스크립트 ConfigMap 갱신"
 kubectl delete configmap k6-scripts -n "$NS" >/dev/null 2>&1 || true
@@ -50,7 +50,7 @@ add_env() {
             - { name: ${1}, value: \"${2}\" }"
   fi
 }
-add_env BASE_URL "http://board-service:8080"          # ClusterIP 직접(호스트 브리지 우회)
+add_env BASE_URL "http://search-service:8080"          # ClusterIP 직접(호스트 브리지 우회)
 add_env ADMIN_PASSWORD "${ADMIN_PASSWORD:-admin1234}"
 add_env PEAK_RATE "${PEAK_RATE:-}"
 add_env READ_PCT "${READ_PCT:-}";  add_env WRITE_PCT "${WRITE_PCT:-}";  add_env HOT_COUNT "${HOT_COUNT:-}"

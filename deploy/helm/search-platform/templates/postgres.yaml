@@ -1,0 +1,100 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: search-platform
+spec:
+  replicas: 1
+  {{- if .Values.postgres.persistence.enabled }}
+  # RWO PVC는 두 파드가 동시에 붙을 수 없어, 롤아웃 시 신규 파드가 볼륨을 못 잡고 멈출 수 있습니다.
+  # Recreate로 기존 파드를 먼저 내린 뒤 새로 띄웁니다.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/part-of: search-platform
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: POSTGRES_PASSWORD
+            # emptyDir 마운트 하위 디렉터리에 데이터를 두어 lost+found 등과 충돌 방지
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}, "-d", {{ .Values.postgres.db | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          {{- if .Values.postgres.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: postgres-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if .Values.postgres.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  annotations:
+    # helm uninstall(=down.sh 기본) 시에도 PVC(DB 데이터)를 삭제하지 않고 보존.
+    # 다음 helm upgrade --install(up.sh)에서 같은 릴리스가 이 PVC를 다시 채택해 데이터가 유지됩니다.
+    # 데이터까지 완전히 지우려면 down.sh --all(kind delete cluster)로 노드를 통째로 제거.
+    "helm.sh/resource-policy": keep
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: search-platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.postgres.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: search-platform
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+{{- end }}

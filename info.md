@@ -82,7 +82,7 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 
 > 튜닝: `board.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
 
-**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/board/`):
 `application/service/BoardService.getBoard`, `adapter/out/redis/BoardViewCountRedisAdapter`, `application/service/FlushBoardViewCountsService`, `adapter/in/batch/BoardViewCountFlushScheduler`, `adapter/out/persistence/BoardPersistenceAdapter.addViewCountsBatch`.
 
 ---
@@ -123,7 +123,7 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 
 > 튜닝: `board.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
 
-**관련 파일** (`board-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/board/`):
 `application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`(findStalePage, deleteByIds — Kotlin JDSL/JPA), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
 
 ---
@@ -151,7 +151,7 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 ## 전체 흐름도
 
 ```
-board-service                                                  search-indexer
+search-service                                                  search-indexer
 ─────────────                                                  ──────────────
 [POST /api/boards]
       │
@@ -191,8 +191,8 @@ board-service                                                  search-indexer
 > 만약 이벤트가 유실되거나 인덱스를 새로 만들면? `POST /api/boards/search/reindex`가 DB를 처음부터 훑어 전부 다시 색인합니다(안전망).
 
 **관련 파일**:
-- board-service: `db/migration/V1__init.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
-- event-contract: `demo.board.events/BoardChangedEvent`
+- search-service: `db/migration/V1__init.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
+- event-contract: `demo.search.events/BoardChangedEvent`
 - search-indexer: `adapter/in/messaging/BoardChangedListener`, `application/service/BoardIndexService`, `adapter/out/search/ElasticsearchBoardIndexAdapter`
 
 ---
@@ -242,7 +242,7 @@ board-service                                                  search-indexer
 [ 내 Mac ]
    └─ Colima (컨테이너 런타임 = 아파트 부지)
         └─ kind (쿠버네티스 클러스터 = 아파트 한 동)
-             ├─ board-service   (게시판 앱)      ← localhost:8080 로 노출
+             ├─ search-service   (게시판 앱)      ← localhost:8080 로 노출
              ├─ search-indexer  (색인 앱)
              ├─ postgres · redis · elasticsearch · kafka   (데이터스토어 = 각 세대)
              └─ (선택) alloy·mimir·loki·tempo·grafana        (관측성 = 관리사무소)

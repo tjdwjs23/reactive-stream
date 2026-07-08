@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# board-platform 정리.
+# search-platform 정리.
 #   ./deploy/down.sh          # helm uninstall만 — postgres PVC(DB 데이터)와 kind 클러스터는 유지.
 #                             #   다음 ./deploy/up.sh에서 기존 데이터에 그대로 재연결됩니다.
 #   ./deploy/down.sh --all    # 위 + kind 클러스터 삭제 + colima 정지 (⚠ DB 데이터도 함께 소멸).
 set -euo pipefail
 
-CLUSTER="board-platform"
+CLUSTER="search-platform"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 ALL=false
@@ -15,7 +15,7 @@ echo "==> 백그라운드 port-forward 정리"
 "${HERE}/pf.sh" stop || true
 
 echo "==> helm 릴리스 삭제 (postgres PVC는 helm.sh/resource-policy: keep 로 보존)"
-helm uninstall board-platform >/dev/null 2>&1 || echo "    (릴리스 없음 — skip)"
+helm uninstall search-platform >/dev/null 2>&1 || echo "    (릴리스 없음 — skip)"
 
 if $ALL; then
   echo "==> kind 클러스터 삭제 (⚠ PVC/DB 데이터 함께 소멸)"
