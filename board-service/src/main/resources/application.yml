@@ -1,5 +1,7 @@
 spring:
   application:
+    # NOTE: "reactive"는 이 서비스가 WebFlux/R2DBC였던 시절의 레거시 식별자입니다(스택은 MVC+JPA로 전환됨).
+    # service.name·DB명·Grafana 대시보드/Tempo/Mimir 상관 키가 모두 이 값에 묶여 있어 의도적으로 유지합니다.
     name: reactive
 
   # 가상 스레드(JDK 25). Tomcat 요청 처리와 @Async/스케줄 실행이 요청마다 가상 스레드에서 돌아,
@@ -87,7 +89,7 @@ logging:
 # 관측성(LGTM 스택 + 단일 수집기 Grafana Alloy). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
 # push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(Alloy 설정: deploy/helm/board-platform/files/alloy/config.alloy).
 # 앱이 백엔드마다 다른 프로토콜/주소로 직접 붙던 것을 단일 OTLP 엔드포인트로 통합한 구조입니다.
-# - /actuator/health : 애플리케이션/의존성 상태(r2dbc/redis/es 헬스 포함)
+# - /actuator/health : 애플리케이션/의존성 상태(db(JDBC)/redis/es 헬스 포함)
 # - /actuator/metrics : 로컬 디버깅용 Micrometer 메트릭(JSON) 노출. 저장/조회는 Mimir가 담당(스크레이프 없음)
 # - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Mimir로 전달(이름/접미사는 Mimir가 처리)
 # - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Loki로 전달(trace_id는 구조화 메타데이터)

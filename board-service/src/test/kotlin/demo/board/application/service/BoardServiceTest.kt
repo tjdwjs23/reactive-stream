@@ -33,7 +33,7 @@ private class ServiceFixture {
     val boardEventOutboxPort = mockk<BoardEventOutboxPort>(relaxed = true)
 
     // 트랜잭션 경계는 테스트에서 블록을 그대로 실행하는 pass-through로 대체합니다
-    // (실제 원자성/롤백은 R2DBC 통합테스트가 검증하고, 여기서는 서비스 오케스트레이션만 봅니다).
+    // (실제 원자성/롤백은 JPA 통합테스트가 검증하고, 여기서는 서비스 오케스트레이션만 봅니다).
     val transactionRunner =
         object : TransactionRunnerPort {
             override fun <T> execute(block: () -> T): T = block()

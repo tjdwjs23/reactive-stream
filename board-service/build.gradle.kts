@@ -48,7 +48,7 @@ dependencies {
     // (ElasticsearchOperations/ElasticsearchClient)가 자동 구성됩니다.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
-    // 관측성. Actuator(health + r2dbc/redis/es 헬스, /actuator/metrics).
+    // 관측성. Actuator(health + db(JDBC)/redis/es 헬스, /actuator/metrics).
     // 메트릭 저장/조회는 Mimir가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
     // 스크레이프 파이프라인이 없어(Alloy는 OTLP 수신만) Prometheus 레지스트리는 두지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
