@@ -56,6 +56,23 @@
           ],
           "tokenizer": "keyword"
         },
+        "product_jamo": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose"
+          ],
+          "tokenizer": "keyword",
+          "filter": [
+            "edge_1_20"
+          ]
+        },
+        "product_jamo_search": {
+          "type": "custom",
+          "char_filter": [
+            "hangul_decompose"
+          ],
+          "tokenizer": "keyword"
+        },
         "product_ngram": {
           "type": "custom",
           "tokenizer": "keyword",

@@ -9,6 +9,11 @@
           "analyzer": "product_chosung",
           "search_analyzer": "product_chosung_search"
         },
+        "jamo": {
+          "type": "text",
+          "analyzer": "product_jamo",
+          "search_analyzer": "product_jamo_search"
+        },
         "ngram": {
           "type": "text",
           "analyzer": "product_ngram",

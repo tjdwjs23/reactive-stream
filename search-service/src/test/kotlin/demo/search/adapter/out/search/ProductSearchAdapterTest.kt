@@ -37,8 +37,8 @@ class ProductSearchAdapterTest(
         ) = Product(id = id, name = name, price = 1000, createdAt = LocalDateTime.now())
 
         Given("상품이 색인·승격돼 있을 때") {
-            // 초성: 삼각김밥→ㅅㄱㄱㅂ, 삼계탕→ㅅㄱㅌ, 라면→ㄹㅁ
-            seed(p(6001L, "삼각김밥"), p(6002L, "삼계탕"), p(6003L, "라면"))
+            // 초성: 삼각김밥→ㅅㄱㄱㅂ, 삼계탕→ㅅㄱㅌ, 라면→ㄹㅁ, 사과→ㅅㄱ
+            seed(p(6001L, "삼각김밥"), p(6002L, "삼계탕"), p(6003L, "라면"), p(6004L, "사과"))
 
             When("일반 검색 '김밥'") {
                 val ids = adapter.search("김밥", 10).map { it.product.id }
@@ -47,24 +47,26 @@ class ProductSearchAdapterTest(
                 }
             }
 
-            When("초성 자동완성 'ㅅㄱ'") {
+            When("순수 초성 'ㅅㄱ'") {
                 val ids = adapter.autocomplete("ㅅㄱ", 10).map { it.product.id }
-                Then("초성이 ㅅㄱ로 시작하는 삼각김밥·삼계탕이 매칭되고, 라면은 아니다") {
+                Then("초성이 ㅅㄱ로 시작하는 삼각김밥·삼계탕·사과가 모두 매칭되고 라면은 아니다") {
                     ids shouldContain 6001L
                     ids shouldContain 6002L
+                    ids shouldContain 6004L
                     ids shouldNotContain 6003L
                 }
             }
 
-            When("초성 자동완성 'ㅅㄱㄱ'(더 좁힘)") {
+            When("순수 초성 'ㅅㄱㄱ'(더 좁힘)") {
                 val ids = adapter.autocomplete("ㅅㄱㄱ", 10).map { it.product.id }
-                Then("삼각김밥만 매칭되고 삼계탕은 제외된다") {
+                Then("초성 ㅅㄱㄱ은 삼각김밥만(삼계탕·사과 제외)") {
                     ids shouldContain 6001L
                     ids shouldNotContain 6002L
+                    ids shouldNotContain 6004L
                 }
             }
 
-            When("초성 자동완성 'ㄹ'") {
+            When("순수 초성 'ㄹ'") {
                 val ids = adapter.autocomplete("ㄹ", 10).map { it.product.id }
                 Then("라면만 매칭된다") {
                     ids shouldContain 6003L
@@ -72,11 +74,22 @@ class ProductSearchAdapterTest(
                 }
             }
 
-            When("완성형 접두 '삼'으로 자동완성해도 초성으로 정규화된다") {
+            // ── 버그 수정 검증: 완성형 음절은 초성으로 뭉개지지 않고 자모 접두로 매칭된다 ──
+            When("완성형+초성 혼합 '사ㄱ'") {
+                val ids = adapter.autocomplete("사ㄱ", 10).map { it.product.id }
+                Then("'사'로 시작하고 다음이 ㄱ초성인 사과만 — 삼계탕·삼각김밥은 제외된다") {
+                    ids shouldContain 6004L
+                    ids shouldNotContain 6001L
+                    ids shouldNotContain 6002L
+                }
+            }
+
+            When("완성형 '삼'") {
                 val ids = adapter.autocomplete("삼", 10).map { it.product.id }
-                Then("초성 ㅅ으로 시작하는 삼각김밥·삼계탕이 매칭된다") {
+                Then("'삼'으로 시작하는 삼계탕·삼각김밥만 — 사과(ㅅㄱ)는 제외된다") {
                     ids shouldContain 6001L
                     ids shouldContain 6002L
+                    ids shouldNotContain 6004L
                 }
             }
         }

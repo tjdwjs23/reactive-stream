@@ -50,11 +50,22 @@ class ProductSearchAdapter(
         prefix: String,
         size: Int,
     ): List<ProductSearchHit> {
-        // name.chosung에 대한 match. 색인 분석기는 초성+edge_ngram, 검색 분석기는 초성 정규화만이라
-        // "ㅅㄱ" → "삼각김밥"의 초성 접두 토큰(ㅅ,ㅅㄱ,...)에 매칭됩니다. 접두 문자열도 초성으로 정규화돼 동작합니다.
+        // 완성형 음절과 초성을 구분하기 위해 두 가지 매칭을 라우팅합니다:
+        // - 질의가 "순수 초성"(모두 호환 자음 자모, 예 "ㅅㄱ")이면 name.chosung(초성만 edge_ngram)에 매칭 →
+        //   초성이 ㅅㄱ로 시작하는 모든 상품(사과·삼계탕·삼각김밥).
+        // - 그 외(완성형 음절이 섞이면, 예 "사ㄱ"·"삼")는 name.jamo(전체 자모 edge_ngram)에 매칭 →
+        //   "사ㄱ"=ㅅㅏㄱ은 사과(ㅅㅏㄱ…)만, "삼"=ㅅㅏㅁ은 삼계탕·삼각김밥만. 완성형 음절이 초성으로 뭉개지지 않습니다.
+        // name.jamo는 순수 초성 질의("ㅅㄱ"=ㅅㄱ)를 매칭하지 못하므로(문서 자모엔 중성이 끼어 있음), 초성 질의는 chosung로만 처리합니다.
+        val isChosungOnly = prefix.isNotEmpty() && prefix.all { it in 'ㄱ'..'ㅎ' }
         val query =
             Query.of { q ->
-                q.match { m -> m.field("name.chosung").query(prefix) }
+                q.bool { b ->
+                    b.should { s -> s.match { m -> m.field("name.jamo").query(prefix) } }
+                    if (isChosungOnly) {
+                        b.should { s -> s.match { m -> m.field("name.chosung").query(prefix) } }
+                    }
+                    b.minimumShouldMatch("1")
+                }
             }
         return execute(query, size)
     }
