@@ -180,7 +180,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **순서 보존**: 릴레이는 미발행 이벤트를 `id` 오름차순으로 발행하다 **한 건이라도 실패하면 그 지점에서 멈춥니다**(뒤 이벤트를 앞지르지 않음). 다음 사이클이 실패 지점부터 재시도합니다. Kafka는 `key = boardId`로 파티셔닝돼 **같은 게시글의 이벤트 순서**를 보장합니다.
 - **at-least-once + 멱등**: 발행 후 `published` 표시 전에 죽으면 다음 사이클이 재발행합니다(유실 대신 중복). 소비자는 `_id = boardId` 기준 **upsert/삭제라 자연히 멱등**이고, 파티션 순서까지 있어 "마지막 이벤트가 이긴다"로 안전합니다(별도 `eventId` 중복 저장 불필요).
 - **운영 스위치**: 릴레이 스케줄러는 아카이브 배치처럼 `board.outbox.relay.enabled=true`일 때만 활성화됩니다(로컬/테스트는 꺼진 채 Kafka 없이 조용).
-- **정합성 회복**: 이벤트 유실·인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다.
+- **정합성 회복(무중단 alias 재색인)**: 이벤트 유실·매핑 변경 시 `POST /api/boards/search/reindex`가 DB를 키셋 순회해 **새 버전 인덱스(`boards_v{n}`)에 전량 재구축한 뒤 `boards` alias를 원자적으로 스왑**합니다(스왑 전까지 검색은 옛 인덱스를 보므로 무중단). 색인 실패가 있으면 스왑하지 않고 새 인덱스를 폐기해 **자동 롤백**합니다(재구축이라 과거의 고아 prune이 불필요). 상품도 `POST /api/products/search/reindex`로 동일합니다.
 
 관련 파일: `board_outbox`(db/migration/V1__init.sql), `OutboxPersistenceAdapter`, `RelayOutboxService`, `OutboxRelayScheduler`, `KafkaEventPublisherAdapter`, `SpringTransactionRunner` / (consumer) `BoardChangedListener`, `BoardIndexService`, `ElasticsearchBoardIndexAdapter`.
 
@@ -208,6 +208,22 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 | `PUT` | `/api/boards/{id}` | 수정 → 200 | 인증(소유자/관리자) |
 | `DELETE` | `/api/boards/{id}` | 삭제 → 204 | 인증(소유자/관리자) |
 | `GET` | `/api/boards/search?keyword=&size=` | 한글 전문검색(관련도순) → 200 | 공개 |
+
+### 상품 (Product) — 초성/자동완성 검색
+
+> 초성 검색은 긴 게시글엔 안 맞지만 **짧은 상품명**엔 딱 맞아, 초성이 값을 내는 별도 도메인으로 분리했습니다(Spoqa es-dev 사례의 맥락 그대로). board와 동일한 헥사고날 + Transactional Outbox → Kafka(`product-changed`) → search-indexer → `products` 인덱스 파이프라인을 미러링합니다(board 경로는 무변경, 별도 테이블·토픽·DLQ·게이지).
+
+| Method | Path | 설명 | 인가 |
+|---|---|---|---|
+| `POST` | `/api/products` | 상품 생성 → 201 | ROLE_ADMIN |
+| `GET` | `/api/products/{id}` | 단건 조회 → 200 | 공개 |
+| `GET` | `/api/products?cursor=&size=` | 목록(키셋) → 200 | 공개 |
+| `GET` | `/api/products/search?keyword=&size=` | 상품명 전문검색(Nori) → 200 | 공개 |
+| `GET` | `/api/products/autocomplete?q=ㅅㄱ&size=` | **초성/접두 자동완성** → 200 | 공개 |
+| `DELETE` | `/api/products/{id}` | 삭제 → 204 | ROLE_ADMIN |
+| `POST` | `/api/products/search/reindex` | DB→ES 전체 재색인(무중단 alias 스왑) → 200 | ROLE_ADMIN |
+
+> **초성 검색(ICU)**: `products` 인덱스의 `name.chosung` 서브필드는 **ICU 분석기**로 초성 색인합니다. `icu_normalizer`(nfkc, decompose)가 완성형 음절("삼각김밥")과 사용자가 타이핑한 호환 자모("ㅅㄱ")를 **모두 결합형 자모로 정규화**하고, `pattern_replace([^ᄀ-ᄒ])`로 **초성만 추출**한 뒤 `edge_ngram`으로 접두 자동완성을 만듭니다. `analyzer`(색인=초성+edge_ngram)와 `search_analyzer`(검색=초성 정규화만)를 분리해 별도 자모 매핑표 없이 동작합니다 — "ㅅㄱ"→삼각김밥·삼계탕, "ㅅㄱㄱ"→삼각김밥, 완성형 "삼"→ㅅ으로 정규화. ES 이미지에 `analysis-icu`가 필요합니다(`docker/elasticsearch/Dockerfile`). 일반 상품명 검색은 `name`(Nori)+`name.ngram`(부분)으로, 자동완성은 `name.chosung`으로 매칭합니다.
 
 ### 운영 (Admin / Operational)
 
@@ -259,7 +275,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match(title^2, content)`로 검색, 기본 `_score` 내림차순 + `<em>` 하이라이트, `List<BoardSearchHit>` 반환.
 - **버전 제약**: Spring Boot 4는 ES **9.2.x 클라이언트**를 번들합니다. ES 8 서버는 프로토콜이 안 맞아 통신이 깨지므로 **서버도 ES 9.2.x**(`docker/elasticsearch/Dockerfile`이 Nori 포함 이미지를 빌드 — 로컬 k8s는 `deploy/build-and-load.sh`가 빌드해 `kind load`로 주입).
 
-> **알려진 tradeoff(중복)**: reader(board-service)와 writer(search-indexer)가 같은 `boards` 인덱스를 공유하므로 `BoardDocument`와 Nori 설정 JSON이 **두 모듈에 중복**됩니다(매핑 변경 시 양쪽 동기화 필요 — 공유 스키마 모듈 추출은 후속 과제). 또한 `reindex`가 board-service에서 ES에 직접 쓰는 dual-writer 경로라, 이벤트 리플레이 기반으로 옮기는 것도 후속 과제입니다.
+> **알려진 tradeoff(중복)**: reader(board-service)와 writer(search-indexer)가 같은 `boards`·`products` 인덱스를 공유하므로 `BoardDocument`/`ProductDocument`와 분석기 설정 JSON(Nori/ICU)이 **두 모듈에 중복**됩니다(매핑 변경 시 양쪽 동기화 필요 — 공유 스키마 모듈 추출은 후속 과제). 또한 `reindex`가 board-service에서 ES에 직접 쓰는 dual-writer 경로라, 이벤트 리플레이 기반으로 옮기는 것도 후속 과제입니다.
 
 ---
 

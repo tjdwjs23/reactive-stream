@@ -106,7 +106,13 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 | `PUT` | `/api/boards/{id}` | `UpdateBoardUseCase` → 200 OK | 인증 (소유자/관리자) |
 | `DELETE` | `/api/boards/{id}` | `DeleteBoardUseCase` → 204 No Content | 인증 (소유자/관리자) |
 | `GET` | `/api/boards/search?keyword=&size=` | `SearchBoardUseCase` → 200 OK (한글 전문검색, 관련도순) | 공개 |
-| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 전체 재색인) | ROLE_ADMIN |
+| `POST` | `/api/boards/search/reindex` | `ReindexBoardsUseCase` → 200 OK (DB→ES 무중단 재색인, alias 스왑) | ROLE_ADMIN |
+| `POST` | `/api/products` | `CreateProductUseCase` → 201 Created (상품 생성) | ROLE_ADMIN |
+| `GET` | `/api/products/{id}` · `/api/products` | `GetProductUseCase` → 200 OK (단건/키셋 목록) | 공개 |
+| `GET` | `/api/products/search?keyword=` | `SearchProductUseCase` → 200 OK (상품명 Nori 검색) | 공개 |
+| `GET` | `/api/products/autocomplete?q=ㅅㄱ` | `AutocompleteProductUseCase` → 200 OK (**ICU 초성/접두 자동완성**) | 공개 |
+| `DELETE` | `/api/products/{id}` | `DeleteProductUseCase` → 204 No Content | ROLE_ADMIN |
+| `POST` | `/api/products/search/reindex` | `ReindexProductsUseCase` → 200 OK (DB→ES 무중단 재색인, alias 스왑) | ROLE_ADMIN |
 | `POST` | `/api/admin/view-counts/flush` | `FlushBoardViewCountsUseCase` → 200 OK (조회수 즉시 플러시) | ROLE_ADMIN |
 | `POST` | `/api/admin/boards/archive` | `ArchiveStaleBoardsUseCase` → 200 OK (오래된 게시글 즉시 아카이브) | ROLE_ADMIN |
 
@@ -132,7 +138,9 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 - **인덱스/분석기**: `boards` 인덱스는 기동 시 `BoardSearchIndexInitializer`(`@EventListener(ApplicationReadyEvent)`, 블로킹)가 멱등 생성합니다. Nori 분석기 정의는 `resources/elasticsearch/board-settings.json`(nori_tokenizer, decompound_mode=mixed + nori_part_of_speech/readingform/lowercase 필터), 필드 매핑은 `board-mappings.json`(title/content를 `korean` 분석기로). `BoardDocument`의 `@Setting`/`@Mapping`이 이 JSON을 가리키며 매핑의 최종 권위입니다.
 - **검색 쿼리**: `BoardSearchAdapter`가 `NativeQuery` + `multi_match`(title^2, content)로 검색하고, 기본 `_score` 내림차순(관련도순)으로 정렬 + `<em>` 하이라이트를 반환합니다. 다건은 관례대로 `List<BoardSearchHit>`.
 - **엔티티 분리**: 도메인 `Board` ↔ `BoardDocument` 변환은 `BoardDocumentMapper`에서만. 도메인 모델에는 ES 애노테이션이 새어 들어가지 않습니다(JPA 엔티티 규칙과 동일).
-- **정합성 회복**: 이벤트 유실이나 인덱스 재생성 시 `POST /api/boards/search/reindex`로 DB를 키셋 순회하며 전체 재색인합니다. 색인은 **페이지 단위 벌크(`BoardSearchPort.indexAll` → ES `saveAll`)**로 수행하고, 한 페이지가 실패해도 그 페이지만 건너뛰며 실패 건수를 집계합니다. 재색인은 upsert이므로, 순회 중 모은 정본 전체 id를 `keepIds`로 넘겨 **재색인 후 `BoardSearchPort.pruneExcept`로 정본에 없는 고아 문서를 정리**합니다(과거 삭제 이벤트 유실분 회복). prune은 `createdAt` + search_after로 인덱스를 순회하며 `id ∉ keepIds`이고 `id ≤ max(keepIds)`인 문서만 삭제해, 재색인 중 갓 생성된(스냅샷 이후) 문서는 건드리지 않습니다. 결과는 `ReindexResult(indexed, failed, pruned)`로 반환됩니다(응답 `result.reindexed`/`result.failed`/`result.pruned`). ES refresh 간격(기본 ~1s) 탓에 색인 직후 검색에는 지연이 있을 수 있습니다.
+- **정합성 회복(무중단 alias 재색인)**: 이벤트 유실·매핑 변경 시 `POST /api/boards/search/reindex`가 DB를 키셋 순회해 **새 버전 인덱스(`boards_v{n}`, `boards_<ts>`)에 전량 재구축한 뒤 `boards` alias를 원자적으로 스왑**합니다. `boards`는 이제 고정 인덱스가 아니라 **alias**이며, 검색/이벤트색인은 alias로만 접근하고 실제 데이터는 뒤의 버전 인덱스에 있습니다. 흐름: `BoardSearchPort.createNewVersionIndex()` → 페이지 벌크 `indexInto(page, newIndex)` → 전량 성공 시 `promote(newIndex)`(alias 원자 이동 + 옛 버전 삭제). **한 페이지라도 실패하면 스왑하지 않고 `deleteVersionIndex`로 새 인덱스를 폐기**해 검색이 기존 인덱스를 그대로 보게 합니다(무중단·자동 롤백). 새 인덱스로 깨끗이 재구축하므로 과거의 고아(orphan) prune이 불필요해졌습니다. alias 이동/삭제는 저수준 `ElasticsearchClient`, 문서 색인/검색은 `ElasticsearchOperations`로 분리합니다. 결과는 `ReindexResult(indexed, failed, swapped)`(응답 `result.reindexed`/`result.failed`/`result.swapped`). 인덱스 이니셜라이저는 alias-native(`boards_v1` + alias)로 멱등 생성합니다. **상품(`products`)도 동일한 alias 재색인**을 씁니다. ES refresh(~1s) 탓에 색인 직후 검색엔 지연이 있을 수 있습니다.
+
+- **상품 초성/자동완성 검색(ICU)**: 초성 검색은 긴 게시글엔 안 맞지만 짧은 상품명엔 맞아 별도 `Product` 도메인 + `products` 인덱스로 분리했습니다(board 파이프라인 미러링). `name.chosung` 서브필드는 **ICU 분석기**로 색인 — `icu_normalizer(nfkc, decompose)`가 완성형 음절과 사용자가 친 호환 자모(ㅅㄱ)를 결합형 자모로 정규화, `pattern_replace([^ᄀ-ᄒ])`로 초성만 추출, `edge_ngram`으로 접두 자동완성. `analyzer`(색인)/`search_analyzer`(검색) 분리로 별도 매핑표 불필요. `GET /api/products/autocomplete?q=ㅅㄱ`. ES 이미지에 `analysis-icu` 필요.
 
 ### Adding a new feature
 
