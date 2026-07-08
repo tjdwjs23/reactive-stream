@@ -39,7 +39,7 @@ if [ "$VAL" = "true" ]; then
 
 관측성 ON. Grafana 접속:
   ./deploy/pf.sh                       # Grafana(3000) 등 port-forward (colima localhost 직결이 불안정할 때 권장)
-  → http://localhost:3000  (admin/admin)  "Hexagonal Board API" 대시보드
+  → http://localhost:3000  (admin/admin)  "Hexagonal Search API" 대시보드
 EOF
 else
   echo "관측성 OFF — LGTM 파드 제거됨(앱 OTLP export도 꺼짐)."

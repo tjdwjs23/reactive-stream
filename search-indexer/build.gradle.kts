@@ -1,7 +1,7 @@
 // search-indexer = board-changed 이벤트를 소비해 Elasticsearch 색인을 갱신하는 독립 서비스.
 // search-service와 물리적으로 분리되며, event-contract만 공유한다.
 // @KafkaListener는 컨테이너 스레드에서 동기로 처리하고 ES 접근도 imperative라, 코루틴 브리지 없이 동작한다.
-// Kotlin JVM / ktlint / JDK21 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
+// Kotlin JVM / ktlint / JDK25 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
 plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")

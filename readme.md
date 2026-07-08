@@ -317,7 +317,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 ./gradlew koverVerify            # 커버리지 게이트 (search-service 라인 ≥ 92%)
 ./gradlew koverHtmlReport        # search-service/build/reports/kover/html/index.html
 ```
-- **Kover**: `search-service` 라인 커버리지 하한 **92%**(부트스트랩 `BoardApplication*` 제외).
+- **Kover**: `search-service` 라인 커버리지 하한 **92%**(부트스트랩 `SearchApplication*` 제외).
 - **Konsist**: 아키텍처 규칙을 테스트로 강제 — 일반 `./gradlew test`에 포함돼 돌아갑니다.
 
 ---

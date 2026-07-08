@@ -27,7 +27,7 @@ import org.springframework.web.context.WebApplicationContext
 // - 읽기는 공개, 쓰기는 인증, admin은 ROLE_ADMIN
 // - 자체 발급 JWT로 signup→login→Bearer 흐름
 // Boot 4는 @AutoConfigureMockMvc를 기본 제공하지 않으므로 WebApplicationContext + springSecurity()로 직접 결선합니다
-// (서블릿 보안 필터 체인을 MockMvc에 태움 — 실서버 불필요). admin 부트스트랩은 board.security.admin.password로 켭니다.
+// (서블릿 보안 필터 체인을 MockMvc에 태움 — 실서버 불필요). admin 부트스트랩은 search.security.admin.password로 켭니다.
 @SpringBootTest
 class SecurityIntegrationTest(
     context: WebApplicationContext,

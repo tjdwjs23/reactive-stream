@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController
 // 용도:
 //  - 부하 테스트에서 플러시를 온디맨드로 트리거해 지연/정합성을 결정적으로 측정.
 //  - 운영에서 배포/셧다운 직전 버퍼를 강제로 비워 미반영 델타 유실 창을 줄임.
-@Tag(name = "Admin", description = "조회수 write-back 운영/시험용 API")
+@Tag(name = "Admin", description = "운영/시험용 관리 API (조회수 플러시·게시글 아카이브)")
 @RestController
 @RequestMapping("/api/admin/view-counts")
 class AdminViewCountController(

@@ -20,9 +20,11 @@ import org.springframework.data.elasticsearch.core.query.highlight.HighlightPara
 import org.springframework.stereotype.Component
 
 // ProductSearchPort의 Elasticsearch 구현. BoardSearchAdapter와 동일한 alias 무중단 재색인 전략(products alias +
-// 버전 인덱스)을 쓰고, 추가로 초성/자동완성(name.chosung) 쿼리를 제공합니다.
+// 버전 인덱스)을 쓰고, 추가로 초성/접두 자동완성 쿼리를 제공합니다.
 // - 일반 검색: name(Nori) + name.ngram(부분)로 multi_match, _score 내림차순, <em> 하이라이트.
-// - 자동완성: name.chosung(색인=초성+edge_ngram, 검색=초성 정규화만)에 match → "ㅅㄱ" 같은 초성 접두 매칭.
+// - 자동완성: 질의를 name.jamo(기본)와 name.chosung(순수 초성 질의)로 라우팅합니다 — 순수 초성("ㅅㄱ")은
+//   name.chosung(초성+edge_ngram)에도 매칭하고, 완성형 음절이 섞이면("사ㄱ"·"삼") name.jamo(전체 자모 edge_ngram)로만
+//   매칭해 완성형 음절이 초성으로 뭉개지지 않게 합니다.
 @Component
 class ProductSearchAdapter(
     private val operations: ElasticsearchOperations,

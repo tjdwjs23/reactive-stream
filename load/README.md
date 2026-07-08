@@ -199,7 +199,7 @@ done
 
 부하가 도는 동안 **앱 관점 지표**(HikariCP 커넥션 풀, HTTP 지연, JVM 스레드)를 실시간으로 봅니다.
 앱이 메트릭을 OTLP로 Mimir에 push하므로(스크레이프 아님), Grafana(`http://localhost:3000`, admin/admin)의
-"Hexagonal Board API" 대시보드나 Explore(Mimir 데이터소스)에서 확인합니다.
+"Hexagonal Search API" 대시보드나 Explore(Mimir 데이터소스)에서 확인합니다.
 
 빠르게 커맨드라인으로 몇 개만 보고 싶으면:
 ```bash
