@@ -18,7 +18,7 @@ class OpenApiConfig {
         OpenAPI()
             .info(
                 Info()
-                    .title("Board API")
+                    .title("Search Platform API")
                     .description(
                         "Spring MVC + 가상 스레드 + JPA 기반 게시판 API (헥사고날 아키텍처). " +
                             "응답은 BaseResponse(code/status/result)로 통일됩니다.",

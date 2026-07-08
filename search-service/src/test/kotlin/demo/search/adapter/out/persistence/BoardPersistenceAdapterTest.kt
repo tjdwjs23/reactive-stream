@@ -9,7 +9,6 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.flow.toList
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -47,7 +46,7 @@ class BoardPersistenceAdapterTest(
 
                 Then("저장된 Board를 반환한다") {
                     found.shouldNotBeNull()
-                    found?.title shouldBe "조회용 제목"
+                    found.title shouldBe "조회용 제목"
                 }
             }
 
@@ -131,7 +130,7 @@ class BoardPersistenceAdapterTest(
                 boardPersistenceAdapter.deleteById(saved.id!!)
 
                 Then("더 이상 조회되지 않는다") {
-                    boardPersistenceAdapter.findById(saved.id!!).shouldBeNull()
+                    boardPersistenceAdapter.findById(saved.id).shouldBeNull()
                 }
             }
         }

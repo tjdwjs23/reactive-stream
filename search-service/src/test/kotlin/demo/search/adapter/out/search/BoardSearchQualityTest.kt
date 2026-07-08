@@ -70,9 +70,9 @@ class BoardSearchQualityTest(
                 val hits = boardSearchAdapter.search("메일", 10)
                 Then("'메일'이 제목+본문에 여러 번 나오는 7005가 최상위, 본문에만 있는 문서보다 앞선다") {
                     hits.first().board.id shouldBe 7005L
-                    val rank5005 = hits.indexOfFirst { it.board.id == 7005L }
+                    val rank7005 = hits.indexOfFirst { it.board.id == 7005L }
                     val rank7003 = hits.indexOfFirst { it.board.id == 7003L } // 본문에만 '메일과'
-                    (rank5005 < rank7003) shouldBe true
+                    (rank7005 < rank7003) shouldBe true
                 }
             }
 

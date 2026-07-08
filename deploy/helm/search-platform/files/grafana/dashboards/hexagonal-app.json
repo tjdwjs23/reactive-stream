@@ -1,6 +1,6 @@
 {
   "uid": "hexagonal-app",
-  "title": "Hexagonal Board API — 통합 관측성",
+  "title": "Hexagonal Search API — 통합 관측성",
   "tags": [
     "hexagonal",
     "spring-boot",

@@ -35,7 +35,7 @@ import javax.crypto.spec.SecretKeySpec
 class SecurityConfig(
     @Value("\${search.security.jwt.secret:}") private val configuredSecret: String,
     // 허용 오리진(쉼표 구분). SPA 등 브라우저 클라이언트가 다른 오리진에서 API를 호출할 수 있게 CORS를 명시합니다.
-    // 기본은 로컬 프런트(3000). 운영은 BOARD_CORS_ALLOWED_ORIGINS로 실제 도메인을 주입합니다.
+    // 기본은 로컬 프런트(3000). 운영은 SEARCH_CORS_ALLOWED_ORIGINS로 실제 도메인을 주입합니다.
     @Value("\${search.security.cors.allowed-origins:http://localhost:3000}") private val allowedOrigins: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -140,13 +140,13 @@ class SecurityConfig(
         val raw =
             if (configuredSecret.isBlank()) {
                 log.warn(
-                    "board.security.jwt.secret is not set — using an INSECURE dev default. " +
-                        "Set BOARD_JWT_SECRET (>=32 bytes) in non-local environments.",
+                    "search.security.jwt.secret is not set — using an INSECURE dev default. " +
+                        "Set SEARCH_JWT_SECRET (>=32 bytes) in non-local environments.",
                 )
                 DEV_SECRET
             } else {
                 require(configuredSecret.toByteArray().size >= 32) {
-                    "board.security.jwt.secret must be at least 32 bytes for HS256"
+                    "search.security.jwt.secret must be at least 32 bytes for HS256"
                 }
                 configuredSecret
             }
@@ -154,7 +154,7 @@ class SecurityConfig(
     }
 
     private companion object {
-        // 로컬/개발 전용 고정 키(≥32byte). 운영에서는 반드시 BOARD_JWT_SECRET로 덮어써야 합니다.
+        // 로컬/개발 전용 고정 키(≥32byte). 운영에서는 반드시 SEARCH_JWT_SECRET로 덮어써야 합니다.
         const val DEV_SECRET = "dev-only-insecure-jwt-secret-change-me-please-32b+"
     }
 }

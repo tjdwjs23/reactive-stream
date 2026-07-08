@@ -15,7 +15,7 @@ deploy/
 ```
 
 구성 요소: `search-service`, `search-indexer` + `PostgreSQL` · `Redis` · `Elasticsearch(Nori)` · `Kafka(KRaft)`.
-관측성 스택(LGTM: Alloy·Mimir·Loki·Tempo·Grafana)도 **이 차트에 포함**되며 `observability.enabled`로 켜고 끕니다(docker-compose는 제거됨 — 모든 인프라가 여기에).
+관측성 스택(LGTM: Alloy·Mimir·Loki·Tempo·Grafana)도 **이 차트에 포함**되며 `observability.enabled`로 켜고 끕니다(모든 인프라가 kind+Helm 경로인 여기에). 참고로 레포 루트의 `docker-compose.yml`은 **여전히 존재**하며, kind 없이 데이터스토어 4종(PostgreSQL/Redis/Elasticsearch/Kafka)만 host 포트에 띄워 앱을 host에서 직접 `bootRun`/디버그하는 가벼운 경로용입니다.
 기본은 off(로컬 리소스 절약): 앱 OTLP export가 꺼지고 LGTM 파드도 뜨지 않습니다.
 
 ---
@@ -38,7 +38,7 @@ brew install colima kind helm      # 최초 1회
 # 접근(colima에선 직결 localhost가 불안정 → port-forward 권장):
 ./deploy/pf.sh                     # search-service(8080)+Grafana(3000)+Postgres(5432) 한 번에, Ctrl+C로 종료
 #   → http://localhost:8080/swagger-ui.html , http://localhost:3000 (admin/admin, --obs일 때)
-#   → DBeaver: localhost:5432 (db=board user=board pw=board1234); 5432 충돌 시 PG_LOCAL_PORT=5433 ./deploy/pf.sh
+#   → DBeaver: localhost:5432 (db=search user=search pw=search1234); 5432 충돌 시 PG_LOCAL_PORT=5433 ./deploy/pf.sh
 
 # 정리:
 ./deploy/down.sh                   # helm uninstall만 — DB 데이터·kind 클러스터 유지(다음 up.sh에서 복구)
@@ -104,7 +104,7 @@ curl -s localhost:8080/actuator/health
 curl -s -XPOST localhost:8080/api/auth/signup -H 'Content-Type: application/json' \
   -d '{"username":"alice","password":"password123"}'
 TOKEN=$(curl -s -XPOST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
-  -d '{"username":"alice","password":"password123"}' | sed -E 's/.*"result":"?([^",}]+).*/\1/')
+  -d '{"username":"alice","password":"password123"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
 
 # 게시글 생성 → (아웃박스 → Kafka → search-indexer → ES) → 검색
 curl -s -XPOST localhost:8080/api/boards -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -140,7 +140,7 @@ helm upgrade search-platform deploy/helm/search-platform --set observability.ena
 # 예: 특정 데이터스토어를 외부 것으로 대체(차트에서 제외)
 helm upgrade search-platform deploy/helm/search-platform --set kafka.enabled=false
 ```
-주요 값: `boardService.image`, `searchIndexer.image`, `*.resources`, `postgres.password`, `security.jwtSecret`, `security.adminPassword`, `observability.enabled`. 전체는 `helm/search-platform/values.yaml` 참고.
+주요 값: `searchService.image`, `searchIndexer.image`, `*.resources`, `postgres.password`, `security.jwtSecret`, `security.adminPassword`, `observability.enabled`. 전체는 `helm/search-platform/values.yaml` 참고.
 
 ## 정리(teardown)
 
@@ -162,4 +162,4 @@ helm upgrade search-platform deploy/helm/search-platform --set kafka.enabled=fal
 - PostgreSQL은 PVC(`postgres.persistence.enabled=true`, 기본 on)로 **데이터가 유지**됩니다(파드 재생성·`down.sh` 기본에도 보존, `down.sh --all`에서만 소멸). Redis/Elasticsearch/Kafka는 `emptyDir`라 파드 재생성 시 초기화됩니다(검색 인덱스는 `POST /api/boards/search/reindex`로 재구축, 조회수 버퍼는 휘발성).
 - 코드 변경 반영: 이미지를 다시 빌드·load한 뒤 `kubectl rollout restart deploy/search-service`(또는 search-indexer). `imagePullPolicy: IfNotPresent`라 태그가 같으면 새로 pull하지 않으므로 **load 후 rollout restart**가 필요합니다.
 - 스키마는 search-service 기동 시 **Flyway**가 `db/migration/V*.sql`을 적용해 만듭니다(`flyway_schema_history`로 이력 추적, 파드/부트런 어디서 뜨든 자동, 별도 마이그레이션 잡 불필요). JPA는 `ddl-auto=validate`라 매핑 불일치만 감지합니다.
-- 이미지 태그가 `:local`로 고정이라, 갱신 시 `--set boardService.image=search-service:local2`처럼 태그를 바꾸면 rollout이 확실합니다.
+- 이미지 태그가 `:local`로 고정이라, 갱신 시 `--set searchService.image=search-service:local2`처럼 태그를 바꾸면 rollout이 확실합니다.

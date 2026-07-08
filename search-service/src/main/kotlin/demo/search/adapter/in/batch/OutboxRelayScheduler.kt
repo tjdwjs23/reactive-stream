@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component
 // Driving Adapter: 주기 폴링이 아웃박스 릴레이 유즈케이스를 "구동"하는 입력 어댑터입니다.
 // 웹 컨트롤러/아카이브 스케줄러와 마찬가지로 유즈케이스 인터페이스에만 의존합니다.
 //
-// board.outbox.relay.enabled=true일 때만 빈으로 등록됩니다(아카이브 배치처럼 운영에서 opt-in) —
+// search.outbox.relay.enabled=true일 때만 빈으로 등록됩니다(아카이브 배치처럼 운영에서 opt-in) —
 // 비활성 시엔 빈 자체가 없어 스케줄도 걸리지 않으므로, 테스트/로컬에서 Kafka 없이도 조용합니다.
 @Component
 @ConditionalOnProperty(prefix = "search.outbox.relay", name = ["enabled"], havingValue = "true")
