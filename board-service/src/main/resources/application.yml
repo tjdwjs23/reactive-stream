@@ -93,7 +93,7 @@ logging:
 # - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Mimir로 전달(이름/접미사는 Mimir가 처리)
 # - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Loki로 전달(trace_id는 구조화 메타데이터)
 # - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Alloy에 export → Alloy가 Tempo로 전달.
-#   Reactor↔코루틴 컨텍스트 전파는 ObservabilityConfig가 켜 둠(suspend/Flow 경계 넘어 traceId 유지).
+#   스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘는 trace 컨텍스트 전파는 Micrometer Tracing이 처리합니다(context-propagation).
 management:
   endpoints:
     web:
@@ -178,7 +178,6 @@ board:
     flush-interval-ms: 30000  # 플러시 주기(ms). 짧을수록 DB 정합성↑, 쓰기 부하↑
     flush-chunk-size: 1000    # 한 번의 배치 UPDATE에 묶을 게시글 수(DB 왕복 = ceil(N/chunk))
     flush-lock-ttl-ms: 300000 # 분산 플러시 락 TTL(ms). 홀더가 죽어도 이 시간 뒤 자동 해제. 최대 플러시 소요보다 넉넉히
-    increment-timeout-ms: 200 # 조회 시 Redis 조회수 증가에 허용하는 시간 예산. 초과/실패 시 DB 값으로 강등 응답
 
   # Transactional Outbox 릴레이: board_outbox의 미발행 이벤트를 주기 폴링해 Kafka(board-changed)로 발행.
   # 아카이브 배치처럼 기본 OFF(opt-in) — enabled=true일 때만 스케줄러 빈이 등록됩니다(테스트/로컬은 Kafka 없이 조용).

@@ -52,7 +52,7 @@ dependencies {
     // 메트릭 저장/조회는 Mimir가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
     // 스크레이프 파이프라인이 없어(Alloy는 OTLP 수신만) Prometheus 레지스트리는 두지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
+    // 스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘어 Observation/MDC(traceId) 컨텍스트 전파 — Micrometer Tracing이 사용
     implementation("io.micrometer:context-propagation")
 
     // 분산 트레이싱 + 메트릭을 모두 OTLP로 push하는 LGTM 파이프라인.

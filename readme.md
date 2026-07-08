@@ -308,7 +308,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 
 ## 🚀 Getting Started
 
-전체 스택은 **로컬 쿠버네티스(Colima + kind + Helm)** 에서 실행합니다(docker-compose는 제거됨). 상세 런북은 [`deploy/README.md`](./deploy/README.md).
+전체 스택은 **로컬 쿠버네티스(Colima + kind + Helm)** 에서 실행합니다. (IntelliJ에서 앱을 host로 직접 `bootRun`할 때 데이터스토어만 컨테이너로 띄우는 루트 `docker-compose.yml`도 병행 제공합니다.) 상세 런북은 [`deploy/README.md`](./deploy/README.md).
 
 ### Prerequisites
 JDK 21+, `colima` · `kind` · `helm`(+ `docker` CLI). `brew install colima kind helm`.

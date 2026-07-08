@@ -45,18 +45,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Quality gates**: 아키텍처 규칙은 **Konsist**(`board-service/src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 board-service 하한 92%로 게이트(`koverVerify`)하며, 부트스트랩(`BoardApplication*`)은 집계에서 제외합니다.
 
-> **Note**: The app runs on **Spring MVC + virtual threads (JDK 25) with blocking JDBC — Spring Data JPA/Hibernate + Kotlin JDSL, no R2DBC/WebFlux anywhere**. `application.yml` configures `spring.datasource.*` (HikariCP) and `spring.jpa.*` (`ddl-auto=validate`, `open-in-view=false`). The schema is owned by **Flyway**: `db/migration/V*.sql` runs at startup and is tracked in `flyway_schema_history` (`baseline-on-migrate=true`). Simple CRUD uses Spring Data derived queries; keyset/stale scans use Kotlin JDSL; the unnest batch UPDATE / outbox writes use native SQL via `JdbcTemplate`. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/reactive`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`).
+> **Note**: The app runs on **Spring MVC + virtual threads (JDK 25) with blocking JDBC — Spring Data JPA/Hibernate + Kotlin JDSL, no R2DBC/WebFlux anywhere**. `application.yml` configures `spring.datasource.*` (HikariCP) and `spring.jpa.*` (`ddl-auto=validate`, `open-in-view=false`). The schema is owned by **Flyway**: `db/migration/V*.sql` runs at startup and is tracked in `flyway_schema_history` (`baseline-on-migrate=true`). Simple CRUD uses Spring Data derived queries; keyset/stale scans use Kotlin JDSL; the unnest batch UPDATE / outbox writes use native SQL via `JdbcTemplate`. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/board`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`).
 
 ## 로컬 실행 / 배포 (Colima + kind + Helm)
 
-**docker-compose는 제거됐고**, 로컬 실행은 **k8s(Helm)** 로 통일됐습니다(클라우드 미연결). 모든 인프라와 두 서비스가 kind 클러스터 안에서 뜹니다. 자산은 `deploy/`에 있습니다.
+로컬 실행은 **k8s(Helm)** 로 통일됐습니다(클라우드 미연결) — 모든 인프라와 두 서비스가 kind 클러스터 안에서 뜹니다. 자산은 `deploy/`에 있습니다. **별도로**, IntelliJ에서 앱을 host로 직접 `bootRun`/디버그할 때 데이터스토어 4종(PostgreSQL/Redis/Elasticsearch/Kafka)만 컨테이너로 띄우는 루트 `docker-compose.yml`을 병행 제공합니다(kind 없이 가벼운 디버깅 루프용 — 이 경로에선 앱만 host에서 실행).
 
 - **원클릭**: `./deploy/up.sh`(코어 = 앱 2 + PostgreSQL/Redis/Elasticsearch/Kafka = 6파드, 멱등) / `./deploy/up.sh --obs`(+ LGTM 관측성 5파드 = 11, colima 12G). 정리 `./deploy/down.sh`(`--all`이면 colima까지).
 - **차트**: `deploy/helm/board-platform`(Chart/values/templates). 데이터스토어·앱은 항상, LGTM(Alloy/Mimir/Loki/Tempo/Grafana)은 `observability.enabled`로 토글(기본 off — 앱 OTLP export도 함께 꺼짐). LGTM 설정은 `files/`(compose에서 이관, 서비스명이 같아 그대로 재사용).
 - **앱 설정 주입**: ConfigMap/Secret env — `SPRING_DATASOURCE_URL`=jdbc:postgresql://postgres, `SPRING_DATA_REDIS_HOST`=redis, `SPRING_ELASTICSEARCH_URIS`=http://elasticsearch:9200, `KAFKA_BOOTSTRAP_SERVERS`=kafka:9092, `BOARD_OUTBOX_RELAY_ENABLED`=true.
 - **이미지**: `board-service/Dockerfile`·`search-indexer/Dockerfile`(멀티스테이지, 빌드 컨텍스트=레포 루트). `deploy/build-and-load.sh`가 빌드→`kind load`(로컬 이미지라 pull 불가, `imagePullPolicy: IfNotPresent`). 두 앱 모듈은 plain jar 비활성(`tasks.named<Jar>("jar")`)이라 `build/libs`에 bootJar 하나만 남습니다.
 - **접근**: board-service `localhost:8080`(NodePort 30080), search-indexer `localhost:8081`, Grafana `localhost:3000`(--obs). 코드 변경 반영은 재빌드+load 후 `kubectl rollout restart deploy/<svc>`.
-- 빠른 개발 반복은 `:board-service:bootRun`도 되지만 데이터스토어를 `kubectl port-forward`로 당겨야 합니다. 상세 런북: `deploy/README.md`.
+- 빠른 개발 반복은 `:board-service:bootRun`(host 실행)도 됩니다 — 데이터스토어는 루트 `docker compose up -d`로 4종을 host 포트에 띄우거나(가장 가벼움), 이미 kind가 떠 있으면 `kubectl port-forward`로 당깁니다(단 `deploy/pf.sh`는 postgres만 forward하므로 redis/es/kafka는 직접 forward 필요). 상세 런북: `deploy/README.md`.
 
 ## Architecture
 

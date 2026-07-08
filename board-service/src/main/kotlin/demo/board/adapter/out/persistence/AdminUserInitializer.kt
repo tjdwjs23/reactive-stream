@@ -16,7 +16,7 @@ import java.time.LocalDateTime
 // 관리자는 여기서만(설정 기반) 생성됩니다 — admin 엔드포인트(reindex/flush)를 호출할 계정의 유일한 출처입니다.
 // - board.security.admin.password가 비어 있으면 생성을 건너뛰고 경고합니다(로컬/개발 편의).
 // - 이미 같은 username이 있으면 멱등하게 건너뜁니다.
-// BoardSearchIndexInitializer와 동일하게 @EventListener + runBlocking으로 코루틴 경계를 어댑터 안에 가둡니다.
+// BoardSearchIndexInitializer와 동일하게 @EventListener(ApplicationReadyEvent)로 기동 직후 한 번 실행합니다(순수 블로킹).
 @Component
 class AdminUserInitializer(
     private val userRepositoryPort: UserRepositoryPort,
