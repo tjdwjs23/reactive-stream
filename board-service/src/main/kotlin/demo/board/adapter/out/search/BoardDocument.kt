@@ -6,7 +6,7 @@ import org.springframework.data.elasticsearch.annotations.Mapping
 import org.springframework.data.elasticsearch.annotations.Setting
 import java.time.LocalDateTime
 
-// Elasticsearch 색인 문서. R2DBC 엔티티(BoardR2dbcEntity)와 엄격히 분리된, 검색 전용 표현입니다.
+// Elasticsearch 색인 문서. JPA 엔티티(BoardJpaEntity)와 엄격히 분리된, 검색 전용 표현입니다.
 // 도메인 Board ↔ 이 문서 변환은 오직 BoardDocumentMapper에서만 일어납니다.
 //
 // - @Setting: Nori 분석기 정의(analysis)를 board-settings.json에서 로드

@@ -11,7 +11,6 @@ import demo.board.application.port.out.TransactionRunnerPort
 import demo.board.domain.model.Board
 import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
-import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -20,7 +19,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-// Redis 버퍼의 조회수 델타를 DB로 write-back합니다.
+// Redis 버퍼의 조회수 델타를 DB로 write-back합니다. MVC/블로킹 스택이라 평범한 블로킹 함수입니다.
 // - Redis 버퍼를 스냅샷으로 옮겨두고(snapshot), 청크 단위 단일 UPDATE(배치)로 view_count에 더합니다.
 // - 한 청크 실패가 전체를 막지 않도록 청크별로 내결함성 처리합니다(아카이브 배치와 동일한 철학).
 //
@@ -32,10 +31,8 @@ import java.util.UUID
 // 델타가 유실되지 않습니다(유실 대신 크래시 시 약간의 중복 계수를 허용하는 at-least-once — 조회수는 근사값).
 //
 // 상호배제(분산 락): 스냅샷~반영~정리(DRAINING)가 서로 뒤엉키면 removeDrained가 짝을 잃어 유실/이중반영이
-// 생기므로, 플러시 전체를 "한 번에 하나"로 직렬화해야 합니다. 예전엔 JVM 로컬 Mutex를 썼지만 그것은 한 프로세스
-// 안에서만 유효해, k8s 다중 레플리카에서는 인스턴스마다 동시에 플러시가 돌아 같은 델타를 이중 계수합니다.
-// 그래서 DistributedLockPort(Redis SET NX)로 클러스터 전역에서 직렬화합니다. 이 락은 인스턴스 내부의
-// 스케줄/admin 동시 호출까지 함께 막으므로 로컬 Mutex는 더 이상 필요 없습니다.
+// 생기므로, 플러시 전체를 "한 번에 하나"로 직렬화합니다. DistributedLockPort(Redis SET NX)로 클러스터 전역에서
+// 직렬화하며, 이 락은 인스턴스 내부의 스케줄/admin 동시 호출까지 함께 막습니다.
 @Service
 class FlushBoardViewCountsService(
     private val boardViewCountPort: BoardViewCountPort,
@@ -56,7 +53,7 @@ class FlushBoardViewCountsService(
 ) : FlushBoardViewCountsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun flush(): FlushViewCountsResult {
+    override fun flush(): FlushViewCountsResult {
         val result =
             distributedLock.withLock(FLUSH_LOCK_KEY, Duration.ofMillis(lockTtlMs)) {
                 doFlush()
@@ -68,7 +65,7 @@ class FlushBoardViewCountsService(
         }
     }
 
-    private suspend fun doFlush(): FlushViewCountsResult {
+    private fun doFlush(): FlushViewCountsResult {
         val deltas = boardViewCountPort.snapshotPendingDeltas()
         if (deltas.isEmpty()) return FlushViewCountsResult(boards = 0, updatedRows = 0, failed = 0)
 
@@ -84,9 +81,7 @@ class FlushBoardViewCountsService(
                     transactionRunner.execute {
                         val boards = boardRepositoryPort.addViewCountsBatch(chunkMap)
                         if (boards.isNotEmpty()) {
-                            boardEventOutboxPort.recordAll(
-                                boards.map { it.toViewCountUpdatedEvent() },
-                            )
+                            boardEventOutboxPort.recordAll(boards.map { it.toViewCountUpdatedEvent() })
                         }
                         boards
                     }
@@ -94,8 +89,6 @@ class FlushBoardViewCountsService(
                 // commit-then-delete: DB 반영이 성공한 뒤에만 버퍼에서 지웁니다.
                 // 반영과 제거 사이에 죽으면 남아 다음 플러시가 재시도합니다(실패 청크도 지우지 않아 재시도됨).
                 boardViewCountPort.removeDrained(chunkMap.keys)
-            } catch (e: CancellationException) {
-                throw e
             } catch (e: Exception) {
                 failed += chunkMap.size
                 log.error(

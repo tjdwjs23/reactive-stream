@@ -6,7 +6,7 @@ import java.time.LocalDateTime
 /**
  * board-service의 게시글 상태 변화를 검색 색인 등 하위 소비자에게 알리는 도메인 이벤트.
  *
- * board-service(정본, R2DBC)와 search-indexer(ES)는 물리적으로 분리돼 있고, 이 이벤트가 둘을 잇는
+ * board-service(정본, JPA/PostgreSQL)와 search-indexer(ES)는 물리적으로 분리돼 있고, 이 이벤트가 둘을 잇는
  * 유일한 계약이다. Transactional Outbox로 게시글 쓰기와 원자적으로 기록된 뒤 Kafka(`board-changed`)로
  * 발행되며, 소비자는 이 페이로드만으로 색인을 갱신/삭제할 수 있어야 한다(추가 DB 조회 불필요).
  *

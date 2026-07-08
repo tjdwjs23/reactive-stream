@@ -19,27 +19,23 @@ import demo.board.domain.exception.BoardNotFoundException
 import demo.board.domain.model.Board
 import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
 import java.util.UUID
-import kotlin.time.Duration.Companion.milliseconds
 
 // 트랜잭션 경계는 "DB 접근"에만 좁게 둡니다. 클래스 레벨 @Transactional을 붙이면 Redis 증가 같은 외부 자원
-// 부수효과까지 DB 트랜잭션 안(그리고 커밋 전)에서 실행돼, R2DBC 커넥션을 오래 점유하고 정합성 위험이 생깁니다.
+// 부수효과까지 DB 트랜잭션 안(그리고 커밋 전)에서 실행돼, DB 커넥션을 오래 점유하고 정합성 위험이 생깁니다.
 // 그래서 조회수 증가(Redis)는 트랜잭션 밖에서 수행하고, 목록/단건 조회도 단일 SELECT라 트랜잭션 없이 읽습니다.
 //
 // 단 하나의 예외가 "쓰기 + 아웃박스 기록"입니다. Transactional Outbox는 게시글 반영과 이벤트 기록이 반드시
 // 원자적이어야 유실(DB엔 반영됐는데 이벤트는 유실)이 없으므로, 이 두 문장만 TransactionRunnerPort로 묶습니다.
-// 검색 색인은 더 이상 쓰기 경로에서 인라인으로 하지 않습니다 — 아웃박스 이벤트를 Kafka로 발행하고
-// search-indexer가 소비해 ES에 반영합니다(색인 책임이 쓰기 경로 밖으로 완전히 분리됨).
+// 검색 색인은 쓰기 경로에서 인라인으로 하지 않습니다 — 아웃박스 이벤트를 Kafka로 발행하고 search-indexer가 소비합니다.
+//
+// 스택: MVC + 가상 스레드. 모든 메서드는 평범한 블로킹 함수이며, 요청 스레드(가상 스레드) 위에서 JPA/Redis I/O를
+// 블로킹으로 호출합니다(코루틴은 대용량 아카이브 배치에만 사용 — ArchiveStaleBoardsService).
 @Service
 class BoardService(
     private val boardRepositoryPort: BoardRepositoryPort,
@@ -52,15 +48,13 @@ class BoardService(
     private val observability: ObservabilityPort,
     // 생성 시각/이벤트 발생 시각 주입용 시계. 도메인이 벽시계를 직접 읽지 않도록 여기서 만들어 넘깁니다(테스트에서 고정 가능).
     private val clock: Clock,
-    // 조회수 증가(Redis)에 허용하는 시간 예산. Redis가 느리거나 죽어도 조회 지연이 여기서 상한선을 가집니다.
-    @Value("\${board.view-count.increment-timeout-ms:200}") private val incrementTimeoutMs: Long = 200,
 ) : CreateBoardUseCase,
     GetBoardUseCase,
     UpdateBoardUseCase,
     DeleteBoardUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun createBoard(command: CreateBoardCommand): Board {
+    override fun createBoard(command: CreateBoardCommand): Board {
         // 도메인 객체 생성 (생성 시각은 주입된 Clock에서 만들어 넘깁니다 — 도메인이 벽시계를 직접 읽지 않음)
         val newBoard =
             Board(
@@ -84,7 +78,7 @@ class BoardService(
     // 응답에는 DB 누적값 + 아직 반영 안 된 델타를 더해 실시간 조회수를 보여줍니다.
     // DB 읽기(단일 SELECT, 자동 커밋)를 먼저 끝내고 Redis 증가는 그 뒤에 수행합니다 —
     // @Transactional로 메서드 전체를 감싸면 Redis 왕복 동안 DB 커넥션을 붙잡게 되므로 붙이지 않습니다.
-    override suspend fun getBoard(id: Long): Board {
+    override fun getBoard(id: Long): Board {
         val board =
             boardRepositoryPort.findById(id) // (1) DB에서 확정값 읽기 (SELECT만!)
                 ?: throw BoardNotFoundException(id)
@@ -93,32 +87,22 @@ class BoardService(
         return board.copy(viewCount = board.viewCount + pendingDelta) // (3) 합쳐서 응답
     }
 
-    // 조회수 증가를 시간 예산 안에서 시도하고, 실패하면 0을 돌려줍니다(조회 자체는 성공).
-    // TimeoutCancellationException은 강등 대상이지만, 그 외 CancellationException(상위 취소)은
-    // 구조적 동시성을 위해 삼키지 않고 다시 던집니다.
-    private suspend fun incrementViewCountSafely(id: Long): Long =
+    // 조회수 증가를 시도하고, 실패하면 0을 돌려줍니다(조회 자체는 성공 — graceful degradation).
+    // Redis가 느리거나 죽으면 Lettuce 커맨드 타임아웃(application.yml redis.timeout)에서 상한이 걸리고,
+    // 어댑터의 서킷브레이커가 반복 실패 시 열려 즉시 실패시킵니다. 여기서는 그 예외를 삼켜 DB 값으로 강등합니다.
+    private fun incrementViewCountSafely(id: Long): Long =
         try {
-            withTimeout(incrementTimeoutMs.milliseconds) { boardViewCountPort.increment(id) }
-        } catch (e: TimeoutCancellationException) {
-            log.warn(
-                "view count increment timed out (boardId={}, budget={}ms); serving DB value",
-                id,
-                incrementTimeoutMs,
-            )
-            0L
-        } catch (e: CancellationException) {
-            throw e
+            boardViewCountPort.increment(id)
         } catch (e: Exception) {
             log.warn("view count increment failed (boardId={}); serving DB value. cause={}", id, e.toString())
             0L
         }
 
-    // 키셋 페이지네이션. 한 페이지(size)만 읽으므로 여기서 collect(toList)해도 요청당 메모리가 일정합니다.
-    // 단일 SELECT(오토커밋)라 트랜잭션이 사줄 이점이 없어 @Transactional을 붙이지 않습니다 —
-    // getBoard와 동일하게 "트랜잭션은 DB 이득이 있을 때만" 원칙을 지킵니다.
+    // 키셋 페이지네이션. 한 페이지(size)만 읽으므로 요청당 메모리가 일정합니다.
+    // 단일 SELECT라 트랜잭션이 사줄 이점이 없어 @Transactional을 붙이지 않습니다.
     // hasNext 판정을 위해 size+1건을 조회해, 초과분이 있으면 다음 페이지가 있다고 봅니다.
-    override suspend fun getBoards(query: BoardPageQuery): BoardPage {
-        val rows = boardRepositoryPort.findPage(query.cursor, query.size + 1).toList()
+    override fun getBoards(query: BoardPageQuery): BoardPage {
+        val rows = boardRepositoryPort.findPage(query.cursor, query.size + 1)
         val hasNext = rows.size > query.size
         val items = if (hasNext) rows.take(query.size) else rows
         return BoardPage(
@@ -128,7 +112,7 @@ class BoardService(
         )
     }
 
-    override suspend fun updateBoard(command: UpdateBoardCommand): Board {
+    override fun updateBoard(command: UpdateBoardCommand): Board {
         // 1. 기존 게시글 조회
         val existingBoard =
             boardRepositoryPort.findById(command.id)
@@ -137,7 +121,7 @@ class BoardService(
         // 2. 소유권 인가: 소유자 또는 관리자만 수정 가능(IDOR 방지). 도메인 로직 실행 전에 검사한다.
         assertCanModify(existingBoard, command.requesterId, command.requesterIsAdmin)
 
-        // 3. 도메인 로직 실행 (내용 수정). Board가 data class(immutable)라면 copy로 새 객체를 만듭니다.
+        // 3. 도메인 로직 실행 (내용 수정). Board가 data class(immutable)라 copy로 새 객체를 만듭니다.
         val updatedBoard = existingBoard.update(command.title, command.content)
 
         // 4. 저장(UPDATE) + 아웃박스 기록을 하나의 트랜잭션으로 묶는다.
@@ -151,7 +135,7 @@ class BoardService(
         return saved
     }
 
-    override suspend fun deleteBoard(command: DeleteBoardCommand) {
+    override fun deleteBoard(command: DeleteBoardCommand) {
         // 삭제 전 대상을 먼저 읽어 소유권을 검사한다(없으면 404). 인가를 위해 blind delete 대신 조회를 선행한다.
         val board =
             boardRepositoryPort.findById(command.id)
@@ -180,8 +164,6 @@ class BoardService(
     }
 
     // 저장된 게시글을 색인 소비자가 그대로 반영할 수 있는 변경 이벤트로 변환합니다.
-    // eventId는 아웃박스 행 키(발행 시 부여). createdAt/viewCount는 색인 문서 복원용으로 그대로 싣습니다
-    // (createdAt은 도메인·문서와 동일한 LocalDateTime이라 존 변환이 필요 없습니다). occurredAt만 실제 instant.
     private fun Board.toChangedEvent(type: BoardChangeType): BoardChangedEvent =
         BoardChangedEvent(
             eventId = UUID.randomUUID().toString(),

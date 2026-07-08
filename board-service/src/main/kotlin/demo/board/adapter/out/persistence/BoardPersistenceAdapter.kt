@@ -2,74 +2,77 @@ package demo.board.adapter.out.persistence
 
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.domain.model.Board
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.reactive.awaitSingle
-import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.PreparedStatementSetter
+import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
 import java.time.LocalDateTime
 
-@Repository // 스프링 빈으로 등록
+// BoardRepositoryPort의 JPA 구현. 단건/기본 CRUD는 Spring Data JPA(BoardJpaRepository), 목록은 Kotlin JDSL(키셋),
+// 조회수 배치 UPDATE는 PostgreSQL unnest 네이티브 SQL(JdbcTemplate)로 처리합니다.
+// JdbcTemplate은 JpaTransactionManager가 바인딩한 커넥션을 그대로 쓰므로, transactionRunner.execute { } 안에서
+// JPA 저장과 "같은 트랜잭션"으로 묶입니다(조회수 플러시가 배치 UPDATE + 아웃박스 기록을 원자화하는 경로).
+@Repository
 class BoardPersistenceAdapter(
-    private val boardR2dbcRepository: BoardR2dbcRepository,
+    private val boardJpaRepository: BoardJpaRepository,
     private val boardMapper: BoardMapper,
-    private val databaseClient: DatabaseClient,
+    private val jdbcTemplate: JdbcTemplate,
 ) : BoardRepositoryPort {
-    override suspend fun save(board: Board): Board {
-        // 1. 도메인을 엔티티로 변환
-        val entity = boardMapper.toEntity(board)
-        // 2. R2DBC로 저장 (id가 채번된 엔티티가 반환됨)
-        val savedEntity = boardR2dbcRepository.save(entity)
-        // 3. 다시 도메인으로 변환해서 반환
-        return boardMapper.toDomain(savedEntity)
+    override fun save(board: Board): Board {
+        // id가 null이면 INSERT(IDENTITY 채번), 있으면 merge(UPDATE). IDENTITY라 persist 즉시 id가 채워집니다.
+        val saved = boardJpaRepository.save(boardMapper.toEntity(board))
+        return boardMapper.toDomain(saved)
     }
 
-    override suspend fun findById(id: Long): Board? =
-        boardR2dbcRepository.findById(id)?.let { boardMapper.toDomain(it) }
+    override fun findById(id: Long): Board? = boardJpaRepository.findById(id).orElse(null)?.let(boardMapper::toDomain)
 
-    // 키셋 페이지네이션. cursor 유무에 따라 첫 페이지/다음 페이지 쿼리를 고릅니다.
+    // 키셋 페이지네이션(Kotlin JDSL). cursor가 있으면 id < cursor 조건을 동적으로 붙이고(whereAnd는 null 술어를 건너뜀),
+    // id 내림차순으로 limit건. OFFSET이 없어 뒤쪽 페이지에서도 성능이 일정합니다.
     override fun findPage(
         cursor: Long?,
         limit: Int,
-    ): Flow<Board> =
-        (
-            if (cursor == null) {
-                boardR2dbcRepository.findFirstPage(limit)
-            } else {
-                boardR2dbcRepository.findPageAfter(cursor, limit)
-            }
-        ).map { boardMapper.toDomain(it) }
+    ): List<Board> =
+        boardJpaRepository
+            .findAll(limit = limit) {
+                select(entity(BoardJpaEntity::class))
+                    .from(entity(BoardJpaEntity::class))
+                    .whereAnd(cursor?.let { path(BoardJpaEntity::id).lessThan(it) })
+                    .orderBy(path(BoardJpaEntity::id).desc())
+            }.filterNotNull()
+            .map(boardMapper::toDomain)
 
-    override suspend fun deleteById(id: Long) {
-        boardR2dbcRepository.deleteById(id)
+    override fun deleteById(id: Long) {
+        boardJpaRepository.deleteById(id)
     }
 
-    // 배치 write-back: unnest(배열)로 (id, delta) 쌍을 펼쳐 단일 UPDATE로 조인 반영합니다.
-    // id/delta 배열은 같은 순서로 바인딩되어야 하므로 entries에서 함께 만듭니다(Map 순회 순서 일치에 의존하지 않음).
-    // RETURNING으로 반영된 행의 최신 상태를 함께 받아, 별도 재조회(왕복) 없이 UPDATED 이벤트 페이로드를 구성할 수 있게 합니다.
-    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> {
+    // 배치 write-back: unnest(배열)로 (id, delta) 쌍을 펼쳐 단일 UPDATE로 조인 반영합니다(건별 왕복 제거).
+    // RETURNING으로 반영된 행의 최신 상태를 함께 받아, 별도 재조회 없이 UPDATED 이벤트 페이로드를 구성합니다.
+    // JPA(Hibernate)가 아닌 JdbcTemplate 네이티브로 실행하지만 같은 트랜잭션/커넥션을 공유합니다.
+    override fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> {
         if (deltas.isEmpty()) return emptyList()
         val entries = deltas.entries.toList()
-        val ids = Array(entries.size) { entries[it].key }
-        val amounts = Array(entries.size) { entries[it].value }
-        return databaseClient
-            .sql(
-                "UPDATE board AS b SET view_count = b.view_count + d.delta " +
-                    "FROM unnest(:ids, :deltas) AS d(id, delta) WHERE b.id = d.id " +
-                    "RETURNING b.id, b.title, b.content, b.created_at, b.view_count, b.author_id",
-            ).bind("ids", ids)
-            .bind("deltas", amounts)
-            .map { row ->
+        val ids = entries.map { it.key }.toTypedArray()
+        val amounts = entries.map { it.value }.toTypedArray()
+        val sql =
+            "UPDATE board AS b SET view_count = b.view_count + d.delta " +
+                "FROM unnest(?, ?) AS d(id, delta) WHERE b.id = d.id " +
+                "RETURNING b.id, b.title, b.content, b.created_at, b.view_count, b.author_id"
+        return jdbcTemplate.query(
+            sql,
+            PreparedStatementSetter { ps ->
+                ps.setArray(1, ps.connection.createArrayOf("bigint", ids))
+                ps.setArray(2, ps.connection.createArrayOf("bigint", amounts))
+            },
+            RowMapper { rs, _ ->
                 Board(
-                    id = row.get("id", java.lang.Long::class.java)!!.toLong(),
-                    title = row.get("title", String::class.java)!!,
-                    content = row.get("content", String::class.java)!!,
-                    createdAt = row.get("created_at", LocalDateTime::class.java)!!,
-                    viewCount = row.get("view_count", java.lang.Long::class.java)!!.toLong(),
-                    authorId = row.get("author_id", java.lang.Long::class.java)?.toLong(),
+                    id = rs.getLong("id"),
+                    title = rs.getString("title"),
+                    content = rs.getString("content"),
+                    createdAt = rs.getObject("created_at", LocalDateTime::class.java),
+                    viewCount = rs.getLong("view_count"),
+                    authorId = rs.getObject("author_id") as Long?,
                 )
-            }.all()
-            .collectList()
-            .awaitSingle()
+            },
+        )
     }
 }

@@ -11,7 +11,7 @@ import java.time.Duration
 // 같은 이미지 태그를 써서 docker 레이어 캐시를 공유합니다(최초 1회 이후 빠름). 컨테이너는 JVM당 싱글톤.
 object ElasticsearchTestContainer {
     private val imageName: String =
-        ImageFromDockerfile("hexagonal-elasticsearch-nori-test", false)
+        ImageFromDockerfile("board-elasticsearch-nori-test", false)
             .withDockerfile(Path.of("docker/elasticsearch/Dockerfile"))
             .get()
 

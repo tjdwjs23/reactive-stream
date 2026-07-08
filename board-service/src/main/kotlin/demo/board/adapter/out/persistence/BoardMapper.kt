@@ -5,8 +5,8 @@ import org.springframework.stereotype.Component
 
 @Component
 class BoardMapper {
-    fun toEntity(domain: Board): BoardR2dbcEntity =
-        BoardR2dbcEntity(
+    fun toEntity(domain: Board): BoardJpaEntity =
+        BoardJpaEntity(
             id = domain.id,
             title = domain.title,
             content = domain.content,
@@ -15,7 +15,7 @@ class BoardMapper {
             authorId = domain.authorId,
         )
 
-    fun toDomain(entity: BoardR2dbcEntity): Board =
+    fun toDomain(entity: BoardJpaEntity): Board =
         Board(
             id = entity.id,
             title = entity.title,

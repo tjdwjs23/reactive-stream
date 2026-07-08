@@ -6,9 +6,8 @@ import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.time.Duration
@@ -18,13 +17,13 @@ import java.time.Duration
 @SpringBootTest
 class RedisDistributedLockAdapterTest(
     private val lock: DistributedLockPort,
-    private val redis: ReactiveStringRedisTemplate,
+    private val redis: StringRedisTemplate,
 ) : BehaviorSpec({
 
         val key = "test:lock:flush"
 
-        suspend fun clean() {
-            redis.delete(key).awaitSingleOrNull()
+        fun clean() {
+            redis.delete(key)
         }
 
         Given("아무도 락을 잡고 있지 않을 때") {
@@ -68,7 +67,7 @@ class RedisDistributedLockAdapterTest(
                 Then("만료 전엔 못 잡고(null), 만료 후엔 새로 획득한다") {
                     clean()
                     // 다른 홀더가 200ms TTL로 선점(해제 코드 없이 죽은 상황을 모사)
-                    redis.opsForValue().setIfAbsent(key, "someone-else", Duration.ofMillis(200)).awaitSingleOrNull()
+                    redis.opsForValue().setIfAbsent(key, "someone-else", Duration.ofMillis(200))
 
                     // 아직 점유 중 → 획득 실패
                     lock.withLock(key, Duration.ofSeconds(5)) { "x" } shouldBe null

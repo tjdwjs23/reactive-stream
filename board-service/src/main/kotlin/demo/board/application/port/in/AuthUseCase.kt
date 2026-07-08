@@ -6,7 +6,7 @@ import demo.board.domain.model.User.Companion.USERNAME_MIN_LENGTH
 
 // 회원가입 유즈케이스. 새 사용자를 만들고(항상 ROLE_USER), 이후 로그인해 토큰을 받습니다.
 interface SignUpUseCase {
-    suspend fun signUp(command: SignUpCommand): Long // 생성된 사용자 id
+    fun signUp(command: SignUpCommand): Long // 생성된 사용자 id
 }
 
 data class SignUpCommand(
@@ -27,7 +27,7 @@ data class SignUpCommand(
 
 // 로그인 유즈케이스. 자격 증명을 검증하고 액세스 토큰 + 리프레시 토큰을 발급합니다.
 interface LoginUseCase {
-    suspend fun login(command: LoginCommand): AuthTokens
+    fun login(command: LoginCommand): AuthTokens
 }
 
 // 로그인 입력은 자가 검증하지 않습니다 — 형식 검증으로 "사용자 존재/비존재"를 유추당하지 않도록,
@@ -40,7 +40,7 @@ data class LoginCommand(
 // 리프레시 유즈케이스. 유효한 리프레시 토큰을 제시하면 새 액세스+리프레시 토큰을 발급합니다(회전).
 // 이미 폐기된 토큰이 다시 제시되면(재사용) 해당 사용자의 세션을 전부 무효화합니다(탈취 대응).
 interface RefreshTokenUseCase {
-    suspend fun refresh(command: RefreshCommand): AuthTokens
+    fun refresh(command: RefreshCommand): AuthTokens
 }
 
 data class RefreshCommand(

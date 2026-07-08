@@ -31,7 +31,7 @@ class BoardSearchController(
                 "매칭 부분은 <em> 태그로 하이라이트됩니다.",
     )
     @GetMapping
-    suspend fun search(
+    fun search(
         @Parameter(description = "검색어(공백 불가)") @RequestParam keyword: String,
         @Parameter(description = "가져올 결과 수(1~100)") @RequestParam(defaultValue = "20") size: Int,
     ): ResponseEntity<SuccessResponse<BoardSearchResponse>> {
@@ -47,7 +47,7 @@ class BoardSearchController(
     )
     @SecurityRequirement(name = "bearer-jwt")
     @PostMapping("/reindex")
-    suspend fun reindex(): ResponseEntity<SuccessResponse<ReindexResponse>> {
+    fun reindex(): ResponseEntity<SuccessResponse<ReindexResponse>> {
         val result = reindexBoardsUseCase.reindexAll()
         return SuccessResponse.ok(
             ReindexResponse(reindexed = result.indexed, failed = result.failed, pruned = result.pruned),

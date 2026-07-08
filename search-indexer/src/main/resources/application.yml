@@ -33,7 +33,7 @@ logging:
       console: ecs
 
 # 관측성: board-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push.
-# service.name은 spring.application.name(=search-indexer)이라 board-service(reactive)와 Grafana/Tempo/Mimir에서 구분됩니다.
+# service.name은 spring.application.name(=search-indexer)이라 board-service와 Grafana/Tempo/Mimir에서 구분됩니다.
 # (service.namespace는 board-service와 동일한 이유로 두지 않습니다 — 상관 키를 raw service.name으로 통일.)
 management:
   endpoints:

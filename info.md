@@ -124,7 +124,7 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 > 튜닝: `board.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
 
 **관련 파일** (`board-service/src/main/kotlin/demo/board/`):
-`application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`, `adapter/out/persistence/BoardR2dbcRepository`(findStalePage, deleteByIds), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
+`application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`(findStalePage, deleteByIds — Kotlin JDSL/JPA), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
 
 ---
 
@@ -191,7 +191,7 @@ board-service                                                  search-indexer
 > 만약 이벤트가 유실되거나 인덱스를 새로 만들면? `POST /api/boards/search/reindex`가 DB를 처음부터 훑어 전부 다시 색인합니다(안전망).
 
 **관련 파일**:
-- board-service: `db/schema.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
+- board-service: `db/migration/V1__init.sql`(board_outbox), `adapter/out/persistence/OutboxPersistenceAdapter`, `application/service/RelayOutboxService`, `adapter/in/batch/OutboxRelayScheduler`, `adapter/out/messaging/KafkaEventPublisherAdapter`, `adapter/out/persistence/SpringTransactionRunner`
 - event-contract: `demo.board.events/BoardChangedEvent`
 - search-indexer: `adapter/in/messaging/BoardChangedListener`, `application/service/BoardIndexService`, `adapter/out/search/ElasticsearchBoardIndexAdapter`
 

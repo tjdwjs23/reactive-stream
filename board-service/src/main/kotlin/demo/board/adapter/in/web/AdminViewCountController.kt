@@ -31,6 +31,5 @@ class AdminViewCountController(
     )
     @SecurityRequirement(name = "bearer-jwt")
     @PostMapping("/flush")
-    suspend fun flush(): ResponseEntity<SuccessResponse<FlushViewCountsResult>> =
-        SuccessResponse.ok(flushUseCase.flush())
+    fun flush(): ResponseEntity<SuccessResponse<FlushViewCountsResult>> = SuccessResponse.ok(flushUseCase.flush())
 }

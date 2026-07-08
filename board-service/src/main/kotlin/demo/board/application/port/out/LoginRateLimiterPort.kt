@@ -4,11 +4,11 @@ package demo.board.application.port.out
 // key는 보통 username입니다(사용자 계정 단위로 실패 횟수를 셈).
 interface LoginRateLimiterPort {
     // 현재 key가 차단 상태인지(윈도우 내 실패가 임계치 이상).
-    suspend fun isBlocked(key: String): Boolean
+    fun isBlocked(key: String): Boolean
 
     // 로그인 실패 1건 기록(윈도우 카운터 증가). 최초 실패 시 윈도우 TTL을 건다.
-    suspend fun recordFailure(key: String)
+    fun recordFailure(key: String)
 
     // 로그인 성공 시 카운터 초기화(정상 사용자가 이전 실패로 잠기지 않도록).
-    suspend fun reset(key: String)
+    fun reset(key: String)
 }

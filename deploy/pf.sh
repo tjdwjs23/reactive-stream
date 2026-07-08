@@ -39,7 +39,7 @@ run_forwards() {
   trap cleanup EXIT INT TERM
   echo "port-forward 시작:"
   pf board-service 8080:8080 "board-service" "http://localhost:8080/swagger-ui.html"
-  pf postgres "${PG_LOCAL_PORT}:5432" "postgres" "localhost:${PG_LOCAL_PORT}  (db=reactive user=reactive pw=reactive1234)"
+  pf postgres "${PG_LOCAL_PORT}:5432" "postgres" "localhost:${PG_LOCAL_PORT}  (db=board user=board pw=board1234)"
 
   # Grafana는 --obs(observability.enabled=true)로 띄웠을 때만 존재합니다.
   if kubectl get svc grafana >/dev/null 2>&1; then
@@ -75,7 +75,7 @@ case "${1:-fg}" in
     sleep 1
     echo "백그라운드로 port-forward 시작 (pid=$(cat "$PIDFILE")):"
     echo "  board-service   http://localhost:8080/swagger-ui.html"
-    echo "  postgres        localhost:${PG_LOCAL_PORT}  (db=reactive user=reactive pw=reactive1234)"
+    echo "  postgres        localhost:${PG_LOCAL_PORT}  (db=board user=board pw=board1234)"
     kubectl get svc grafana >/dev/null 2>&1 && echo "  grafana         http://localhost:3000  (admin/admin)"
     echo
     echo "  로그:  tail -f $LOGFILE"

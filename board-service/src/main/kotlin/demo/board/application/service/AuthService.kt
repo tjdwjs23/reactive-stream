@@ -47,7 +47,7 @@ class AuthService(
 ) : SignUpUseCase,
     LoginUseCase,
     RefreshTokenUseCase {
-    override suspend fun signUp(command: SignUpCommand): Long {
+    override fun signUp(command: SignUpCommand): Long {
         // 경쟁 상태에서 두 요청이 동시에 통과할 수 있으나, DB의 UNIQUE(username) 제약이 최종 방어선입니다.
         if (userRepositoryPort.existsByUsername(command.username)) {
             throw DuplicateUsernameException(command.username)
@@ -63,7 +63,7 @@ class AuthService(
             ?: error("저장된 사용자는 반드시 id를 가져야 합니다.")
     }
 
-    override suspend fun login(command: LoginCommand): AuthTokens {
+    override fun login(command: LoginCommand): AuthTokens {
         // brute-force 방어: 짧은 시간에 실패가 임계치를 넘은 계정은 자격 검증 이전에 즉시 차단(429).
         if (loginRateLimiterPort.isBlocked(command.username)) {
             throw TooManyLoginAttemptsException()
@@ -79,7 +79,7 @@ class AuthService(
         return issueTokens(user)
     }
 
-    override suspend fun refresh(command: RefreshCommand): AuthTokens {
+    override fun refresh(command: RefreshCommand): AuthTokens {
         val presentedHash = refreshTokenHashPort.hash(command.refreshToken)
         val stored = refreshTokenPort.findByHash(presentedHash) ?: throw InvalidRefreshTokenException()
         val now = LocalDateTime.now(clock)
@@ -98,7 +98,7 @@ class AuthService(
     }
 
     // 액세스 토큰(JWT) 발급 + 새 리프레시 토큰(불투명 원문) 생성/저장 → 둘을 묶어 반환합니다.
-    private suspend fun issueTokens(user: User): AuthTokens {
+    private fun issueTokens(user: User): AuthTokens {
         val access = authTokenPort.issue(user)
         val rawRefresh = refreshTokenHashPort.generateToken()
         val ttl = Duration.ofDays(refreshTtlDays)

@@ -14,7 +14,7 @@ import java.time.Duration
 object ElasticsearchTestContainer {
     // Dockerfile 빌드는 docker 레이어 캐시가 적용되어(플러그인 설치 레이어) 최초 1회 이후엔 빠릅니다.
     private val imageName: String =
-        ImageFromDockerfile("hexagonal-elasticsearch-nori-test", false)
+        ImageFromDockerfile("board-elasticsearch-nori-test", false)
             .withDockerfile(Path.of("docker/elasticsearch/Dockerfile"))
             .get()
 

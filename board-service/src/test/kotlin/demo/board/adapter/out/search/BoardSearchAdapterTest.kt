@@ -6,11 +6,9 @@ import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.reactive.awaitFirstOrNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.time.LocalDateTime
@@ -21,12 +19,12 @@ import io.kotest.matchers.string.shouldContain as stringShouldContain
 @SpringBootTest
 class BoardSearchAdapterTest(
     @Autowired private val boardSearchAdapter: BoardSearchAdapter,
-    @Autowired private val operations: ReactiveElasticsearchOperations,
+    @Autowired private val operations: ElasticsearchOperations,
 ) : BehaviorSpec({
 
         // 색인 직후 검색 가능하도록 'boards' 인덱스를 강제 refresh
-        suspend fun refresh() {
-            operations.indexOps(BoardDocument::class.java).refresh().awaitFirstOrNull()
+        fun refresh() {
+            operations.indexOps(BoardDocument::class.java).refresh()
         }
 
         Given("한글 게시글이 색인되어 있을 때") {
@@ -44,7 +42,7 @@ class BoardSearchAdapterTest(
             refresh()
 
             When("'메일'로 검색하면") {
-                val hits = boardSearchAdapter.search("메일", 10).toList()
+                val hits = boardSearchAdapter.search("메일", 10)
                 val ids = hits.map { it.board.id }
 
                 Then("Nori가 조사를 분리해 '메일과'가 있는 게시글도 매칭된다") {
@@ -90,7 +88,7 @@ class BoardSearchAdapterTest(
             When("indexAll로 한 번에 색인하면") {
                 val count = boardSearchAdapter.indexAll(bulk)
                 refresh()
-                val ids = boardSearchAdapter.search("벌크", 10).toList().map { it.board.id }
+                val ids = boardSearchAdapter.search("벌크", 10).map { it.board.id }
 
                 Then("색인된 문서 수를 반환하고 모두 검색된다") {
                     count shouldBe 3
@@ -127,13 +125,13 @@ class BoardSearchAdapterTest(
 
                 Then("정본에 없는 고아(99)만 삭제되고, 정본 문서(101,102)는 남는다") {
                     pruned shouldBe 1
-                    (operations.get("99", BoardDocument::class.java).awaitFirstOrNull() == null) shouldBe true
-                    (operations.get("101", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
-                    (operations.get("102", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
+                    (operations.get("99", BoardDocument::class.java) == null) shouldBe true
+                    (operations.get("101", BoardDocument::class.java) != null) shouldBe true
+                    (operations.get("102", BoardDocument::class.java) != null) shouldBe true
                 }
 
                 Then("max(keepIds)=102를 초과하는 문서(8888)는 재색인 중 생성분일 수 있어 가드로 보존된다") {
-                    (operations.get("8888", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
+                    (operations.get("8888", BoardDocument::class.java) != null) shouldBe true
                 }
             }
         }

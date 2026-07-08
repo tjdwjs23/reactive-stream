@@ -1,7 +1,11 @@
-// board-service = reactive 게시판 애플리케이션(정본 DB) + Outbox 프로듀서.
-// Kotlin JVM / ktlint / JDK21 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
+// board-service = 게시판 애플리케이션(정본 DB) + Outbox 프로듀서.
+// 스택: Spring MVC + 가상 스레드(JDK 25) + Spring Data JPA(+ Kotlin JDSL) + Flyway.
+// 코루틴은 아카이브 배치의 구조적 동시성(Channel 팬아웃)에만 남긴다(웹/서비스는 블로킹).
+// Kotlin JVM / ktlint / JDK25 툴체인은 루트 subprojects{} 컨벤션이 이미 적용한다.
 plugins {
     kotlin("plugin.spring")
+    // JPA @Entity에 no-arg 생성자 + allopen을 부여(Hibernate 프록시). R2DBC→JPA 전환으로 추가.
+    kotlin("plugin.jpa")
     id("org.springframework.boot")
     id("io.spring.dependency-management")
     id("org.jetbrains.kotlinx.kover")
@@ -11,33 +15,44 @@ dependencies {
     // 공유 이벤트 계약(순수 Kotlin). board-changed 토픽 페이로드/토픽명을 여기서 가져온다.
     implementation(project(":event-contract"))
 
-    // webflux/data-r2dbc 스타터가 spring-boot-starter(core)를 이미 포함하므로 별도 선언하지 않습니다.
-    implementation("org.springframework.boot:spring-boot-starter-webflux")
+    // Spring MVC(Tomcat). 가상 스레드(spring.threads.virtual.enabled=true, application.yml)를 켜면 요청마다
+    // 가상 스레드가 배정돼, 블로킹 I/O(JPA/Redis/ES) 동안 플랫폼 스레드를 점유하지 않고 높은 동시성을 냅니다.
+    implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+    // 코루틴은 아카이브 배치의 Channel 백프레셔 팬아웃에만 사용(웹/서비스는 블로킹). 리액티브 브리지는 제거.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    // WebFlux/R2DBC 리액티브 타입(Mono/Flux) ↔ 코루틴(suspend/Flow) 브리지
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.9.0")
 
-    implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
+    // 영속성: Spring Data JPA(Hibernate). 조회는 Kotlin JDSL(코드젠 없는 타입세이프 JPQL DSL)로 작성합니다.
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    // Kotlin JDSL — QueryDSL의 kapt 코드젠 없이 순수 Kotlin으로 동적/타입세이프 쿼리를 짭니다.
+    implementation("com.linecorp.kotlin-jdsl:jpql-dsl:3.5.5")
+    implementation("com.linecorp.kotlin-jdsl:jpql-render:3.5.5")
+    implementation("com.linecorp.kotlin-jdsl:spring-data-jpa-support:3.5.5")
+    // 스키마 마이그레이션(버전 관리). R2dbcSchemaInitializer(CREATE TABLE IF NOT EXISTS)를 대체합니다.
+    // Boot 4는 자동설정을 기술별 모듈로 분리했으므로, Flyway 자동설정(기동 시 migrate 실행 + JPA보다 먼저 순서 보장)은
+    // spring-boot-flyway가 제공합니다 — flyway-core 라이브러리만으로는 마이그레이션이 자동 실행되지 않습니다
+    // (그러면 ddl-auto=validate가 "missing table"로 실패). flyway-database-postgresql는 PG 방언 모듈(Flyway 10+ 분리).
+    implementation("org.springframework.boot:spring-boot-flyway")
+    implementation("org.flywaydb:flyway-database-postgresql")
 
-    // 인증/인가: 리액티브 Spring Security + 자체 발급 JWT.
-    // resource-server 스타터가 리액티브 JWT 디코딩과 spring-security-oauth2-jose(NimbusJwtEncoder/Decoder)를 함께 가져옵니다.
+    // 인증/인가: (서블릿) Spring Security + 자체 발급 JWT.
+    // resource-server 스타터가 JWT 디코딩과 spring-security-oauth2-jose(NimbusJwtEncoder/Decoder)를 함께 가져옵니다.
     // 별도 JWT 라이브러리 없이 Spring Security 자체 지원(HS256 대칭키)으로 발급/검증합니다.
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
 
-    // 조회수 카운터: 리액티브 Redis(Lettuce, 논블로킹). 블로킹 RedisTemplate/Jedis는 쓰지 않습니다.
-    implementation("org.springframework.boot:spring-boot-starter-data-redis-reactive")
+    // 조회수 카운터: Redis(Lettuce). MVC 스택이라 블로킹 StringRedisTemplate로 접근합니다.
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
-    // 한글 전문검색: Elasticsearch(Nori 형태소 분석). WebFlux가 클래스패스에 있으므로
-    // 리액티브 클라이언트(ReactiveElasticsearchClient/Operations)가 자동 구성됩니다. 블로킹 클라이언트는 쓰지 않습니다.
+    // 한글 전문검색: Elasticsearch(Nori 형태소 분석). MVC(비-webflux)라 블로킹 클라이언트
+    // (ElasticsearchOperations/ElasticsearchClient)가 자동 구성됩니다.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
-    // 관측성. Actuator(health + r2dbc/redis/es 헬스, /actuator/metrics).
+    // 관측성. Actuator(health + db(JDBC)/redis/es 헬스, /actuator/metrics).
     // 메트릭 저장/조회는 Mimir가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
     // 스크레이프 파이프라인이 없어(Alloy는 OTLP 수신만) Prometheus 레지스트리는 두지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    // Reactor ↔ 코루틴 경계에서 Observation/MDC 등 컨텍스트 자동 전파
+    // 스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘어 Observation/MDC(traceId) 컨텍스트 전파 — Micrometer Tracing이 사용
     implementation("io.micrometer:context-propagation")
 
     // 분산 트레이싱 + 메트릭을 모두 OTLP로 push하는 LGTM 파이프라인.
@@ -55,9 +70,9 @@ dependencies {
     // BOM 관리 밖이라 버전을 명시합니다(-alpha 라인이 최신 안정 배포 관례).
     implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.21.0-alpha")
 
-    // API 문서 자동화: springdoc-openapi(WebFlux). /swagger-ui.html + /v3/api-docs 제공.
+    // API 문서 자동화: springdoc-openapi(Spring MVC). /swagger-ui.html + /v3/api-docs 제공.
     // v3.x가 Spring Boot 4 / Spring Framework 7 지원 라인입니다(2.x는 Boot 4에서 동작하지 않음).
-    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 
     // 이벤트 발행(Kafka). Transactional Outbox 릴레이가 board-changed 토픽으로 발행합니다.
     // KafkaTemplate은 지연 연결이라 브로커가 없어도 부팅되며, 발행 시도 시에만 연결합니다.
@@ -67,22 +82,18 @@ dependencies {
 
     // 회복탄력성(Resilience4j 2.x — Spring Boot 스타터 없이 core만 사용). Boot4 자동구성 비호환을 피하고
     // 헥사고날 순수성을 지키기 위해 서킷브레이커를 "어댑터"에서만 프로그래매틱하게 적용합니다(application 계층은 무의존).
-    //  - circuitbreaker: CircuitBreaker/Registry 코어.
-    //  - kotlin: suspend 함수 데코레이션(executeSuspendFunction) — Redis/Kafka 어댑터의 코루틴 경로.
-    //  - reactor: Flux/Mono 연산자(CircuitBreakerOperator) — 검색 어댑터의 리액티브 경로.
+    // 블로킹 스택이라 executeSupplier/executeRunnable(동기 데코레이션)만 쓰므로 kotlin/reactor 모듈은 제거했습니다.
     implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.3.0")
-    implementation("io.github.resilience4j:resilience4j-kotlin:2.3.0")
-    implementation("io.github.resilience4j:resilience4j-reactor:2.3.0")
 
-    // R2DBC 드라이버: 애플리케이션 런타임 DB 접근용(JDBC 드라이버는 사용하지 않음)
-    runtimeOnly("org.postgresql:r2dbc-postgresql")
+    // JDBC 드라이버: JPA(Hibernate) + Flyway가 사용합니다(R2DBC 드라이버는 제거).
+    runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
     testImplementation("io.kotest:kotest-assertions-core:5.9.1")
     testImplementation("io.kotest.extensions:kotest-extensions-spring:1.3.0")
     testImplementation("io.mockk:mockk:1.13.13")
-    // 리액티브 보안 테스트 지원(mockUser/JWT mutator 등)
+    // 서블릿 보안 테스트 지원(MockMvc + SecurityMockMvcRequestPostProcessors: jwt()/user() 등)
     testImplementation("org.springframework.security:spring-security-test")
     // 아키텍처 규칙(헥사고날 의존성 방향·계층 순수성)을 테스트로 강제 (Kotlin 네이티브)
     testImplementation("com.lemonappdev:konsist:0.17.3")
