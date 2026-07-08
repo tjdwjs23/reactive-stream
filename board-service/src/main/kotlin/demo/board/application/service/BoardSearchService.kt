@@ -29,49 +29,59 @@ class BoardSearchService(
             .search(query.keyword, query.size)
             .also { observability.boardSearched(it.size) }
 
-    // DB(정본)를 키셋 페이지네이션으로 순회하며 ES에 다시 색인합니다.
-    // 한 번에 REINDEX_PAGE_SIZE건만 메모리에 올리므로 데이터가 커져도 일정한 메모리로 동작합니다.
-    // - 색인은 페이지 단위 벌크(indexAll)로 수행해 건별 왕복을 없앱니다.
-    // - 한 페이지 색인이 실패해도 전체를 중단하지 않고 그 페이지만 건너뛰며 실패 건수를 집계합니다
-    //   (플러시/아카이브 배치와 같은 내결함성 철학).
+    // DB(정본)를 새 버전 인덱스에 재구축한 뒤 alias('boards')를 원자적으로 스왑합니다(무중단 재색인).
+    // (1) 새 버전 인덱스 생성 → (2) DB를 키셋 페이지네이션으로 순회하며 그 인덱스에 벌크 색인
+    //   (한 번에 REINDEX_PAGE_SIZE건만 메모리에 올려 데이터가 커져도 일정 메모리) → (3) 전량 성공 시 alias 스왑.
+    // 한 페이지라도 실패하면(failed>0) 새 인덱스가 불완전하므로 스왑하지 않고 폐기합니다 — 검색은 기존 인덱스를
+    // 그대로 보며 무중단·자동 롤백됩니다. 새 인덱스로 깨끗이 재구축하므로 과거의 고아(orphan) 정리가 필요 없습니다.
     override fun reindexAll(): ReindexResult {
+        val newIndex = boardSearchPort.createNewVersionIndex()
         var cursor: Long? = null
         var indexed = 0L
         var failed = 0L
-        // 정본(DB)에 존재하는 전체 게시글 id. 재색인 후 이 집합에 없는 ES 문서(고아)를 정리하는 데 씁니다.
-        // 색인 실패 페이지의 id도 포함시켜(정본엔 존재하므로) 그 문서를 고아로 오인해 지우지 않게 합니다.
-        val keepIds = HashSet<Long>()
-        while (true) {
-            val page = boardRepositoryPort.findPage(cursor, REINDEX_PAGE_SIZE)
-            if (page.isEmpty()) break
-            page.forEach { board -> board.id?.let(keepIds::add) }
-            try {
-                indexed += boardSearchPort.indexAll(page)
-            } catch (e: Exception) {
-                failed += page.size
-                log.error(
-                    "reindex page failed (cursor={}, size={}); skip page. cause={}",
-                    cursor,
-                    page.size,
-                    e.toString(),
-                )
+        try {
+            while (true) {
+                val page = boardRepositoryPort.findPage(cursor, REINDEX_PAGE_SIZE)
+                if (page.isEmpty()) break
+                try {
+                    indexed += boardSearchPort.indexInto(page, newIndex)
+                } catch (e: Exception) {
+                    failed += page.size
+                    log.error(
+                        "reindex page failed (cursor={}, size={}); skip page. cause={}",
+                        cursor,
+                        page.size,
+                        e.toString(),
+                    )
+                }
+                cursor = page.last().id
+                if (page.size < REINDEX_PAGE_SIZE) break
             }
-            cursor = page.last().id
-            if (page.size < REINDEX_PAGE_SIZE) break
+        } catch (e: Exception) {
+            // 순회 자체가 깨진 경우(예: DB 장애): 반쯤 만든 인덱스를 폐기하고 실패를 전파합니다.
+            boardSearchPort.deleteVersionIndex(newIndex)
+            throw e
         }
 
-        // 색인(upsert) 후 고아 정리: 정본에 없는 문서를 제거해 "삭제됐는데 검색엔 남는" 불일치를 회복합니다.
-        // upsert를 먼저 끝낸 뒤 정리하므로, 정리가 실패해도 색인 결과는 보존됩니다(안전한 끝단 정리).
-        val pruned =
-            try {
-                boardSearchPort.pruneExcept(keepIds).toLong()
-            } catch (e: Exception) {
-                log.error("reindex prune(고아 정리) 실패; 색인 결과는 유지됩니다. cause={}", e.toString())
-                0L
+        val swapped =
+            if (failed == 0L) {
+                boardSearchPort.promote(newIndex)
+                true
+            } else {
+                // 불완전한 인덱스로 스왑하면 검색 품질이 오히려 나빠지므로, alias를 옮기지 않고 폐기합니다(자동 롤백).
+                log.error("reindex had {} failed docs; alias NOT swapped, discarding {}", failed, newIndex)
+                boardSearchPort.deleteVersionIndex(newIndex)
+                false
             }
 
-        log.info("reindexAll completed: indexed={}, failed={}, pruned={}", indexed, failed, pruned)
-        return ReindexResult(indexed = indexed, failed = failed, pruned = pruned)
+        log.info(
+            "reindexAll completed: indexed={}, failed={}, swapped={}, index={}",
+            indexed,
+            failed,
+            swapped,
+            newIndex,
+        )
+        return ReindexResult(indexed = indexed, failed = failed, swapped = swapped)
     }
 
     companion object {

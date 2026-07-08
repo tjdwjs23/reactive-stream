@@ -40,9 +40,11 @@ class BoardSearchController(
     }
 
     @Operation(
-        summary = "전체 재색인",
+        summary = "전체 재색인(무중단, alias 스왑)",
         description =
-            "DB(정본)를 순회하며 ES 색인을 다시 채웁니다. 인덱스를 새로 만들었거나 이벤트 유실로 인한 색인 누락을 회복할 때 사용합니다. " +
+            "DB(정본)를 새 버전 인덱스에 재구축한 뒤 'boards' alias를 원자적으로 스왑합니다(무중단). " +
+                "매핑을 바꿔 인덱스를 다시 만들거나 이벤트 유실로 인한 색인 누락을 회복할 때 사용합니다. " +
+                "색인 실패가 있으면(failed>0) alias를 옮기지 않아(swapped=false) 검색은 기존 인덱스를 그대로 봅니다(자동 롤백). " +
                 "ROLE_ADMIN 권한(Bearer 토큰)이 필요합니다.",
     )
     @SecurityRequirement(name = "bearer-jwt")
@@ -50,7 +52,7 @@ class BoardSearchController(
     fun reindex(): ResponseEntity<SuccessResponse<ReindexResponse>> {
         val result = reindexBoardsUseCase.reindexAll()
         return SuccessResponse.ok(
-            ReindexResponse(reindexed = result.indexed, failed = result.failed, pruned = result.pruned),
+            ReindexResponse(reindexed = result.indexed, failed = result.failed, swapped = result.swapped),
         )
     }
 }
@@ -58,6 +60,6 @@ class BoardSearchController(
 data class ReindexResponse(
     val reindexed: Long,
     val failed: Long,
-    // 정본(DB)에 없어 정리한 고아 색인 문서 수.
-    val pruned: Long,
+    // alias('boards')를 새 버전 인덱스로 스왑했는지 여부. failed>0이면 false(롤백).
+    val swapped: Boolean,
 )

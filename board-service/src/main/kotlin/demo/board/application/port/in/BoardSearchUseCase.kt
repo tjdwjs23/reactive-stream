@@ -20,17 +20,18 @@ data class BoardSearchQuery(
     }
 }
 
-// 6. 전체 재색인 유즈케이스: DB(정본)를 순회하며 ES 색인을 다시 채웁니다.
-// 이벤트 유실(발행 실패/DLQ 격리)로 색인이 누락됐거나 인덱스를 새로 만들었을 때 정합성을 회복하는 용도.
+// 6. 전체 재색인 유즈케이스: DB(정본)를 새 버전 인덱스에 재구축한 뒤 alias를 원자적으로 스왑합니다(무중단).
+// 이벤트 유실(발행 실패/DLQ 격리)로 색인이 누락됐거나 매핑을 바꿔 인덱스를 다시 만들 때 정합성을 회복하는 용도.
+// 새 인덱스로 깨끗이 재구축하므로 과거 방식의 고아(orphan) 정리(prune)가 원천적으로 불필요합니다.
 interface ReindexBoardsUseCase {
     fun reindexAll(): ReindexResult
 }
 
-// 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수, pruned=정본에 없어 정리한 고아 문서 수.
-// 페이지 단위로 벌크 색인하다 실패한 페이지는 건너뛰므로, 실패분을 별도로 노출해 재시도 판단에 씁니다.
-// 재색인은 upsert만 하므로, 삭제 이벤트 유실 등으로 ES에 남은 고아 문서는 재색인 후 prune으로 제거하고 그 수를 pruned로 노출합니다.
+// 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수, swapped=alias를 새 인덱스로 스왑했는지.
+// 페이지 단위 벌크 색인 중 한 페이지라도 실패하면(failed>0) 새 인덱스가 불완전하므로 alias를 옮기지 않고(swapped=false)
+// 새 인덱스를 폐기합니다 — 검색은 기존 인덱스를 그대로 보며(무중단·자동 롤백), 관리자는 재시도할 수 있습니다.
 data class ReindexResult(
     val indexed: Long,
     val failed: Long,
-    val pruned: Long = 0,
+    val swapped: Boolean,
 )

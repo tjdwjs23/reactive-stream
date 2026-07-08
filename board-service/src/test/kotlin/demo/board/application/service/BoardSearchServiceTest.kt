@@ -8,11 +8,12 @@ import demo.board.domain.model.Board
 import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import java.time.LocalDateTime
 import java.util.Collections
 
-// 실제 DB/ES 대신 인메모리 페이크 out-port로 재색인 순회·벌크·내결함성 흐름을 결정적으로 검증합니다.
+// 실제 DB/ES 대신 인메모리 페이크 out-port로 재색인 순회·벌크·내결함성·alias 스왑 흐름을 결정적으로 검증합니다.
 
 // 키셋 페이지네이션(id 내림차순, cursor 미만)을 실제 어댑터와 동일하게 흉내 냅니다.
 private class FakeBoardRepositoryPort(
@@ -37,40 +38,43 @@ private class FakeBoardRepositoryPort(
         throw UnsupportedOperationException("not needed")
 }
 
-// indexAll 호출을 기록하고, 특정 id가 포함된 페이지에서 강제 실패시킬 수 있는 페이크.
-// esDocs로 "이미 색인돼 있는 문서 id"(고아 포함)를 미리 심어, reindex 후 pruneExcept가 정본에 없는 문서를 지우는지 검증합니다.
+// 재색인의 alias 흐름(새 버전 인덱스 생성 → indexInto → promote/discard)을 기록하는 페이크.
+// failOnId가 포함된 페이지는 강제 실패시켜 부분 실패 시 "스왑하지 않고 폐기(롤백)"를 검증합니다.
 private class FakeBoardSearchPort(
     private val failOnId: Long? = null,
     private val searchResult: List<BoardSearchHit> = emptyList(),
-    preexistingDocIds: Set<Long> = emptySet(),
 ) : BoardSearchPort {
     val indexedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
-    // 현재 ES에 존재하는 문서 id 집합(색인=추가, prune=삭제로 시뮬레이션).
-    val esDocIds: MutableSet<Long> = Collections.synchronizedSet(preexistingDocIds.toMutableSet())
+    @Volatile var createdIndex: String? = null
 
-    // pruneExcept가 받은 keepIds를 기록해, reindex가 "정본 전체 id"를 넘기는지 검증합니다.
-    @Volatile
-    var lastPruneKeepIds: Set<Long>? = null
+    @Volatile var promotedIndex: String? = null
 
-    override fun indexAll(boards: List<Board>): Int {
+    @Volatile var discardedIndex: String? = null
+
+    override fun createNewVersionIndex(): String {
+        val name = "boards_test_${System.identityHashCode(this)}"
+        createdIndex = name
+        return name
+    }
+
+    override fun indexInto(
+        boards: List<Board>,
+        indexName: String,
+    ): Int {
         if (failOnId != null && boards.any { it.id == failOnId }) {
             throw IllegalStateException("forced bulk failure on page containing id=$failOnId")
         }
-        boards.forEach {
-            indexedIds.add(it.id!!)
-            esDocIds.add(it.id!!)
-        }
+        boards.forEach { indexedIds.add(it.id!!) }
         return boards.size
     }
 
-    // 실제 어댑터와 동일한 계약: 정본에 없고(id ∉ keepIds) max(keepIds) 이하인 문서만 삭제.
-    override fun pruneExcept(keepIds: Set<Long>): Int {
-        lastPruneKeepIds = keepIds
-        val maxKeep = keepIds.maxOrNull()
-        val orphans = esDocIds.filter { it !in keepIds && (maxKeep == null || it <= maxKeep) }
-        esDocIds.removeAll(orphans.toSet())
-        return orphans.size
+    override fun promote(indexName: String) {
+        promotedIndex = indexName
+    }
+
+    override fun deleteVersionIndex(indexName: String) {
+        discardedIndex = indexName
     }
 
     override fun search(
@@ -108,7 +112,7 @@ class BoardSearchServiceTest :
             When("검색을 수행하면") {
                 val result = service.search(BoardSearchQuery(keyword = "메일", size = 10))
 
-                Then("포트가 흘려준 관련도순 Flow를 List로 모아 그대로 반환한다") {
+                Then("포트가 준 관련도순 결과를 그대로 반환한다") {
                     result.map { it.board.id } shouldContainExactly listOf(1L, 2L)
                 }
             }
@@ -123,11 +127,13 @@ class BoardSearchServiceTest :
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
 
-                Then("모든 게시글이 중복 없이 정확히 한 번씩 색인된다") {
+                Then("새 버전 인덱스에 모든 게시글을 중복 없이 색인하고 alias를 스왑한다") {
                     result.indexed shouldBe (PAGE_SIZE + 1L)
                     result.failed shouldBe 0L
-                    searchPort.indexedIds.size shouldBe PAGE_SIZE + 1
+                    result.swapped shouldBe true
                     searchPort.indexedIds.toSet() shouldBe (1L..(PAGE_SIZE + 1L)).toSet()
+                    searchPort.promotedIndex shouldBe searchPort.createdIndex
+                    searchPort.discardedIndex.shouldBeNull()
                 }
             }
         }
@@ -141,9 +147,10 @@ class BoardSearchServiceTest :
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
 
-                Then("빈 페이지에서 종료하며 모든 게시글이 색인된다") {
+                Then("빈 페이지에서 종료하며 모든 게시글을 색인하고 스왑한다") {
                     result.indexed shouldBe (PAGE_SIZE * 2L)
                     result.failed shouldBe 0L
+                    result.swapped shouldBe true
                     searchPort.indexedIds.toSet() shouldBe (1L..(PAGE_SIZE * 2L)).toSet()
                 }
             }
@@ -158,10 +165,13 @@ class BoardSearchServiceTest :
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
 
-                Then("실패한 페이지는 건너뛰고 나머지는 계속 색인하며 실패 건수를 집계한다") {
+                Then("실패한 페이지는 건너뛰고 실패 건수를 집계하며, 불완전 인덱스를 폐기하고 스왑하지 않는다(자동 롤백)") {
                     result.failed shouldBe PAGE_SIZE.toLong() // 실패한 첫 페이지(500건)
                     result.indexed shouldBe 1L // 마지막 페이지 1건만 성공
+                    result.swapped shouldBe false
                     searchPort.indexedIds shouldContainExactly listOf(1L)
+                    searchPort.promotedIndex.shouldBeNull()
+                    searchPort.discardedIndex shouldBe searchPort.createdIndex
                 }
             }
         }
@@ -173,31 +183,12 @@ class BoardSearchServiceTest :
             When("전체 재색인을 실행하면") {
                 val result = service.reindexAll()
 
-                Then("색인/실패 모두 0이며 아무것도 색인하지 않는다") {
+                Then("색인/실패 모두 0이며, 빈 새 인덱스를 스왑한다") {
                     result.indexed shouldBe 0L
                     result.failed shouldBe 0L
+                    result.swapped shouldBe true
                     searchPort.indexedIds.size shouldBe 0
-                }
-            }
-        }
-
-        Given("정본에 없는 고아 색인 문서가 ES에 남아 있을 때 - reindexAll()") {
-            // DB 정본 = {10, 20, 30}. ES에는 정본 문서 + 고아(15, 25: 삭제 이벤트 유실분) + 25보다 큰 미래 문서(99)가 있다.
-            val boards = listOf(board(10L), board(20L), board(30L))
-            val searchPort = FakeBoardSearchPort(preexistingDocIds = setOf(10L, 20L, 30L, 15L, 25L, 99L))
-            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards), NoOpObservabilityPort)
-
-            When("전체 재색인을 실행하면") {
-                val result = service.reindexAll()
-
-                Then("정본 전체 id를 keepIds로 넘겨 색인한다") {
-                    result.indexed shouldBe 3L
-                    searchPort.lastPruneKeepIds shouldBe setOf(10L, 20L, 30L)
-                }
-
-                Then("정본에 없는 고아(15, 25)는 지우고, max(keepIds) 초과분(99)은 재색인 중 생성분일 수 있어 보존한다") {
-                    result.pruned shouldBe 2L
-                    searchPort.esDocIds shouldBe setOf(10L, 20L, 30L, 99L)
+                    searchPort.promotedIndex shouldBe searchPort.createdIndex
                 }
             }
         }

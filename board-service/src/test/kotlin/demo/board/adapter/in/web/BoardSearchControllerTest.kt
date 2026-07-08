@@ -108,15 +108,17 @@ class BoardSearchControllerTest :
 
         Given("전체 재색인 - POST /api/boards/search/reindex") {
             val fixture = SearchControllerFixture()
-            every { fixture.reindexBoardsUseCase.reindexAll() } returns ReindexResult(indexed = 42L, failed = 3L)
+            every { fixture.reindexBoardsUseCase.reindexAll() } returns
+                ReindexResult(indexed = 42L, failed = 3L, swapped = false)
 
             When("재색인을 요청하면") {
-                Then("200 OK와 색인/실패 건수를 반환한다") {
+                Then("200 OK와 색인/실패 건수 및 스왑 여부(failed>0이면 false)를 반환한다") {
                     fixture.mockMvc
                         .perform(post("/api/boards/search/reindex"))
                         .andExpect(status().isOk)
                         .andExpect(jsonPath("$.result.reindexed").value(42))
                         .andExpect(jsonPath("$.result.failed").value(3))
+                        .andExpect(jsonPath("$.result.swapped").value(false))
 
                     verify { fixture.reindexBoardsUseCase.reindexAll() }
                 }

@@ -6,22 +6,33 @@ import demo.board.domain.model.Board
 // 저장소가 Elasticsearch인지 무엇인지는 도메인/서비스가 모릅니다(포트-어댑터 경계).
 // MVC 스택이라 블로킹 함수이며, 다건 검색 결과는 List로 반환합니다.
 interface BoardSearchPort {
-    // 벌크 색인(upsert): 여러 건을 한 번의 요청으로 색인합니다. 전체 재색인에서 건별 왕복을 피하려고 씁니다.
-    // 반환값은 색인에 성공한 문서 수. (단건 색인/삭제는 이벤트 소비자인 search-indexer가 담당하므로 이 포트에 없습니다.)
-    fun indexAll(boards: List<Board>): Int
-
-    // 정본(DB)에 더 이상 없는 색인 문서(고아)를 제거합니다. keepIds = 재색인 시점에 DB에 존재하는 전체 게시글 id.
-    // 재색인은 upsert만 하므로, 삭제 이벤트 유실 등으로 남은 ES 고아 문서는 이 정리로만 회복됩니다.
-    // 재색인 도중 갓 생성돼 아직 keepIds 스냅샷에 없는 문서까지 지우지 않도록, max(keepIds) 이하의 문서만 대상으로 합니다
-    // (keepIds가 비면 정본이 비었다는 뜻이라 전체 삭제). 반환값은 삭제한 고아 문서 수입니다.
-    fun pruneExcept(keepIds: Set<Long>): Int
-
     // 키워드 전문검색. Nori로 형태소 분석된 title/content를 대상으로 매칭하고,
-    // 관련도(_score) 내림차순으로 최대 size건을 반환합니다.
+    // 관련도(_score) 내림차순으로 최대 size건을 반환합니다. 읽기는 alias('boards')를 통해 현재 활성 버전 인덱스로 향합니다.
     fun search(
         keyword: String,
         size: Int,
     ): List<BoardSearchHit>
+
+    // ── Alias 기반 무중단 재색인 ────────────────────────────────────────────────
+    // 검색은 'boards' alias로만 접근하고, 실제 데이터는 뒤의 버전 인덱스('boards_v1', 'boards_<ts>')에 있습니다.
+    // 재색인은 (1) 새 버전 인덱스를 만들어 거기에 전량을 다시 채운 뒤 (2) alias를 원자적으로 새 버전으로 옮기고
+    // (3) 옛 버전을 지웁니다. 스왑 전까지 검색은 옛 인덱스를 그대로 보므로 무중단이고, 스왑을 안 하면 자동 롤백입니다.
+    // (단건 색인/삭제는 이벤트 소비자인 search-indexer가 alias에 반영하므로 이 포트엔 없습니다.)
+
+    // 현재 매핑/설정으로 새 버전 인덱스를 만들고 그 이름을 반환합니다(아직 alias는 옮기지 않음).
+    fun createNewVersionIndex(): String
+
+    // 지정한 버전 인덱스에 벌크 색인(upsert)합니다. 반환값은 색인한 문서 수.
+    fun indexInto(
+        boards: List<Board>,
+        indexName: String,
+    ): Int
+
+    // alias('boards')를 지정한 버전 인덱스로 원자적으로 이동하고(쓰기 인덱스로 지정), 다른 버전 인덱스는 삭제합니다.
+    fun promote(indexName: String)
+
+    // 반쯤 만들다 실패한 버전 인덱스를 삭제합니다(스왑하지 않고 롤백).
+    fun deleteVersionIndex(indexName: String)
 }
 
 // 검색 한 건의 결과. 도메인 Board + 관련도 점수 + 하이라이트(매칭 부분에 <em> 태그).
