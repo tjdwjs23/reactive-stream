@@ -1,4 +1,4 @@
-# 🧩 Board Platform
+# 🧩 event-driven-board
 
 > 헥사고날 아키텍처(Ports & Adapters) 게시판을, **이벤트 기반 MSA**로 확장한 Kotlin + Spring Boot 4 / **JDK 25 LTS** 프로젝트입니다.
 > 게시판 정본(PostgreSQL/JPA)과 검색 인덱스(Elasticsearch)를 **Kafka Transactional Outbox**로 분리하고, **Spring MVC + 가상 스레드(Virtual Threads)** 위에서 동작합니다.
@@ -267,7 +267,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 
 **두 서비스 모두** metrics·logs·traces를 OTLP로 단일 수집기 **Grafana Alloy**(:4318)에 push하고, Alloy가 **Mimir**(metrics)·**Loki**(logs)·**Tempo**(traces)로 팬아웃합니다(스크레이프 없는 순수 OTLP push).
 
-- **service.name**으로 구분: `board-service`(=`reactive`) / `search-indexer`. Grafana 대시보드의 `$job` 드롭다운에 각각 나타납니다.
+- **service.name**으로 구분: `board-service` / `search-indexer`. Grafana 대시보드의 `$job` 드롭다운에 각각 나타납니다.
 - **로그**: Spring Boot 4 네이티브 구조화 로깅(ECS JSON) + OTel logback appender → OTLP → Loki. trace/span id가 로그에 실려 로그↔트레이스 상관.
 - **트레이스(Kafka 경계 포함)**: Micrometer Tracing → OTLP → Tempo. **프로듀서(`KafkaTemplate.observationEnabled`) + 컨슈머(`containerProperties.observationEnabled`)** 관측을 켜 `traceparent`를 Kafka 헤더로 전파하므로, `board-service`의 릴레이 발행 span과 `search-indexer`의 소비 span이 **하나의 트레이스로 연결**됩니다.
 - **비즈니스 메트릭**: `ObservabilityPort` out-port로 도메인 사건을 기록(`board_create_total`, `board_view_total`, `board_search_total` 등) — 서비스는 Micrometer를 모릅니다.

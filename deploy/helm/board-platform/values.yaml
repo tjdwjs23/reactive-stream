@@ -27,9 +27,9 @@ searchIndexer:
 postgres:
   enabled: true
   image: postgres:16
-  db: reactive
-  user: reactive
-  password: reactive1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
+  db: board
+  user: board
+  password: board1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
   # 영속성: PVC를 쓰면 파드 재시작·rollout restart·colima 재시작은 물론
   # helm uninstall(=down.sh 기본)에도 데이터가 유지됩니다.
   # (PVC에 helm.sh/resource-policy: keep 부여 — postgres.yaml. up.sh가 기존 PVC에 재연결)
@@ -53,7 +53,7 @@ redis:
 elasticsearch:
   enabled: true
   # Nori 플러그인 포함 커스텀 이미지 — docker/elasticsearch/Dockerfile로 빌드 후 kind load 필요
-  image: reactive-elasticsearch-nori:9.2.2
+  image: board-elasticsearch-nori:9.2.2
   javaOpts: "-Xms512m -Xmx512m"
   resources:
     requests: { cpu: "250m", memory: "1Gi" }

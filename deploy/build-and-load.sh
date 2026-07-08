@@ -14,14 +14,14 @@ docker build -f board-service/Dockerfile -t board-service:local .
 echo "==> [2/4] building search-indexer:local"
 docker build -f search-indexer/Dockerfile -t search-indexer:local .
 
-echo "==> [3/4] building reactive-elasticsearch-nori:9.2.2 (Nori 플러그인 포함 ES)"
-docker build -t reactive-elasticsearch-nori:9.2.2 docker/elasticsearch
+echo "==> [3/4] building board-elasticsearch-nori:9.2.2 (Nori 플러그인 포함 ES)"
+docker build -t board-elasticsearch-nori:9.2.2 docker/elasticsearch
 
 echo "==> [4/4] loading images into kind cluster '${CLUSTER}'"
 kind load docker-image \
   board-service:local \
   search-indexer:local \
-  reactive-elasticsearch-nori:9.2.2 \
+  board-elasticsearch-nori:9.2.2 \
   --name "${CLUSTER}"
 
 echo "done. 이제: helm upgrade --install board-platform deploy/helm/board-platform"
