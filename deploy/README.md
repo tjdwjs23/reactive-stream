@@ -161,5 +161,5 @@ helm upgrade board-platform deploy/helm/board-platform --set kafka.enabled=false
 ### 참고/한계
 - PostgreSQL은 PVC(`postgres.persistence.enabled=true`, 기본 on)로 **데이터가 유지**됩니다(파드 재생성·`down.sh` 기본에도 보존, `down.sh --all`에서만 소멸). Redis/Elasticsearch/Kafka는 `emptyDir`라 파드 재생성 시 초기화됩니다(검색 인덱스는 `POST /api/boards/search/reindex`로 재구축, 조회수 버퍼는 휘발성).
 - 코드 변경 반영: 이미지를 다시 빌드·load한 뒤 `kubectl rollout restart deploy/board-service`(또는 search-indexer). `imagePullPolicy: IfNotPresent`라 태그가 같으면 새로 pull하지 않으므로 **load 후 rollout restart**가 필요합니다.
-- 스키마는 board-service 기동 시 `R2dbcSchemaInitializer`가 `db/schema.sql`을 실행해 만듭니다(파드/부트런 어디서 뜨든 자동, 별도 마이그레이션 잡 불필요).
+- 스키마는 board-service 기동 시 **Flyway**가 `db/migration/V*.sql`을 적용해 만듭니다(`flyway_schema_history`로 이력 추적, 파드/부트런 어디서 뜨든 자동, 별도 마이그레이션 잡 불필요). JPA는 `ddl-auto=validate`라 매핑 불일치만 감지합니다.
 - 이미지 태그가 `:local`로 고정이라, 갱신 시 `--set boardService.image=board-service:local2`처럼 태그를 바꾸면 rollout이 확실합니다.

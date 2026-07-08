@@ -23,7 +23,7 @@ dependencies {
     implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.21.0-alpha")
 
     // Elasticsearch 색인 writer. 컨슈머 스레드가 블로킹이므로 imperative ElasticsearchOperations를 씁니다
-    // (webflux가 있어도 imperative 템플릿 빈은 그대로 제공됨 — board-service와 동일 조합). 이쪽은 색인 전용.
+    // (webflux가 있어도 imperative 템플릿 빈은 그대로 제공됨). 이쪽은 색인 전용.
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
     // Kafka 소비. Boot 4는 spring-kafka만으론 자동 구성이 안 딸려오므로 KafkaConsumerConfig에서 직접 구성한다.

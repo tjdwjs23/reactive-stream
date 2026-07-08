@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController
 // 오래된 게시글을 지금 즉시 일괄 아카이브(삭제)하는 운영/시험용 구동 어댑터.
 // 평소에는 StaleBoardArchivingScheduler(@Scheduled)가 같은 유즈케이스를 구동하지만,
 // 부하 테스트에서 배치 삭제 처리량을 결정적으로 측정하거나 운영에서 즉시 정리가 필요할 때 이 엔드포인트로 트리거합니다.
-// 스케줄러와 동일하게 유즈케이스 인터페이스에만 의존합니다(구현체·R2DBC를 모릅니다).
+// 스케줄러와 동일하게 유즈케이스 인터페이스에만 의존합니다(구현체·영속성 기술을 모릅니다).
 // 접근 통제는 SecurityConfig가 /api/admin/** 를 ROLE_ADMIN으로 제한합니다.
 @Tag(name = "Admin", description = "운영/시험용 API (조회수 플러시·게시글 아카이브)")
 @RestController

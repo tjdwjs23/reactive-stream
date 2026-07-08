@@ -66,7 +66,7 @@ class ArchitectureTest :
                 }
         }
 
-        "R2DBC @Table 엔티티는 영속성 어댑터 패키지 안에만 존재한다" {
+        "JPA @Table 엔티티는 영속성 어댑터 패키지 안에만 존재한다" {
             Konsist
                 .scopeFromProject()
                 .classes()

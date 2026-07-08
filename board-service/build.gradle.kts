@@ -29,8 +29,10 @@ dependencies {
     implementation("com.linecorp.kotlin-jdsl:jpql-render:3.5.5")
     implementation("com.linecorp.kotlin-jdsl:spring-data-jpa-support:3.5.5")
     // 스키마 마이그레이션(버전 관리). R2dbcSchemaInitializer(CREATE TABLE IF NOT EXISTS)를 대체합니다.
-    // flyway-database-postgresql는 PostgreSQL 방언 지원 모듈(Flyway 10+에서 분리됨).
-    implementation("org.flywaydb:flyway-core")
+    // Boot 4는 자동설정을 기술별 모듈로 분리했으므로, Flyway 자동설정(기동 시 migrate 실행 + JPA보다 먼저 순서 보장)은
+    // spring-boot-flyway가 제공합니다 — flyway-core 라이브러리만으로는 마이그레이션이 자동 실행되지 않습니다
+    // (그러면 ddl-auto=validate가 "missing table"로 실패). flyway-database-postgresql는 PG 방언 모듈(Flyway 10+ 분리).
+    implementation("org.springframework.boot:spring-boot-flyway")
     implementation("org.flywaydb:flyway-database-postgresql")
 
     // 인증/인가: (서블릿) Spring Security + 자체 발급 JWT.
