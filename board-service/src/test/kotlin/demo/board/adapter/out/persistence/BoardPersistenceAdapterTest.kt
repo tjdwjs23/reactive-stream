@@ -5,6 +5,7 @@ import demo.board.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -108,8 +109,12 @@ class BoardPersistenceAdapterTest(
             When("addViewCountsBatch로 여러 게시글 델타를 한 번에 반영하면") {
                 val updated = boardPersistenceAdapter.addViewCountsBatch(mapOf(a to 7L, b to 3L, -1L to 99L))
 
-                Then("존재하는 게시글의 view_count만 델타만큼 증가한다") {
-                    updated shouldBe 2 // 존재하지 않는 -1L은 반영되지 않음
+                Then("존재하는 게시글의 view_count만 델타만큼 증가하고, RETURNING으로 반영-후 상태를 돌려준다") {
+                    // 존재하지 않는 -1L은 반영되지 않아 결과에서 제외된다
+                    updated.map { it.id } shouldContainExactlyInAnyOrder listOf(a, b)
+                    // RETURNING이 반영 직후 누적 view_count를 담는다(재조회 없이 이벤트 페이로드 구성 가능)
+                    updated.first { it.id == a }.viewCount shouldBe 7L
+                    updated.first { it.id == b }.viewCount shouldBe 3L
                     boardPersistenceAdapter.findById(a)?.viewCount shouldBe 7L
                     boardPersistenceAdapter.findById(b)?.viewCount shouldBe 3L
                 }

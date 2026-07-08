@@ -106,6 +106,37 @@ class BoardSearchAdapterTest(
                 }
             }
         }
+
+        Given("정본에 없는 고아 문서가 색인돼 있을 때 - pruneExcept") {
+            // 공유 인덱스를 오염시키지 않도록 낮은 id(≤102)만 씁니다. maxKeep=102라 다른 테스트의 문서(9001+)는
+            // "max(keepIds) 초과" 가드로 절대 지워지지 않습니다(같은 인덱스를 공유하는 통합 테스트 간 격리).
+            val keep1 =
+                Board(id = 101L, title = "정본 유지 문서 하나", content = "prune 유지 대상입니다.", createdAt = LocalDateTime.now())
+            val keep2 =
+                Board(id = 102L, title = "정본 유지 문서 둘", content = "prune 유지 대상입니다.", createdAt = LocalDateTime.now())
+            val orphan = Board(id = 99L, title = "고아 문서", content = "정본에서 삭제된 문서입니다.", createdAt = LocalDateTime.now())
+            // 재색인 중 갓 생성된(스냅샷 이후) 문서를 흉내 내는 고-id 문서. max(keepIds) 초과라 prune 대상이 아니어야 합니다.
+            val future =
+                Board(id = 8888L, title = "미래 문서", content = "재색인 스냅샷 이후 생성분입니다.", createdAt = LocalDateTime.now())
+            boardSearchAdapter.indexAll(listOf(keep1, keep2, orphan, future))
+            refresh()
+
+            When("pruneExcept(정본 id = {101,102})를 호출하면") {
+                val pruned = boardSearchAdapter.pruneExcept(setOf(101L, 102L))
+                refresh()
+
+                Then("정본에 없는 고아(99)만 삭제되고, 정본 문서(101,102)는 남는다") {
+                    pruned shouldBe 1
+                    (operations.get("99", BoardDocument::class.java).awaitFirstOrNull() == null) shouldBe true
+                    (operations.get("101", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
+                    (operations.get("102", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
+                }
+
+                Then("max(keepIds)=102를 초과하는 문서(8888)는 재색인 중 생성분일 수 있어 가드로 보존된다") {
+                    (operations.get("8888", BoardDocument::class.java).awaitFirstOrNull() != null) shouldBe true
+                }
+            }
+        }
     }) {
     override fun extensions() = listOf(SpringExtension)
 

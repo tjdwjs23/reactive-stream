@@ -41,9 +41,13 @@ class BoardSearchService(
         var cursor: Long? = null
         var indexed = 0L
         var failed = 0L
+        // 정본(DB)에 존재하는 전체 게시글 id. 재색인 후 이 집합에 없는 ES 문서(고아)를 정리하는 데 씁니다.
+        // 색인 실패 페이지의 id도 포함시켜(정본엔 존재하므로) 그 문서를 고아로 오인해 지우지 않게 합니다.
+        val keepIds = HashSet<Long>()
         while (true) {
             val page = boardRepositoryPort.findPage(cursor, REINDEX_PAGE_SIZE).toList()
             if (page.isEmpty()) break
+            page.forEach { board -> board.id?.let(keepIds::add) }
             try {
                 indexed += boardSearchPort.indexAll(page)
             } catch (e: CancellationException) {
@@ -60,8 +64,21 @@ class BoardSearchService(
             cursor = page.last().id
             if (page.size < REINDEX_PAGE_SIZE) break
         }
-        log.info("reindexAll completed: indexed={}, failed={}", indexed, failed)
-        return ReindexResult(indexed = indexed, failed = failed)
+
+        // 색인(upsert) 후 고아 정리: 정본에 없는 문서를 제거해 "삭제됐는데 검색엔 남는" 불일치를 회복합니다.
+        // upsert를 먼저 끝낸 뒤 정리하므로, 정리가 실패해도 색인 결과는 보존됩니다(안전한 끝단 정리).
+        val pruned =
+            try {
+                boardSearchPort.pruneExcept(keepIds).toLong()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.error("reindex prune(고아 정리) 실패; 색인 결과는 유지됩니다. cause={}", e.toString())
+                0L
+            }
+
+        log.info("reindexAll completed: indexed={}, failed={}, pruned={}", indexed, failed, pruned)
+        return ReindexResult(indexed = indexed, failed = failed, pruned = pruned)
     }
 
     companion object {

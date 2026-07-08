@@ -1,5 +1,6 @@
 package demo.board.adapter.out.search
 
+import co.elastic.clients.elasticsearch._types.SortOrder
 import co.elastic.clients.elasticsearch._types.query_dsl.Query
 import demo.board.application.port.out.BoardSearchHit
 import demo.board.application.port.out.BoardSearchPort
@@ -11,7 +12,9 @@ import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOper
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.count
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
+import kotlinx.coroutines.reactive.awaitFirstOrNull
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.elasticsearch.client.elc.NativeQuery
 import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations
@@ -41,6 +44,44 @@ class BoardSearchAdapter(
             .saveAll(documents, BoardDocument::class.java)
             .asFlow()
             .count()
+    }
+
+    // 고아 문서 정리: 전체 문서를 createdAt 오름차순 + search_after로 순회하며, 정본(DB)에 없는 문서(id ∉ keepIds)를
+    // 삭제합니다. _id 필드는 기본적으로 fielddata 정렬이 금지돼 정렬 키로 쓸 수 없으므로, 모든 문서에 항상 존재하는
+    // createdAt(date, doc_values)로 정렬합니다. createdAt은 유일하지 않아 이론상 동일 시각이 페이지 경계에 걸치면
+    // 소수가 누락될 수 있으나(다음 재색인이 수거), 대량에서도 일정 메모리로 도는 안전한(끝에서 정리) 방식입니다.
+    // 재색인 도중 생성돼 아직 keepIds에 없는 문서를 지우지 않도록 max(keepIds) 이하만 삭제합니다.
+    override suspend fun pruneExcept(keepIds: Set<Long>): Int {
+        val maxKeep = keepIds.maxOrNull()
+        var searchAfter: List<Any>? = null
+        var pruned = 0
+        while (true) {
+            val builder =
+                NativeQuery
+                    .builder()
+                    .withQuery(Query.of { q -> q.matchAll { it } })
+                    .withSort { s -> s.field { f -> f.field("createdAt").order(SortOrder.Asc) } }
+                    .withPageable(PageRequest.of(0, PRUNE_PAGE_SIZE))
+            searchAfter?.let { builder.withSearchAfter(it) }
+
+            val hits =
+                operations
+                    .search(builder.build(), BoardDocument::class.java)
+                    .asFlow()
+                    .toList()
+            if (hits.isEmpty()) break
+
+            val orphanIds =
+                hits
+                    .map { it.content.id.toLong() }
+                    .filter { it !in keepIds && (maxKeep == null || it <= maxKeep) }
+            orphanIds.forEach { operations.delete(it.toString(), BoardDocument::class.java).awaitFirstOrNull() }
+            pruned += orphanIds.size
+
+            searchAfter = hits.last().sortValues
+            if (hits.size < PRUNE_PAGE_SIZE) break
+        }
+        return pruned
     }
 
     // 키워드 전문검색: title/content를 대상으로 multi_match. title에 가중치(^2)를 줘 제목 매칭을 더 높게 칩니다.
@@ -90,5 +131,10 @@ class BoardSearchAdapter(
                     highlightedContent = hit.getHighlightField("content").firstOrNull(),
                 )
             }
+    }
+
+    private companion object {
+        // 고아 정리 순회의 페이지 크기(search_after 한 번에 훑는 문서 수).
+        const val PRUNE_PAGE_SIZE = 1000
     }
 }

@@ -49,11 +49,15 @@ class BoardSearchController(
     @PostMapping("/reindex")
     suspend fun reindex(): ResponseEntity<SuccessResponse<ReindexResponse>> {
         val result = reindexBoardsUseCase.reindexAll()
-        return SuccessResponse.ok(ReindexResponse(reindexed = result.indexed, failed = result.failed))
+        return SuccessResponse.ok(
+            ReindexResponse(reindexed = result.indexed, failed = result.failed, pruned = result.pruned),
+        )
     }
 }
 
 data class ReindexResponse(
     val reindexed: Long,
     val failed: Long,
+    // 정본(DB)에 없어 정리한 고아 색인 문서 수.
+    val pruned: Long,
 )

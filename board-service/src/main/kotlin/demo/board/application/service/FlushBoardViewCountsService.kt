@@ -2,15 +2,23 @@ package demo.board.application.service
 
 import demo.board.application.port.`in`.FlushBoardViewCountsUseCase
 import demo.board.application.port.`in`.FlushViewCountsResult
+import demo.board.application.port.out.BoardEventOutboxPort
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardViewCountPort
 import demo.board.application.port.out.DistributedLockPort
 import demo.board.application.port.out.ObservabilityPort
+import demo.board.application.port.out.TransactionRunnerPort
+import demo.board.domain.model.Board
+import demo.board.events.BoardChangeType
+import demo.board.events.BoardChangedEvent
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.util.UUID
 
 // Redis 버퍼의 조회수 델타를 DB로 write-back합니다.
 // - Redis 버퍼를 스냅샷으로 옮겨두고(snapshot), 청크 단위 단일 UPDATE(배치)로 view_count에 더합니다.
@@ -32,9 +40,15 @@ import java.time.Duration
 class FlushBoardViewCountsService(
     private val boardViewCountPort: BoardViewCountPort,
     private val boardRepositoryPort: BoardRepositoryPort,
+    // DB 반영과 "같은 트랜잭션"으로 UPDATED 이벤트를 남겨, 검색 색인(ES)의 조회수도 최종 동기화합니다(Transactional Outbox).
+    private val boardEventOutboxPort: BoardEventOutboxPort,
+    // "조회수 반영(UPDATE) + 아웃박스 기록"을 청크 단위로 원자적으로 묶는 트랜잭션 경계.
+    private val transactionRunner: TransactionRunnerPort,
     private val observability: ObservabilityPort,
     // 클러스터 전역 상호배제. 다른 인스턴스가 이미 플러시 중이면 이번 호출은 락을 못 잡고 스킵합니다.
     private val distributedLock: DistributedLockPort,
+    // 이벤트 발생 시각 주입용 시계(도메인/서비스가 벽시계를 직접 읽지 않음 — BoardService와 동일 원칙, 테스트에서 고정 가능).
+    private val clock: Clock,
     // 한 UPDATE에 묶을 게시글 수. 클수록 왕복↓(하지만 실패 시 재시도 단위↑·문장당 바인딩↑).
     @Value("\${board.view-count.flush-chunk-size:1000}") private val chunkSize: Int,
     // 플러시 락 TTL(ms). 홀더가 락을 쥔 채 죽어도 이 시간 뒤 자동 해제됩니다. 최대 플러시 소요보다 넉넉히 잡습니다.
@@ -63,7 +77,20 @@ class FlushBoardViewCountsService(
         for (chunk in deltas.entries.chunked(chunkSize)) {
             val chunkMap = chunk.associate { it.key to it.value }
             try {
-                updatedRows += boardRepositoryPort.addViewCountsBatch(chunkMap)
+                // DB 조회수 반영 + UPDATED 아웃박스 이벤트 기록을 하나의 트랜잭션으로 묶습니다(둘 다 커밋되거나 둘 다 롤백).
+                // RETURNING으로 받은 최신 상태(반영 후 view_count 포함)로 이벤트를 만들어, search-indexer가 ES 문서의
+                // 조회수를 최종 동기화합니다. 이벤트는 절대값(누적 view_count)을 실어 재전달돼도 멱등합니다.
+                val updated =
+                    transactionRunner.execute {
+                        val boards = boardRepositoryPort.addViewCountsBatch(chunkMap)
+                        if (boards.isNotEmpty()) {
+                            boardEventOutboxPort.recordAll(
+                                boards.map { it.toViewCountUpdatedEvent() },
+                            )
+                        }
+                        boards
+                    }
+                updatedRows += updated.size
                 // commit-then-delete: DB 반영이 성공한 뒤에만 버퍼에서 지웁니다.
                 // 반영과 제거 사이에 죽으면 남아 다음 플러시가 재시도합니다(실패 청크도 지우지 않아 재시도됨).
                 boardViewCountPort.removeDrained(chunkMap.keys)
@@ -86,6 +113,22 @@ class FlushBoardViewCountsService(
                 observability.viewCountsFlushed(it.boards - it.failed)
             }
     }
+
+    // 조회수 반영 결과(RETURNING)로 UPDATED 이벤트를 만듭니다. 색인 문서를 그대로 복원할 수 있도록
+    // 최신 필드(반영 후 viewCount 포함)를 모두 싣습니다 — BoardService의 쓰기 경로 UPDATED 이벤트와 동일한 형태라
+    // 소비자(search-indexer)는 별도 분기 없이 기존 upsert 경로로 처리합니다(절대값이라 재전달에도 멱등).
+    private fun Board.toViewCountUpdatedEvent(): BoardChangedEvent =
+        BoardChangedEvent(
+            eventId = UUID.randomUUID().toString(),
+            boardId = requireNotNull(id) { "반영된 게시글은 id가 있어야 합니다" },
+            type = BoardChangeType.UPDATED,
+            title = title,
+            content = content,
+            authorId = authorId,
+            viewCount = viewCount,
+            createdAt = createdAt,
+            occurredAt = Instant.now(clock),
+        )
 
     private companion object {
         // 클러스터 전역에서 공유하는 플러시 락 키(모든 인스턴스가 같은 키를 두고 경합).

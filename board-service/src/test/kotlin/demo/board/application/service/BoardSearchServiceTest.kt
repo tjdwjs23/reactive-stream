@@ -35,23 +35,44 @@ private class FakeBoardRepositoryPort(
 
     override suspend fun deleteById(id: Long) = throw UnsupportedOperationException("not needed")
 
-    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): Int =
+    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> =
         throw UnsupportedOperationException("not needed")
 }
 
 // indexAll 호출을 기록하고, 특정 id가 포함된 페이지에서 강제 실패시킬 수 있는 페이크.
+// esDocs로 "이미 색인돼 있는 문서 id"(고아 포함)를 미리 심어, reindex 후 pruneExcept가 정본에 없는 문서를 지우는지 검증합니다.
 private class FakeBoardSearchPort(
     private val failOnId: Long? = null,
     private val searchResult: List<BoardSearchHit> = emptyList(),
+    preexistingDocIds: Set<Long> = emptySet(),
 ) : BoardSearchPort {
     val indexedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+
+    // 현재 ES에 존재하는 문서 id 집합(색인=추가, prune=삭제로 시뮬레이션).
+    val esDocIds: MutableSet<Long> = Collections.synchronizedSet(preexistingDocIds.toMutableSet())
+
+    // pruneExcept가 받은 keepIds를 기록해, reindex가 "정본 전체 id"를 넘기는지 검증합니다.
+    @Volatile
+    var lastPruneKeepIds: Set<Long>? = null
 
     override suspend fun indexAll(boards: List<Board>): Int {
         if (failOnId != null && boards.any { it.id == failOnId }) {
             throw IllegalStateException("forced bulk failure on page containing id=$failOnId")
         }
-        boards.forEach { indexedIds.add(it.id!!) }
+        boards.forEach {
+            indexedIds.add(it.id!!)
+            esDocIds.add(it.id!!)
+        }
         return boards.size
+    }
+
+    // 실제 어댑터와 동일한 계약: 정본에 없고(id ∉ keepIds) max(keepIds) 이하인 문서만 삭제.
+    override suspend fun pruneExcept(keepIds: Set<Long>): Int {
+        lastPruneKeepIds = keepIds
+        val maxKeep = keepIds.maxOrNull()
+        val orphans = esDocIds.filter { it !in keepIds && (maxKeep == null || it <= maxKeep) }
+        esDocIds.removeAll(orphans.toSet())
+        return orphans.size
     }
 
     override fun search(
@@ -158,6 +179,27 @@ class BoardSearchServiceTest :
                     result.indexed shouldBe 0L
                     result.failed shouldBe 0L
                     searchPort.indexedIds.size shouldBe 0
+                }
+            }
+        }
+
+        Given("정본에 없는 고아 색인 문서가 ES에 남아 있을 때 - reindexAll()") {
+            // DB 정본 = {10, 20, 30}. ES에는 정본 문서 + 고아(15, 25: 삭제 이벤트 유실분) + 25보다 큰 미래 문서(99)가 있다.
+            val boards = listOf(board(10L), board(20L), board(30L))
+            val searchPort = FakeBoardSearchPort(preexistingDocIds = setOf(10L, 20L, 30L, 15L, 25L, 99L))
+            val service = BoardSearchService(searchPort, FakeBoardRepositoryPort(boards), NoOpObservabilityPort)
+
+            When("전체 재색인을 실행하면") {
+                val result = service.reindexAll()
+
+                Then("정본 전체 id를 keepIds로 넘겨 색인한다") {
+                    result.indexed shouldBe 3L
+                    searchPort.lastPruneKeepIds shouldBe setOf(10L, 20L, 30L)
+                }
+
+                Then("정본에 없는 고아(15, 25)는 지우고, max(keepIds) 초과분(99)은 재색인 중 생성분일 수 있어 보존한다") {
+                    result.pruned shouldBe 2L
+                    searchPort.esDocIds shouldBe setOf(10L, 20L, 30L, 99L)
                 }
             }
         }

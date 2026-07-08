@@ -11,6 +11,12 @@ interface BoardSearchPort {
     // 반환값은 색인에 성공한 문서 수. (단건 색인/삭제는 이벤트 소비자인 search-indexer가 담당하므로 이 포트에 없습니다.)
     suspend fun indexAll(boards: List<Board>): Int
 
+    // 정본(DB)에 더 이상 없는 색인 문서(고아)를 제거합니다. keepIds = 재색인 시점에 DB에 존재하는 전체 게시글 id.
+    // 재색인은 upsert만 하므로, 삭제 이벤트 유실 등으로 남은 ES 고아 문서는 이 정리로만 회복됩니다.
+    // 재색인 도중 갓 생성돼 아직 keepIds 스냅샷에 없는 문서까지 지우지 않도록, max(keepIds) 이하의 문서만 대상으로 합니다
+    // (keepIds가 비면 정본이 비었다는 뜻이라 전체 삭제). 반환값은 삭제한 고아 문서 수입니다.
+    suspend fun pruneExcept(keepIds: Set<Long>): Int
+
     // 키워드 전문검색. Nori로 형태소 분석된 title/content를 대상으로 매칭하고,
     // 관련도(_score) 내림차순으로 최대 size건을 흘려보냅니다.
     fun search(

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
+import java.time.LocalDateTime
 
 @Repository // 스프링 빈으로 등록
 class BoardPersistenceAdapter(
@@ -45,20 +46,30 @@ class BoardPersistenceAdapter(
 
     // 배치 write-back: unnest(배열)로 (id, delta) 쌍을 펼쳐 단일 UPDATE로 조인 반영합니다.
     // id/delta 배열은 같은 순서로 바인딩되어야 하므로 entries에서 함께 만듭니다(Map 순회 순서 일치에 의존하지 않음).
-    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): Int {
-        if (deltas.isEmpty()) return 0
+    // RETURNING으로 반영된 행의 최신 상태를 함께 받아, 별도 재조회(왕복) 없이 UPDATED 이벤트 페이로드를 구성할 수 있게 합니다.
+    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> {
+        if (deltas.isEmpty()) return emptyList()
         val entries = deltas.entries.toList()
         val ids = Array(entries.size) { entries[it].key }
         val amounts = Array(entries.size) { entries[it].value }
         return databaseClient
             .sql(
                 "UPDATE board AS b SET view_count = b.view_count + d.delta " +
-                    "FROM unnest(:ids, :deltas) AS d(id, delta) WHERE b.id = d.id",
+                    "FROM unnest(:ids, :deltas) AS d(id, delta) WHERE b.id = d.id " +
+                    "RETURNING b.id, b.title, b.content, b.created_at, b.view_count, b.author_id",
             ).bind("ids", ids)
             .bind("deltas", amounts)
-            .fetch()
-            .rowsUpdated()
+            .map { row ->
+                Board(
+                    id = row.get("id", java.lang.Long::class.java)!!.toLong(),
+                    title = row.get("title", String::class.java)!!,
+                    content = row.get("content", String::class.java)!!,
+                    createdAt = row.get("created_at", LocalDateTime::class.java)!!,
+                    viewCount = row.get("view_count", java.lang.Long::class.java)!!.toLong(),
+                    authorId = row.get("author_id", java.lang.Long::class.java)?.toLong(),
+                )
+            }.all()
+            .collectList()
             .awaitSingle()
-            .toInt()
     }
 }

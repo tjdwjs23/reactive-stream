@@ -36,6 +36,30 @@ class OutboxPersistenceAdapter(
             .awaitSingle()
     }
 
+    // 다건 벌크 기록. unnest(배열)로 여러 행을 단일 INSERT에 펼쳐, 배치 경로(아카이브 삭제/조회수 플러시)가
+    // 건별 왕복 없이 한 트랜잭션에서 원자적으로 기록합니다. 컬럼 순서(event_id, aggregate_id, event_type,
+    // partition_key, payload)와 배열 인자 순서를 맞춰 unnest 결과 컬럼이 그대로 매핑되게 합니다.
+    override suspend fun recordAll(events: List<BoardChangedEvent>) {
+        if (events.isEmpty()) return
+        val eventIds = Array(events.size) { events[it].eventId }
+        val aggregateIds = Array(events.size) { events[it].boardId }
+        val eventTypes = Array(events.size) { events[it].type.name }
+        val partitionKeys = Array(events.size) { events[it].boardId.toString() }
+        val payloads = Array(events.size) { objectMapper.writeValueAsString(events[it]) }
+        databaseClient
+            .sql(
+                "INSERT INTO board_outbox (event_id, aggregate_id, event_type, partition_key, payload) " +
+                    "SELECT * FROM unnest(:eventIds, :aggregateIds, :eventTypes, :partitionKeys, :payloads)",
+            ).bind("eventIds", eventIds)
+            .bind("aggregateIds", aggregateIds)
+            .bind("eventTypes", eventTypes)
+            .bind("partitionKeys", partitionKeys)
+            .bind("payloads", payloads)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+    }
+
     // 미발행 레코드를 id 오름차순(기록 순서)으로 limit건. 부분 인덱스(idx_board_outbox_unpublished)가 뒷받침합니다.
     override suspend fun readUnpublished(limit: Int): List<OutboxRecord> =
         databaseClient

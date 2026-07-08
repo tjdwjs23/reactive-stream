@@ -64,6 +64,43 @@ class OutboxPersistenceAdapterTest(
             }
         }
 
+        fun deletedEvent(boardId: Long) =
+            BoardChangedEvent(
+                eventId = UUID.randomUUID().toString(),
+                boardId = boardId,
+                type = BoardChangeType.DELETED,
+                occurredAt = Instant.now(),
+            )
+
+        Given("recordAll로 여러 이벤트를 한 번에(벌크) 기록하면") {
+            val before = adapter.countUnpublished()
+            val events = listOf(deletedEvent(91001L), deletedEvent(91002L), deletedEvent(91003L))
+            adapter.recordAll(events)
+
+            When("countUnpublished / readUnpublished를 조회하면") {
+                val after = adapter.countUnpublished()
+                val keys = adapter.readUnpublished(1000).map { it.partitionKey }.toSet()
+
+                Then("단건 record와 동일하게 전건이 미발행으로 적재된다(벌크 INSERT)") {
+                    after shouldBe before + 3
+                    keys.contains("91001") shouldBe true
+                    keys.contains("91002") shouldBe true
+                    keys.contains("91003") shouldBe true
+                }
+            }
+        }
+
+        Given("빈 목록으로 recordAll을 호출하면") {
+            When("recordAll(emptyList())을 호출하면") {
+                val before = adapter.countUnpublished()
+                adapter.recordAll(emptyList())
+
+                Then("아무 것도 바뀌지 않는다(no-op)") {
+                    adapter.countUnpublished() shouldBe before
+                }
+            }
+        }
+
         Given("빈 id 목록으로 markPublished를 호출하면") {
             When("markPublished(emptyList())을 호출하면") {
                 val before = adapter.countUnpublished()

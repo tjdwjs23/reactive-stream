@@ -22,6 +22,8 @@ interface BoardRepositoryPort {
 
     // 조회수 write-back(배치): 여러 게시글의 view_count 델타를 단일 UPDATE로 한꺼번에 반영합니다.
     // 건별 왕복 대신 DB 라운드트립을 1회로 줄여, 플러시 대상이 많을수록 큰 이득입니다.
-    // 반환값은 영향받은 행 수(존재하지 않는 id는 반영되지 않으므로 deltas.size보다 작을 수 있음).
-    suspend fun addViewCountsBatch(deltas: Map<Long, Long>): Int
+    // 반환값은 실제 반영된(존재하는) 게시글들의 최신 상태입니다(UPDATE ... RETURNING). 존재하지 않는 id는
+    // 반영되지 않아 제외되므로 결과 크기는 deltas.size보다 작을 수 있습니다. 플러시가 이 최신 상태로
+    // UPDATED 아웃박스 이벤트를 남겨 검색 색인(ES)의 조회수도 최종적으로 동기화합니다.
+    suspend fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board>
 }

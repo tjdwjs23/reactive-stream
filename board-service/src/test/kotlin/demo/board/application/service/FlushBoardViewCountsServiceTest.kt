@@ -1,15 +1,45 @@
 package demo.board.application.service
 
+import demo.board.application.port.out.BoardEventOutboxPort
 import demo.board.application.port.out.BoardRepositoryPort
 import demo.board.application.port.out.BoardViewCountPort
 import demo.board.application.port.out.DistributedLockPort
+import demo.board.application.port.out.TransactionRunnerPort
+import demo.board.domain.model.Board
+import demo.board.events.BoardChangeType
 import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import java.time.Clock
 import java.time.Duration
+import java.time.LocalDateTime
+import java.time.ZoneId
+
+// 이벤트 발생 시각 고정용 시계 + 트랜잭션 경계를 그대로 통과시키는 러너(단위 테스트용).
+private val fixedClock: Clock =
+    Clock.fixed(
+        LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant(),
+        ZoneId.systemDefault(),
+    )
+private val passThroughRunner =
+    object : TransactionRunnerPort {
+        override suspend fun <T> execute(block: suspend () -> T): T = block()
+    }
+
+// addViewCountsBatch(RETURNING) 스텁이 돌려줄 반영-후 게시글들. size가 updatedRows가 되고, UPDATED 이벤트의 소스가 됩니다.
+private fun boardsFor(vararg idToViewCount: Pair<Long, Long>): List<Board> =
+    idToViewCount.map { (id, vc) ->
+        Board(
+            id = id,
+            title = "t$id",
+            content = "content-$id",
+            createdAt = LocalDateTime.now(fixedClock),
+            viewCount = vc,
+        )
+    }
 
 // 락을 항상 획득해 블록을 그대로 실행하는 테스트 더블(단일 인스턴스·경합 없음 상황을 재현).
 private object AlwaysAcquiringLock : DistributedLockPort {
@@ -35,12 +65,16 @@ private class FlushFixture(
 ) {
     val boardViewCountPort = mockk<BoardViewCountPort>()
     val boardRepositoryPort = mockk<BoardRepositoryPort>()
+    val outbox = mockk<BoardEventOutboxPort>(relaxed = true)
     val service =
         FlushBoardViewCountsService(
             boardViewCountPort,
             boardRepositoryPort,
+            outbox,
+            passThroughRunner,
             NoOpObservabilityPort,
             lock,
+            fixedClock,
             chunkSize,
             lockTtlMs = 300_000,
         )
@@ -57,7 +91,8 @@ class FlushBoardViewCountsServiceTest :
         Given("Redis에 여러 게시글의 조회 델타가 쌓여 있을 때") {
             val fixture = FlushFixture()
             coEvery { fixture.boardViewCountPort.snapshotPendingDeltas() } returns mapOf(1L to 3L, 2L to 5L)
-            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 3L, 2L to 5L)) } returns 2
+            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 3L, 2L to 5L)) } returns
+                boardsFor(1L to 13L, 2L to 25L)
 
             When("flush를 호출하면") {
                 val result = fixture.service.flush()
@@ -70,14 +105,27 @@ class FlushBoardViewCountsServiceTest :
                     // commit-then-delete: 반영 성공 후에만 스냅샷에서 제거
                     coVerify(exactly = 1) { fixture.boardViewCountPort.removeDrained(setOf(1L, 2L)) }
                 }
+
+                Then("DB 반영과 같은 트랜잭션에서 반영-후 조회수를 실은 UPDATED 이벤트를 아웃박스에 기록한다(ES 동기화)") {
+                    coVerify(exactly = 1) {
+                        fixture.outbox.recordAll(
+                            match { events ->
+                                events.map { it.boardId }.toSet() == setOf(1L, 2L) &&
+                                    events.all { it.type == BoardChangeType.UPDATED } &&
+                                    events.first { it.boardId == 1L }.viewCount == 13L
+                            },
+                        )
+                    }
+                }
             }
         }
 
         Given("청크 크기보다 델타가 많을 때") {
             val fixture = FlushFixture(chunkSize = 2)
             coEvery { fixture.boardViewCountPort.snapshotPendingDeltas() } returns mapOf(1L to 1L, 2L to 1L, 3L to 1L)
-            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 1L, 2L to 1L)) } returns 2
-            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(3L to 1L)) } returns 1
+            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 1L, 2L to 1L)) } returns
+                boardsFor(1L to 1L, 2L to 1L)
+            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(3L to 1L)) } returns boardsFor(3L to 1L)
 
             When("flush를 호출하면") {
                 val result = fixture.service.flush()
@@ -130,7 +178,8 @@ class FlushBoardViewCountsServiceTest :
         Given("일부 청크의 DB 반영이 실패할 때") {
             val fixture = FlushFixture(chunkSize = 2)
             coEvery { fixture.boardViewCountPort.snapshotPendingDeltas() } returns mapOf(1L to 1L, 2L to 1L, 3L to 1L)
-            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 1L, 2L to 1L)) } returns 2
+            coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(1L to 1L, 2L to 1L)) } returns
+                boardsFor(1L to 1L, 2L to 1L)
             coEvery { fixture.boardRepositoryPort.addViewCountsBatch(mapOf(3L to 1L)) } throws
                 RuntimeException("db down")
 

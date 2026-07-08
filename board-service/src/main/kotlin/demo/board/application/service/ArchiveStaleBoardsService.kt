@@ -4,8 +4,12 @@ import demo.board.application.port.`in`.ArchiveResult
 import demo.board.application.port.`in`.ArchiveStaleBoardsCommand
 import demo.board.application.port.`in`.ArchiveStaleBoardsUseCase
 import demo.board.application.port.out.BoardBatchQueryPort
+import demo.board.application.port.out.BoardEventOutboxPort
 import demo.board.application.port.out.ObservabilityPort
+import demo.board.application.port.out.TransactionRunnerPort
 import demo.board.domain.model.Board
+import demo.board.events.BoardChangeType
+import demo.board.events.BoardChangedEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -15,7 +19,9 @@ import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDateTime
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 // Service는 "흐름 제어(오케스트레이션)"만 담당합니다.
@@ -25,10 +31,16 @@ import java.util.concurrent.atomic.AtomicInteger
 //
 // 배치 서비스에는 클래스 레벨 @Transactional을 붙이지 않습니다.
 // 수백만 건을 하나의 트랜잭션으로 묶으면 커넥션·락을 오래 잡기 때문입니다.
-// 삭제는 청크 단위(BoardBatchQueryPort.deleteByIds)로 각각 짧게 커밋합니다.
+// 대신 청크 단위로 "삭제 + 아웃박스 DELETED 이벤트 기록"을 하나의 짧은 트랜잭션으로 묶어 커밋합니다.
+// 삭제와 이벤트 기록이 원자적이어야 정본(DB)에서 지워졌는데 검색 색인(ES)에는 남는 고아 문서가 생기지 않습니다
+// (BoardService의 단건 삭제와 동일한 Transactional Outbox 원칙 — 삭제도 반드시 DELETED 이벤트를 남깁니다).
 @Service
 class ArchiveStaleBoardsService(
     private val boardBatchQueryPort: BoardBatchQueryPort,
+    // 삭제 이벤트를 아웃박스에 남겨 search-indexer가 ES 문서를 지우게 합니다(색인 정합성).
+    private val boardEventOutboxPort: BoardEventOutboxPort,
+    // "삭제 + 아웃박스 기록"을 청크 단위로 원자적으로 묶는 트랜잭션 경계.
+    private val transactionRunner: TransactionRunnerPort,
     private val observability: ObservabilityPort,
     // 배치 실행 시각을 주입된 시계에서 얻습니다(벽시계 직접 호출 대신 — 테스트에서 고정 가능, BoardService와 동일 원칙).
     private val clock: Clock,
@@ -135,8 +147,17 @@ class ArchiveStaleBoardsService(
         // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다
         // 단, CancellationException은 코루틴 취소 신호이므로 삼키지 않고 다시 던져 구조적 동시성을 지킵니다.
         // (runCatching은 취소 예외까지 잡아버리므로 여기서는 명시적 try/catch를 씁니다.)
+        //
+        // 삭제(DELETE)와 DELETED 이벤트 기록을 한 트랜잭션으로 묶습니다 — 둘 다 커밋되거나 둘 다 롤백됩니다.
+        // 실패한 청크는 커밋되지 않으므로(삭제도 이벤트도 반영 안 됨), 다음 실행에서 다시 대상이 됩니다.
         try {
-            deleted.addAndGet(boardBatchQueryPort.deleteByIds(targetIds))
+            val removed =
+                transactionRunner.execute {
+                    val count = boardBatchQueryPort.deleteByIds(targetIds)
+                    boardEventOutboxPort.recordAll(targetIds.map { deletedEvent(it) })
+                    count
+                }
+            deleted.addAndGet(removed)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -144,4 +165,13 @@ class ArchiveStaleBoardsService(
             log.error("Failed to delete chunk (size={}). Skip and continue.", targetIds.size, e)
         }
     }
+
+    // 삭제 이벤트: 색인에서 제거만 하면 되므로 본문 필드는 비웁니다(boardId만 유효). BoardService의 단건 삭제와 동일한 형태.
+    private fun deletedEvent(boardId: Long): BoardChangedEvent =
+        BoardChangedEvent(
+            eventId = UUID.randomUUID().toString(),
+            boardId = boardId,
+            type = BoardChangeType.DELETED,
+            occurredAt = Instant.now(clock),
+        )
 }

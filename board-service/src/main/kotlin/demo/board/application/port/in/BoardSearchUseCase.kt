@@ -26,9 +26,11 @@ interface ReindexBoardsUseCase {
     suspend fun reindexAll(): ReindexResult
 }
 
-// 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수.
+// 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수, pruned=정본에 없어 정리한 고아 문서 수.
 // 페이지 단위로 벌크 색인하다 실패한 페이지는 건너뛰므로, 실패분을 별도로 노출해 재시도 판단에 씁니다.
+// 재색인은 upsert만 하므로, 삭제 이벤트 유실 등으로 ES에 남은 고아 문서는 재색인 후 prune으로 제거하고 그 수를 pruned로 노출합니다.
 data class ReindexResult(
     val indexed: Long,
     val failed: Long,
+    val pruned: Long = 0,
 )
