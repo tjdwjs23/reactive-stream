@@ -44,7 +44,7 @@ class BoardController(
     )
     @SecurityRequirement(name = "bearer-jwt")
     @PostMapping
-    suspend fun createBoard(
+    fun createBoard(
         @RequestBody request: CreateBoardRequest,
     ): ResponseEntity<SuccessResponse<BoardResponse>> {
         val command =
@@ -59,7 +59,7 @@ class BoardController(
 
     @Operation(summary = "게시글 단건 조회", description = "id로 게시글을 조회합니다. 없으면 404를 반환합니다.")
     @GetMapping("/{id}")
-    suspend fun getBoard(
+    fun getBoard(
         @PathVariable id: Long,
     ): ResponseEntity<SuccessResponse<BoardResponse>> =
         SuccessResponse.ok(boardWebMapper.toResponse(getBoardUseCase.getBoard(id)))
@@ -70,7 +70,7 @@ class BoardController(
         description = "id 내림차순으로 size건을 반환합니다. 다음 페이지는 응답의 nextCursor를 cursor로 다시 넘겨 조회합니다.",
     )
     @GetMapping
-    suspend fun getBoards(
+    fun getBoards(
         @Parameter(description = "마지막으로 본 게시글 id. 생략 시 최신부터 조회") @RequestParam(required = false) cursor: Long?,
         @Parameter(description = "페이지 크기(1~100)") @RequestParam(defaultValue = "20") size: Int,
     ): ResponseEntity<SuccessResponse<BoardPageResponse>> {
@@ -86,7 +86,7 @@ class BoardController(
     )
     @SecurityRequirement(name = "bearer-jwt")
     @PutMapping("/{id}")
-    suspend fun updateBoard(
+    fun updateBoard(
         @PathVariable id: Long,
         @RequestBody request: UpdateBoardRequest,
     ): ResponseEntity<SuccessResponse<BoardResponse>> {
@@ -110,7 +110,7 @@ class BoardController(
     )
     @SecurityRequirement(name = "bearer-jwt")
     @DeleteMapping("/{id}")
-    suspend fun deleteBoard(
+    fun deleteBoard(
         @PathVariable id: Long,
     ): ResponseEntity<Void> {
         val requester = authenticatedUserProvider.current()

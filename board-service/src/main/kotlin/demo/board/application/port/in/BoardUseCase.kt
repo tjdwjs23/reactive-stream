@@ -6,7 +6,7 @@ import demo.board.domain.model.Board.Companion.MIN_CONTENT_LENGTH
 
 // 1. 게시글 생성 유즈케이스
 interface CreateBoardUseCase {
-    suspend fun createBoard(command: CreateBoardCommand): Board
+    fun createBoard(command: CreateBoardCommand): Board
 }
 
 data class CreateBoardCommand(
@@ -29,11 +29,11 @@ data class CreateBoardCommand(
 
 // 2. 게시글 조회 유즈케이스
 interface GetBoardUseCase {
-    suspend fun getBoard(id: Long): Board
+    fun getBoard(id: Long): Board
 
     // 목록은 키셋(seek) 페이지네이션으로 조회합니다. 한 번에 size건만 읽으므로
     // OFFSET 방식/전체 조회와 달리 데이터가 커져도 요청당 메모리/지연이 일정합니다.
-    suspend fun getBoards(query: BoardPageQuery): BoardPage
+    fun getBoards(query: BoardPageQuery): BoardPage
 }
 
 // 커서 페이지 요청. cursor가 null이면 첫 페이지(최신)부터, 아니면 그 id보다 과거를 읽습니다.
@@ -56,7 +56,7 @@ data class BoardPage(
 
 // 3. 게시글 수정 유즈케이스
 interface UpdateBoardUseCase {
-    suspend fun updateBoard(command: UpdateBoardCommand): Board
+    fun updateBoard(command: UpdateBoardCommand): Board
 }
 
 // CreateBoardCommand와 달리 여기엔 init 블록 검증이 없습니다.
@@ -73,7 +73,7 @@ data class UpdateBoardCommand(
 
 // 4. 게시글 삭제 유즈케이스
 interface DeleteBoardUseCase {
-    suspend fun deleteBoard(command: DeleteBoardCommand)
+    fun deleteBoard(command: DeleteBoardCommand)
 }
 
 // 삭제도 수정과 동일하게 요청자 정보를 함께 받아 소유권을 검사합니다(소유자 또는 관리자만 삭제 가능).

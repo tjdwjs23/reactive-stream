@@ -4,10 +4,9 @@ import demo.board.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
@@ -15,11 +14,11 @@ import org.springframework.test.context.DynamicPropertySource
 @SpringBootTest
 class RedisLoginRateLimiterAdapterTest(
     @Autowired private val adapter: RedisLoginRateLimiterAdapter,
-    @Autowired private val redis: ReactiveStringRedisTemplate,
+    @Autowired private val redis: StringRedisTemplate,
 ) : BehaviorSpec({
 
-        suspend fun clean(key: String) {
-            redis.delete("login:fail:$key").awaitSingleOrNull()
+        fun clean(key: String) {
+            redis.delete("login:fail:$key")
         }
 
         Given("한 계정의 로그인 실패가 누적될 때") {

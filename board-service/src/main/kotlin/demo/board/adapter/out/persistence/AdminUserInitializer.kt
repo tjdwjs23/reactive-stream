@@ -4,7 +4,6 @@ import demo.board.application.port.out.PasswordEncoderPort
 import demo.board.application.port.out.UserRepositoryPort
 import demo.board.domain.model.Role
 import demo.board.domain.model.User
-import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -38,21 +37,19 @@ class AdminUserInitializer(
             return
         }
         try {
-            runBlocking {
-                if (userRepositoryPort.existsByUsername(adminUsername)) {
-                    log.info("admin user '{}' already exists — skip bootstrap", adminUsername)
-                    return@runBlocking
-                }
-                userRepositoryPort.save(
-                    User(
-                        username = adminUsername,
-                        passwordHash = passwordEncoderPort.encode(adminPassword),
-                        role = Role.ADMIN,
-                        createdAt = LocalDateTime.now(clock),
-                    ),
-                )
-                log.info("admin user '{}' bootstrapped (ROLE_ADMIN)", adminUsername)
+            if (userRepositoryPort.existsByUsername(adminUsername)) {
+                log.info("admin user '{}' already exists — skip bootstrap", adminUsername)
+                return
             }
+            userRepositoryPort.save(
+                User(
+                    username = adminUsername,
+                    passwordHash = passwordEncoderPort.encode(adminPassword),
+                    role = Role.ADMIN,
+                    createdAt = LocalDateTime.now(clock),
+                ),
+            )
+            log.info("admin user '{}' bootstrapped (ROLE_ADMIN)", adminUsername)
         } catch (e: Exception) {
             log.warn("failed to bootstrap admin user '{}'. cause={}", adminUsername, e.toString())
         }

@@ -6,27 +6,32 @@ import demo.board.application.port.`in`.SearchBoardUseCase
 import demo.board.application.port.out.BoardSearchHit
 import demo.board.domain.model.Board
 import io.kotest.core.spec.style.BehaviorSpec
-import io.mockk.coEvery
-import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
-import org.springframework.test.web.reactive.server.WebTestClient
+import io.mockk.verify
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.time.LocalDateTime
 
 // reindex의 접근 통제(ROLE_ADMIN)는 SecurityConfig가 담당하며 SecurityIntegrationTest가 검증합니다.
-// 여기서는 standalone WebTestClient로 검색/재색인 핸들러 동작만 봅니다.
+// 여기서는 standalone MockMvc로 검색/재색인 핸들러 동작만 봅니다.
 private class SearchControllerFixture {
     val searchBoardUseCase = mockk<SearchBoardUseCase>()
     val reindexBoardsUseCase = mockk<ReindexBoardsUseCase>()
 
-    val client: WebTestClient =
-        WebTestClient
-            .bindToController(
+    val mockMvc: MockMvc =
+        MockMvcBuilders
+            .standaloneSetup(
                 BoardSearchController(
                     searchBoardUseCase,
                     reindexBoardsUseCase,
                     BoardWebMapper(),
                 ),
-            ).controllerAdvice(GlobalExceptionHandler())
+            ).setControllerAdvice(GlobalExceptionHandler())
             .build()
 }
 
@@ -56,31 +61,20 @@ class BoardSearchControllerTest :
                         highlightedContent = "<em>메일</em>과는 무관",
                     ),
                 )
-            coEvery { fixture.searchBoardUseCase.search(any()) } returns hits
+            every { fixture.searchBoardUseCase.search(any()) } returns hits
 
             When("keyword로 검색하면") {
                 Then("200 OK와 관련도순 검색 결과(점수·하이라이트 포함)를 통일 포맷으로 반환한다") {
-                    fixture.client
-                        .get()
-                        .uri("/api/boards/search?keyword=메일&size=5")
-                        .exchange()
-                        .expectStatus()
-                        .isOk
-                        .expectBody()
-                        .jsonPath("$.status")
-                        .isEqualTo("Success")
-                        .jsonPath("$.result.keyword")
-                        .isEqualTo("메일")
-                        .jsonPath("$.result.total")
-                        .isEqualTo(2)
-                        .jsonPath("$.result.items[0].board.id")
-                        .isEqualTo(1)
-                        .jsonPath("$.result.items[0].score")
-                        .isEqualTo(2.0)
-                        .jsonPath("$.result.items[0].highlightedTitle")
-                        .isEqualTo("카카오<em>메일</em> 공지")
-                        .jsonPath("$.result.items[1].highlightedContent")
-                        .isEqualTo("<em>메일</em>과는 무관")
+                    fixture.mockMvc
+                        .perform(get("/api/boards/search?keyword=메일&size=5"))
+                        .andExpect(status().isOk)
+                        .andExpect(jsonPath("$.status").value("Success"))
+                        .andExpect(jsonPath("$.result.keyword").value("메일"))
+                        .andExpect(jsonPath("$.result.total").value(2))
+                        .andExpect(jsonPath("$.result.items[0].board.id").value(1))
+                        .andExpect(jsonPath("$.result.items[0].score").value(2.0))
+                        .andExpect(jsonPath("$.result.items[0].highlightedTitle").value("카카오<em>메일</em> 공지"))
+                        .andExpect(jsonPath("$.result.items[1].highlightedContent").value("<em>메일</em>과는 무관"))
                 }
             }
         }
@@ -90,17 +84,11 @@ class BoardSearchControllerTest :
 
             When("keyword를 공백으로 요청하면") {
                 Then("커맨드 자가검증(IllegalArgumentException)이 400 VALIDATION_ERROR로 매핑된다") {
-                    fixture.client
-                        .get()
-                        .uri("/api/boards/search?keyword=")
-                        .exchange()
-                        .expectStatus()
-                        .isBadRequest
-                        .expectBody()
-                        .jsonPath("$.status")
-                        .isEqualTo("Failure")
-                        .jsonPath("$.result.code")
-                        .isEqualTo("VALIDATION_ERROR")
+                    fixture.mockMvc
+                        .perform(get("/api/boards/search?keyword="))
+                        .andExpect(status().isBadRequest)
+                        .andExpect(jsonPath("$.status").value("Failure"))
+                        .andExpect(jsonPath("$.result.code").value("VALIDATION_ERROR"))
                 }
             }
         }
@@ -110,38 +98,27 @@ class BoardSearchControllerTest :
 
             When("size=0으로 요청하면") {
                 Then("400 VALIDATION_ERROR를 반환한다") {
-                    fixture.client
-                        .get()
-                        .uri("/api/boards/search?keyword=메일&size=0")
-                        .exchange()
-                        .expectStatus()
-                        .isBadRequest
-                        .expectBody()
-                        .jsonPath("$.result.code")
-                        .isEqualTo("VALIDATION_ERROR")
+                    fixture.mockMvc
+                        .perform(get("/api/boards/search?keyword=메일&size=0"))
+                        .andExpect(status().isBadRequest)
+                        .andExpect(jsonPath("$.result.code").value("VALIDATION_ERROR"))
                 }
             }
         }
 
         Given("전체 재색인 - POST /api/boards/search/reindex") {
             val fixture = SearchControllerFixture()
-            coEvery { fixture.reindexBoardsUseCase.reindexAll() } returns ReindexResult(indexed = 42L, failed = 3L)
+            every { fixture.reindexBoardsUseCase.reindexAll() } returns ReindexResult(indexed = 42L, failed = 3L)
 
             When("재색인을 요청하면") {
                 Then("200 OK와 색인/실패 건수를 반환한다") {
-                    fixture.client
-                        .post()
-                        .uri("/api/boards/search/reindex")
-                        .exchange()
-                        .expectStatus()
-                        .isOk
-                        .expectBody()
-                        .jsonPath("$.result.reindexed")
-                        .isEqualTo(42)
-                        .jsonPath("$.result.failed")
-                        .isEqualTo(3)
+                    fixture.mockMvc
+                        .perform(post("/api/boards/search/reindex"))
+                        .andExpect(status().isOk)
+                        .andExpect(jsonPath("$.result.reindexed").value(42))
+                        .andExpect(jsonPath("$.result.failed").value(3))
 
-                    coVerify { fixture.reindexBoardsUseCase.reindexAll() }
+                    verify { fixture.reindexBoardsUseCase.reindexAll() }
                 }
             }
         }

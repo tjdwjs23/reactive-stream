@@ -7,13 +7,14 @@ import demo.board.domain.exception.DuplicateUsernameException
 import demo.board.domain.exception.InvalidCredentialsException
 import demo.board.domain.exception.InvalidRefreshTokenException
 import demo.board.domain.exception.TooManyLoginAttemptsException
-import org.springframework.beans.TypeMismatchException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
-import org.springframework.web.server.ServerWebInputException
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -55,16 +56,16 @@ class GlobalExceptionHandler {
     fun handleIllegalArgumentException(e: IllegalArgumentException): ResponseEntity<FailureResponse> =
         failure(CommonErrorCode.ValidationError, e.message)
 
-    // WebFlux에서 입력 바인딩 실패는 대부분 ServerWebInputException(400)으로 수렴합니다.
-    // - PathVariable/파라미터 타입 불일치(예: GET /api/boards/abc): cause가 TypeMismatchException
-    // - 요청 Body 파싱 실패/누락(빈 Body, 타입 불일치): 그 외
-    @ExceptionHandler(ServerWebInputException::class)
-    fun handleServerWebInputException(e: ServerWebInputException): ResponseEntity<FailureResponse> =
-        if (e.cause is TypeMismatchException) {
-            failure(CommonErrorCode.InvalidParameter)
-        } else {
-            failure(CommonErrorCode.InvalidRequestBody)
-        }
+    // Spring MVC의 입력 바인딩 실패를 400으로 매핑합니다.
+    // - PathVariable/RequestParam 타입 불일치(예: GET /api/boards/abc) → MethodArgumentTypeMismatchException
+    // - 필수 RequestParam 누락(예: 검색 keyword 누락) → MissingServletRequestParameterException
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class, MissingServletRequestParameterException::class)
+    fun handleParameterBindingException(): ResponseEntity<FailureResponse> = failure(CommonErrorCode.InvalidParameter)
+
+    // 요청 Body 파싱 실패/누락(빈 Body, JSON 형식 오류, 타입 불일치) → 400.
+    @ExceptionHandler(HttpMessageNotReadableException::class)
+    fun handleHttpMessageNotReadableException(): ResponseEntity<FailureResponse> =
+        failure(CommonErrorCode.InvalidRequestBody)
 
     // 프레임워크가 던지는 상태 예외(존재하지 않는 경로의 NoResourceFoundException=404,
     // 405/415 등)는 그 HTTP 상태를 보존해 통일 포맷으로 응답합니다.

@@ -6,7 +6,7 @@ import demo.board.application.port.out.BoardSearchHit
 // 반환 타입 BoardSearchHit은 out-port에 정의돼 있지만 둘 다 application 계층이므로
 // (in-port ↔ out-port는 같은 층) 계층 규칙 위반이 아닙니다 — 불필요한 중복 DTO를 피합니다.
 interface SearchBoardUseCase {
-    suspend fun search(query: BoardSearchQuery): List<BoardSearchHit>
+    fun search(query: BoardSearchQuery): List<BoardSearchHit>
 }
 
 // 검색 요청. keyword는 필수(공백 불가), size는 1~100.
@@ -23,7 +23,7 @@ data class BoardSearchQuery(
 // 6. 전체 재색인 유즈케이스: DB(정본)를 순회하며 ES 색인을 다시 채웁니다.
 // 이벤트 유실(발행 실패/DLQ 격리)로 색인이 누락됐거나 인덱스를 새로 만들었을 때 정합성을 회복하는 용도.
 interface ReindexBoardsUseCase {
-    suspend fun reindexAll(): ReindexResult
+    fun reindexAll(): ReindexResult
 }
 
 // 재색인 결과. indexed=색인 성공 건수, failed=색인 실패(건너뛴) 건수, pruned=정본에 없어 정리한 고아 문서 수.

@@ -26,7 +26,7 @@ private val fixedClock: Clock =
     )
 private val passThroughRunner =
     object : TransactionRunnerPort {
-        override suspend fun <T> execute(block: suspend () -> T): T = block()
+        override fun <T> execute(block: () -> T): T = block()
     }
 
 // addViewCountsBatch(RETURNING) 스텁이 돌려줄 반영-후 게시글들. size가 updatedRows가 되고, UPDATED 이벤트의 소스가 됩니다.
@@ -43,19 +43,19 @@ private fun boardsFor(vararg idToViewCount: Pair<Long, Long>): List<Board> =
 
 // 락을 항상 획득해 블록을 그대로 실행하는 테스트 더블(단일 인스턴스·경합 없음 상황을 재현).
 private object AlwaysAcquiringLock : DistributedLockPort {
-    override suspend fun <T> withLock(
+    override fun <T> withLock(
         key: String,
         ttl: Duration,
-        block: suspend () -> T,
+        block: () -> T,
     ): T? = block()
 }
 
 // 락을 절대 획득하지 못하는 더블(다른 인스턴스가 이미 플러시 중인 상황을 재현). 블록을 실행하지 않고 null을 반환.
 private object NeverAcquiringLock : DistributedLockPort {
-    override suspend fun <T> withLock(
+    override fun <T> withLock(
         key: String,
         ttl: Duration,
-        block: suspend () -> T,
+        block: () -> T,
     ): T? = null
 }
 

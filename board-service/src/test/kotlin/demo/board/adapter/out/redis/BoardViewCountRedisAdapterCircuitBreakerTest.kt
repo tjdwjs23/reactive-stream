@@ -6,14 +6,14 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.mockk.mockk
 import io.mockk.verify
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 
 // 서킷브레이커 open 경로 단위 테스트(컨테이너 불필요). 정상 경로는 BoardViewCountRedisAdapterTest(Testcontainers)가 검증합니다.
 class BoardViewCountRedisAdapterCircuitBreakerTest :
     BehaviorSpec({
 
         Given("redis-viewcount 서킷이 열려 있을 때") {
-            val redis = mockk<ReactiveStringRedisTemplate>()
+            val redis = mockk<StringRedisTemplate>()
             val registry = CircuitBreakerRegistry.ofDefaults()
             val adapter = BoardViewCountRedisAdapter(redis, registry)
             registry.circuitBreaker("redis-viewcount").transitionToOpenState()

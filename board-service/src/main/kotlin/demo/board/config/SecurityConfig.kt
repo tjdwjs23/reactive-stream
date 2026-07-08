@@ -7,34 +7,31 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.core.convert.converter.Converter
 import org.springframework.http.HttpMethod
-import org.springframework.security.authentication.AbstractAuthenticationToken
-import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
-import org.springframework.security.config.web.server.ServerHttpSecurity
+import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
+import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
-import org.springframework.security.oauth2.jwt.Jwt
+import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtEncoder
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
-import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder
-import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter
-import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter
-import org.springframework.security.web.server.SecurityWebFilterChain
+import org.springframework.security.web.SecurityFilterChain
 import org.springframework.web.cors.CorsConfiguration
-import org.springframework.web.cors.reactive.CorsConfigurationSource
-import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
-import reactor.core.publisher.Mono
+import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 
-// 리액티브 Spring Security 설정. 자체 발급 JWT(HS256 대칭키)로 stateless 인증합니다.
+// (서블릿) Spring Security 설정. 자체 발급 JWT(HS256 대칭키)로 stateless 인증합니다. MVC + 가상 스레드 스택이라
+// 필터 체인은 SecurityFilterChain(서블릿)으로 구성하고, 인증 컨텍스트는 ThreadLocal(SecurityContextHolder)로 흐릅니다.
 // 정책: 읽기(GET)·문서·actuator는 공개, 게시글 쓰기는 인증, reindex/flush/archive(admin)는 ROLE_ADMIN.
 @Configuration
-@EnableWebFluxSecurity
+@EnableWebSecurity
 class SecurityConfig(
     @Value("\${board.security.jwt.secret:}") private val configuredSecret: String,
     // 허용 오리진(쉼표 구분). SPA 등 브라우저 클라이언트가 다른 오리진에서 API를 호출할 수 있게 CORS를 명시합니다.
@@ -58,41 +55,42 @@ class SecurityConfig(
 
     // 리소스 서버가 Bearer 토큰을 검증하는 디코더. 같은 대칭키 + HS256으로 서명을 확인합니다.
     @Bean
-    fun jwtDecoder(): ReactiveJwtDecoder =
-        NimbusReactiveJwtDecoder
+    fun jwtDecoder(): JwtDecoder =
+        NimbusJwtDecoder
             .withSecretKey(secretKey)
             .macAlgorithm(MacAlgorithm.HS256)
             .build()
 
     @Bean
-    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             // 브라우저 클라이언트(SPA)의 교차 오리진 호출 허용. 아래 corsConfigurationSource 정책을 적용합니다.
             .cors { it.configurationSource(corsConfigurationSource()) }
-            // 상태를 서버에 두지 않는 토큰 인증이라 CSRF/폼로그인/HTTP Basic은 끕니다(REST API + 무상태).
+            // 상태를 서버에 두지 않는 토큰 인증이라 CSRF/폼로그인/HTTP Basic은 끄고 세션도 만들지 않습니다.
             .csrf { it.disable() }
             .httpBasic { it.disable() }
             .formLogin { it.disable() }
             .logout { it.disable() }
-            .authorizeExchange { ex ->
-                ex
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests { auth ->
+                auth
                     // 인증 없이 가입/로그인 가능해야 최초 토큰을 받을 수 있습니다.
-                    .pathMatchers(HttpMethod.POST, "/api/auth/**")
+                    .requestMatchers(HttpMethod.POST, "/api/auth/**")
                     .permitAll()
                     // 운영 트리거는 ROLE_ADMIN. reindex는 /api/boards 하위라 일반 POST 규칙보다 먼저 선언합니다.
-                    .pathMatchers(HttpMethod.POST, "/api/boards/search/reindex")
+                    .requestMatchers(HttpMethod.POST, "/api/boards/search/reindex")
                     .hasRole("ADMIN")
-                    .pathMatchers("/api/admin/**")
+                    .requestMatchers("/api/admin/**")
                     .hasRole("ADMIN")
-                    // 게시글 쓰기는 인증 필요(역할 무관 — 수정/삭제는 인증된 사용자면 누구나).
-                    .pathMatchers(HttpMethod.POST, "/api/boards/**")
+                    // 게시글 쓰기는 인증 필요(역할 무관 — 수정/삭제는 인증된 사용자면 누구나, 소유권은 서비스가 검사).
+                    .requestMatchers(HttpMethod.POST, "/api/boards/**")
                     .authenticated()
-                    .pathMatchers(HttpMethod.PUT, "/api/boards/**")
+                    .requestMatchers(HttpMethod.PUT, "/api/boards/**")
                     .authenticated()
-                    .pathMatchers(HttpMethod.DELETE, "/api/boards/**")
+                    .requestMatchers(HttpMethod.DELETE, "/api/boards/**")
                     .authenticated()
                     // 그 외(GET 단건/목록/검색, /actuator, /swagger-ui, /v3/api-docs, 미존재 경로의 404)는 공개.
-                    .anyExchange()
+                    .anyRequest()
                     .permitAll()
             }.oauth2ResourceServer { rs ->
                 rs.jwt { jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()) }
@@ -121,17 +119,15 @@ class SecurityConfig(
 
     // JWT의 roles 클레임(["USER"] / ["ADMIN"])을 Spring Security 권한(ROLE_USER / ROLE_ADMIN)으로 변환합니다.
     // hasRole("ADMIN")은 "ROLE_ADMIN" 권한을 요구하므로 접두사를 ROLE_로 맞춥니다.
-    private fun jwtAuthenticationConverter(): Converter<Jwt, Mono<AbstractAuthenticationToken>> {
+    private fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
         val authoritiesConverter =
             JwtGrantedAuthoritiesConverter().apply {
                 setAuthorityPrefix("ROLE_")
                 setAuthoritiesClaimName("roles")
             }
-        val converter =
-            JwtAuthenticationConverter().apply {
-                setJwtGrantedAuthoritiesConverter(authoritiesConverter)
-            }
-        return ReactiveJwtAuthenticationConverterAdapter(converter)
+        return JwtAuthenticationConverter().apply {
+            setJwtGrantedAuthoritiesConverter(authoritiesConverter)
+        }
     }
 
     private fun resolveSecretKey(): SecretKey {

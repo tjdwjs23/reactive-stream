@@ -11,9 +11,9 @@ import demo.board.domain.model.Board
 import demo.board.events.BoardChangeType
 import demo.board.events.BoardChangedEvent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
@@ -29,10 +29,13 @@ import java.util.concurrent.atomic.AtomicInteger
 // - 어떻게 저장소에서 읽고 지우는지 → BoardBatchQueryPort (어댑터)
 // 여기서는 스트리밍/청크/동시성/백프레셔/내결함성 흐름만 조립합니다.
 //
-// 배치 서비스에는 클래스 레벨 @Transactional을 붙이지 않습니다.
-// 수백만 건을 하나의 트랜잭션으로 묶으면 커넥션·락을 오래 잡기 때문입니다.
-// 대신 청크 단위로 "삭제 + 아웃박스 DELETED 이벤트 기록"을 하나의 짧은 트랜잭션으로 묶어 커밋합니다.
-// 삭제와 이벤트 기록이 원자적이어야 정본(DB)에서 지워졌는데 검색 색인(ES)에는 남는 고아 문서가 생기지 않습니다
+// 이 서비스만 코루틴을 씁니다(웹/다른 서비스는 블로킹). 대량 삭제를 생산자 1 + 워커 N으로 팬아웃하는
+// "구조적 동시성"이 코루틴이 진짜 값을 내는 지점이기 때문입니다 — 바운드 Channel이 백프레셔를,
+// coroutineScope가 전 워커의 합류(취소 전파 포함)를 보장합니다. 포트는 블로킹(JPA/JDBC)이라 워커/생산자는
+// Dispatchers.IO에서 돌려, 블로킹 호출이 코루틴 기본 디스패처를 굶기지 않게 합니다.
+//
+// 배치 서비스에는 클래스 레벨 @Transactional을 붙이지 않습니다(수백만 건을 한 트랜잭션으로 묶으면 커넥션·락을
+// 오래 잡음). 대신 청크 단위로 "삭제 + 아웃박스 DELETED 이벤트 기록"을 하나의 짧은 트랜잭션으로 묶어 커밋합니다
 // (BoardService의 단건 삭제와 동일한 Transactional Outbox 원칙 — 삭제도 반드시 DELETED 이벤트를 남깁니다).
 @Service
 class ArchiveStaleBoardsService(
@@ -57,34 +60,29 @@ class ArchiveStaleBoardsService(
         // 삭제를 실제로 시도한(대상이 있는) 청크 수. "전부 실패"를 판정하는 분모입니다.
         val attemptedChunks = AtomicInteger()
 
-        // 호출자의 코루틴 컨텍스트(디스패처)를 그대로 상속합니다. R2DBC는 논블로킹이라
-        // Dispatchers.IO로 스레드를 따로 잡을 필요가 없습니다.
         coroutineScope {
-            // 바운드 채널이 곧 백프레셔 장치입니다
-            // 소비자(워커)가 밀리면 send가 suspend되어 생산자가 DB 페이지를 더 읽지 않습니다.
-            // 덕분에 "생산자가 소비자보다 빨라 메모리가 폭증"하는 상황이 원천 차단됩니다.
+            // 바운드 채널이 곧 백프레셔 장치입니다 — 소비자(워커)가 밀리면 send가 suspend되어 생산자가
+            // DB 페이지를 더 읽지 않습니다. "생산자가 소비자보다 빨라 메모리가 폭증"하는 상황을 원천 차단합니다.
             val channel = Channel<List<Board>>(capacity = command.concurrency)
 
             val producer =
-                launch {
-                    // Flow에는 chunked가 없으므로 흐르는 원소를 chunkSize만큼 모아 청크로 전송합니다.
-                    val buffer = ArrayList<Board>(command.chunkSize)
-                    boardBatchQueryPort
-                        .findStaleBoards(threshold, command.chunkSize)
-                        .collect { board ->
-                            buffer.add(board)
-                            if (buffer.size >= command.chunkSize) {
-                                channel.send(ArrayList(buffer))
-                                buffer.clear()
-                            }
-                        }
-                    if (buffer.isNotEmpty()) channel.send(ArrayList(buffer))
+                launch(Dispatchers.IO) {
+                    // 키셋 페이지네이션: "마지막으로 읽은 id 이후"를 조건으로 다음 페이지를 읽습니다(블로킹 JPA/JDSL).
+                    // 워커가 동시에 삭제해도 커서는 id 오름차순으로만 전진하므로 삭제된 행이 다시 잡히지 않습니다.
+                    var lastId = 0L
+                    while (true) {
+                        val page = boardBatchQueryPort.findStalePage(threshold, lastId, command.chunkSize)
+                        if (page.isEmpty()) break
+                        channel.send(page) // 한 페이지 = 한 청크
+                        lastId = page.last().id ?: break
+                        if (page.size < command.chunkSize) break
+                    }
                     channel.close()
                 }
 
             val workers =
                 List(command.concurrency) {
-                    launch {
+                    launch(Dispatchers.IO) {
                         for (chunk in channel) {
                             processChunk(
                                 chunk,
@@ -123,7 +121,8 @@ class ArchiveStaleBoardsService(
         return result
     }
 
-    private suspend fun processChunk(
+    // 워커에서 블로킹으로 실행됩니다(suspend 아님). 실제 삭제/이벤트 기록은 블로킹 트랜잭션 경계 안에서 수행합니다.
+    private fun processChunk(
         chunk: List<Board>,
         now: LocalDateTime,
         retentionDays: Long,
@@ -144,12 +143,10 @@ class ArchiveStaleBoardsService(
 
         attemptedChunks.incrementAndGet()
 
-        // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다
-        // 단, CancellationException은 코루틴 취소 신호이므로 삼키지 않고 다시 던져 구조적 동시성을 지킵니다.
-        // (runCatching은 취소 예외까지 잡아버리므로 여기서는 명시적 try/catch를 씁니다.)
-        //
+        // 내결함성: 한 청크가 실패해도 배치 전체를 멈추지 않고 건너뜁니다.
         // 삭제(DELETE)와 DELETED 이벤트 기록을 한 트랜잭션으로 묶습니다 — 둘 다 커밋되거나 둘 다 롤백됩니다.
-        // 실패한 청크는 커밋되지 않으므로(삭제도 이벤트도 반영 안 됨), 다음 실행에서 다시 대상이 됩니다.
+        // 실패한 청크는 커밋되지 않으므로 다음 실행에서 다시 대상이 됩니다.
+        // 상위 취소(CancellationException)는 삼키지 않고 재던져 구조적 동시성을 지킵니다.
         try {
             val removed =
                 transactionRunner.execute {

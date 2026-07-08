@@ -4,9 +4,8 @@ import demo.board.support.TestContainers
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
@@ -15,12 +14,12 @@ import org.springframework.test.context.DynamicPropertySource
 @SpringBootTest
 class BoardViewCountRedisAdapterTest(
     private val adapter: BoardViewCountRedisAdapter,
-    private val redis: ReactiveStringRedisTemplate,
+    private val redis: StringRedisTemplate,
 ) : BehaviorSpec({
 
         // 공유 Redis라 각 시나리오 시작 시 관련 키를 비웁니다.
-        suspend fun clean() {
-            redis.delete("board:views:pending", "board:views:draining").awaitSingleOrNull()
+        fun clean() {
+            redis.delete(listOf("board:views:pending", "board:views:draining"))
         }
 
         Given("같은 게시글을 여러 번 조회할 때") {

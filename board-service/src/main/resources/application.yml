@@ -2,6 +2,13 @@ spring:
   application:
     name: reactive
 
+  # 가상 스레드(JDK 25). Tomcat 요청 처리와 @Async/스케줄 실행이 요청마다 가상 스레드에서 돌아,
+  # 블로킹 I/O(JPA/Redis/ES) 동안 플랫폼 스레드를 점유하지 않습니다. JDK 24(JEP 491)에서 synchronized 피닝이
+  # 제거돼 25 LTS에서 안정적입니다 — WebFlux+R2DBC를 걷어내고도 높은 동시성을 유지하는 핵심 스위치.
+  threads:
+    virtual:
+      enabled: true
+
   # @Scheduled 작업 실행 스레드 풀. 기본값은 1이라 아카이브 배치(장시간)와 조회수 플러시(30초 주기)가
   # 한 스레드를 두고 경합해, 긴 배치가 도는 동안 플러시가 통째로 밀립니다. 두 스케줄이 서로를 막지 않도록 2로 둡니다.
   task:
@@ -9,28 +16,42 @@ spring:
       pool:
         size: 2
 
-  # 애플리케이션 DB 접근은 전 구간 R2DBC(논블로킹)로만 수행합니다. JDBC는 사용하지 않습니다.
-  # 스키마 초기화는 Flyway가 아니라 R2DBC ConnectionFactoryInitializer(R2dbcSchemaInitializer)가
-  # 기동 시 db/schema.sql을 실행하는 방식으로 처리합니다.
+  # 애플리케이션 DB 접근은 JDBC(JPA/Hibernate) + HikariCP 풀. 가상 스레드 위에서 블로킹 JDBC를 씁니다.
   # 접속 정보는 환경변수로 외부화합니다(운영은 Vault/K8s Secret로 주입, 로컬은 아래 기본값 사용).
   # 비밀번호를 소스에 평문으로 커밋하지 않기 위해 ${ENV:default} 형태를 씁니다.
-  r2dbc:
-    url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/reactive}
-    username: ${SPRING_R2DBC_USERNAME:reactive}
-    password: ${SPRING_R2DBC_PASSWORD:reactive1234}
-    # 커넥션 풀(r2dbc-pool, starter-data-r2dbc에 포함)을 명시적으로 크기 지정합니다. 대용량 쓰기/조회에서
-    # 풀 크기가 처리량 상한이 되므로 기본값(10)에 기대지 않고 초기/최대 크기를 환경변수로 외부화합니다.
-    # max-acquire-time은 "커넥션을 못 얻을 때 무한 대기"를 막는 회복탄력성 상한입니다(풀 고갈 시 5초 뒤 실패).
-    pool:
-      enabled: true
-      initial-size: ${SPRING_R2DBC_POOL_INITIAL_SIZE:10}
-      max-size: ${SPRING_R2DBC_POOL_MAX_SIZE:50}
-      max-idle-time: 30m         # 유휴 커넥션을 이 시간 뒤 반납(idle 커넥션이 서버 자원을 계속 점유하지 않도록)
-      max-life-time: 60m         # 커넥션 최대 수명(오래된 커넥션의 서버측 상태 누수 방지)
-      max-acquire-time: ${SPRING_R2DBC_POOL_MAX_ACQUIRE_TIME:5s}  # 획득 타임아웃(무한 대기 차단)
-      validation-query: SELECT 1 # 반납/대여 시 커넥션 유효성 검사(끊긴 커넥션을 조용히 넘기지 않음)
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/reactive}
+    username: ${SPRING_DATASOURCE_USERNAME:reactive}
+    password: ${SPRING_DATASOURCE_PASSWORD:reactive1234}
+    driver-class-name: org.postgresql.Driver
+    # HikariCP 풀. 대용량 쓰기/조회에서 풀 크기가 처리량 상한이 되므로 기본값(10)에 기대지 않고 외부화합니다.
+    # connection-timeout은 "커넥션을 못 얻을 때 무한 대기"를 막는 회복탄력성 상한(풀 고갈 시 5초 뒤 실패)입니다.
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_POOL_MAX_SIZE:50}
+      minimum-idle: ${SPRING_DATASOURCE_POOL_MIN_IDLE:10}
+      connection-timeout: ${SPRING_DATASOURCE_POOL_CONNECTION_TIMEOUT_MS:5000}
+      max-lifetime: 1800000      # 커넥션 최대 수명(30m). 오래된 커넥션의 서버측 상태 누수 방지
+      validation-timeout: 3000
 
-  # 조회수 카운터용 Redis(리액티브 Lettuce). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
+  # JPA/Hibernate. 스키마는 Flyway가 소유하므로 ddl-auto=validate(엔티티↔테이블 매핑 불일치를 기동 시 감지).
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false          # OSIV 비활성 — 트랜잭션 밖 지연로딩을 막아 커넥션 점유를 좁게 유지(BoardService 원칙과 정합)
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 1000       # 아웃박스 벌크 INSERT/조회수 배치 UPDATE의 JDBC 배치 크기
+        order_inserts: true
+        order_updates: true
+
+  # 스키마 마이그레이션(Flyway). db/migration/V*.sql을 순서대로 적용하고 flyway_schema_history로 이력을 추적합니다.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true    # 기존 데이터가 있는 DB(시드 148k행 등)에도 baseline 후 이어서 적용
+
+  # 조회수 카운터용 Redis(Lettuce, 블로킹 StringRedisTemplate). 조회 시 INCR로 델타를 쌓고, 주기적으로 DB에 write-back합니다.
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -40,7 +61,7 @@ spring:
       timeout: ${SPRING_DATA_REDIS_TIMEOUT:1s}
       connect-timeout: ${SPRING_DATA_REDIS_CONNECT_TIMEOUT:1s}
 
-  # 한글 전문검색용 Elasticsearch(Nori). WebFlux 클래스패스에서 리액티브 클라이언트가 자동 구성됩니다.
+  # 한글 전문검색용 Elasticsearch(Nori). MVC 스택이라 블로킹 클라이언트(ElasticsearchOperations)가 자동 구성됩니다.
   # 로컬 k8s/컨테이너의 elasticsearch(보안 비활성화)에 맞춰 http로 접속합니다.
   elasticsearch:
     uris: ${SPRING_ELASTICSEARCH_URIS:http://localhost:9200}

@@ -1,9 +1,9 @@
-# 🌊 Reactive Board Platform
+# 🧩 Board Platform
 
-> 헥사고날 아키텍처(Ports & Adapters) 게시판을, **이벤트 기반 MSA**로 확장한 Kotlin + Spring Boot 4 / JDK 21 프로젝트입니다.
-> 게시판 정본(R2DBC)과 검색 인덱스(Elasticsearch)를 **Kafka Transactional Outbox**로 분리하고, 논블로킹 리액티브 스택(WebFlux + 코루틴 + R2DBC) 위에서 동작합니다.
+> 헥사고날 아키텍처(Ports & Adapters) 게시판을, **이벤트 기반 MSA**로 확장한 Kotlin + Spring Boot 4 / **JDK 25 LTS** 프로젝트입니다.
+> 게시판 정본(PostgreSQL/JPA)과 검색 인덱스(Elasticsearch)를 **Kafka Transactional Outbox**로 분리하고, **Spring MVC + 가상 스레드(Virtual Threads)** 위에서 동작합니다.
 
-이 저장소는 처음에 단일 모듈 게시판 API였습니다. 블로킹 스택(Spring MVC + JPA)에서 **논블로킹 리액티브 스택(WebFlux + 코루틴 + R2DBC)** 으로 전환하면서도 도메인 모델은 한 줄도 바뀌지 않았고, 이번엔 **단일 서비스에서 이벤트 기반 MSA로** 확장하면서도 같은 원칙을 지켰습니다 — 도메인은 그대로 두고, "무엇이 바깥이고 무엇이 안인가"의 경계만 옮겼습니다.
+이 저장소는 아키텍처의 경계(포트-어댑터)를 그대로 둔 채 **바깥(스택)만 여러 번 갈아 끼우며** 검증해 왔습니다 — 도메인 모델은 한 줄도 바뀌지 않습니다. 한때는 논블로킹 리액티브 스택(WebFlux + 코루틴 + R2DBC)이었고, 지금은 **JDK 25 LTS의 가상 스레드 위 블로킹 스택(MVC + JPA)** 입니다. 이 전환의 "왜"는 아래 [스택 전환 근거](#-스택-전환-근거-webfluxr2dbc--mv--가상-스레드--jpa)에 정리했습니다. 헥사고날의 값어치가 바로 여기서 드러납니다 — 웹/영속성 어댑터와 포트 시그니처(블로킹/논블로킹)만 바뀌고 도메인·유즈케이스의 비즈니스 규칙은 불변이었습니다.
 
 핵심 변화는 **검색 색인의 분리**입니다. 예전에는 게시글을 쓸 때 같은 스레드에서 Elasticsearch에 인라인으로 색인했고, 실패하면 누락될 수 있었습니다. 지금은 게시글 쓰기와 **원자적으로** 아웃박스에 이벤트를 남기고, 릴레이가 Kafka로 발행하며, 별도 서비스(`search-indexer`)가 이를 소비해 색인합니다. 정합성은 "베스트에포트"에서 **아웃박스가 보장하는 최종 일관성**으로 올라갔습니다.
 
@@ -40,10 +40,10 @@
 
 ## 🛠 Tech Stack
 
-- **Language / Runtime**: Kotlin, JDK 21
-- **Framework**: Spring Boot **4.0.1**, Spring WebFlux(Netty) — `board-service`
-- **동시성**: Kotlin Coroutines(`suspend`/`Flow`), `kotlinx-coroutines-reactor`(Mono/Flux ↔ 코루틴 브리지)
-- **DB(정본)**: Spring Data R2DBC + `CoroutineCrudRepository`, PostgreSQL — **JDBC는 어디에도 없음**(전 구간 논블로킹)
+- **Language / Runtime**: Kotlin, **JDK 25 LTS**
+- **Framework**: Spring Boot **4.0.1**, Spring **MVC(Tomcat) + 가상 스레드**(`spring.threads.virtual.enabled=true`) — `board-service`
+- **동시성**: 요청 처리는 **가상 스레드 위 블로킹** I/O. Kotlin Coroutines는 대용량 아카이브 배치의 구조적 동시성(바운드 Channel 팬아웃)에만 사용
+- **DB(정본)**: Spring Data **JPA(Hibernate)** + **Kotlin JDSL**(코드젠 없는 타입세이프 쿼리), PostgreSQL. 스키마는 **Flyway**로 버전 관리
 - **메시징**: **Apache Kafka**(KRaft) — Transactional Outbox로 `board-changed` 토픽 발행/소비
 - **검색**: Elasticsearch **9.2.x** + Nori(한글 형태소). Spring Boot 4의 ES 클라이언트가 9.x라 **서버도 9.x**여야 합니다(ES 8 프로토콜 비호환)
 - **캐시/카운터**: Reactive Redis(Lettuce) — 조회수 write-back 버퍼
@@ -54,6 +54,30 @@
 - **빌드/품질**: Gradle 멀티모듈, ktlint, Kover(라인 ≥ 92%), **Konsist**(아키텍처 규칙을 테스트로 강제)
 - **테스트**: Kotest, MockK, WebTestClient, **Testcontainers**(PostgreSQL/Redis/Elasticsearch), **`@EmbeddedKafka`**(인-JVM 브로커)
 - **CI**: GitHub Actions(모든 브랜치 push + main PR)
+
+---
+
+## 🔁 스택 전환 근거 (WebFlux/R2DBC → MVC + 가상 스레드 + JPA)
+
+> 이 프로젝트는 원래 **WebFlux + 코루틴 + R2DBC** 풀 리액티브 스택이었습니다. 이를 **JDK 25 LTS + Spring MVC + 가상 스레드 + JPA(Kotlin JDSL) + Flyway** 로 옮겼습니다. "리액티브가 대세라더라"를 좇지 않고, **실제로 무엇이 이득이고 무엇이 비용인지**를 비교한 뒤 내린 결정입니다.
+
+**왜 리액티브를 걷어냈나 (비용의 재평가)**
+- **리액티브의 본래 값어치는 "적은 스레드로 높은 동시성"** 입니다. 하지만 그 대가로 스택트레이스가 끊기고(디버깅 난이도↑), 라이브러리가 리액티브 체인에 오염되며, `ThreadLocal`(MDC/트랜잭션/시큐리티 컨텍스트) 전파가 까다롭습니다.
+- **R2DBC 생태계 미성숙**: JPA/Hibernate가 20년간 다져온 것(연관관계·더티체킹·2차 캐시·풍부한 쿼리 도구)이 R2DBC엔 없습니다. 실무에서 R2DBC는 여전히 "특수 상황용"이고, 대다수 서비스의 기본값은 JPA입니다.
+- 게시판 CRUD 같은 **일반 트래픽 서비스**에서 리액티브의 이점은 대부분 과잉이며, 팀이 치르는 복잡도 비용이 더 큽니다.
+
+**왜 지금은 "가상 스레드 + 블로킹"이 맞나 (JDK 25 LTS의 결정타)**
+- **가상 스레드(Virtual Threads, JEP 444, JDK 21 GA)** 는 요청마다 값싼 가상 스레드를 배정합니다. 블로킹 I/O(JPA/Redis/ES) 동안 가상 스레드는 캐리어(플랫폼) 스레드를 **양보(unmount)** 하므로, **평범한 블로킹 코드가 리액티브에 준하는 확장성**을 냅니다 — 리액티브의 복잡도 없이.
+- **JDK 24의 JEP 491(가상 스레드 피닝 해결)** 이 결정적입니다. 기존엔 `synchronized` 블록 안에서 블로킹하면 가상 스레드가 캐리어에 **고정(pinning)** 돼 확장성이 무너졌는데(그래서 라이브러리 전반을 `ReentrantLock`으로 바꿔야 했음), JDK 24에서 이 제약이 제거됐고 **JDK 25 LTS로 안정화**됐습니다. 즉 커넥션 풀·드라이버·로깅 등 `synchronized`가 깔린 기존 블로킹 생태계를 **그대로** 가상 스레드 위에 올려도 피닝 없이 확장됩니다. 이 한 조각 때문에 "블로킹 스택 + 가상 스레드"가 비로소 실무 기본값으로 올라섰습니다.
+- **디버깅·관측 편의**: 스택트레이스가 온전하고, `ThreadLocal` 기반 MDC/트랜잭션/`SecurityContextHolder`가 그대로 동작합니다. 장애 분석·프로파일링이 리액티브보다 훨씬 쉽습니다.
+
+**전환에서 지킨 것 / 바꾼 것**
+- **도메인·유즈케이스(비즈니스 규칙)는 불변** — 포트-어댑터 경계 덕분에 바뀐 건 어댑터와 포트 시그니처(`suspend`/`Flow` → 블로킹 `fun`/`List`)뿐입니다.
+- **코루틴은 버리지 않고 제자리로** — I/O 동시성용으로 전 계층에 흩뿌리는 대신, **진짜 구조적 동시성이 필요한 아카이브 배치**(생산자 1 + 워커 N, 바운드 `Channel` 백프레셔)에만 남겼습니다. "코루틴이 대세라 다 쓴다"가 아니라 "값을 내는 곳에만 쓴다".
+- **조회는 Kotlin JDSL** — QueryDSL의 kapt 코드젠(느린 빌드·Kotlin 연동 마찰) 대신 순수 Kotlin DSL로 타입세이프 동적 쿼리(키셋 페이지네이션·stale 스캔). 단순 조회는 Spring Data 파생 쿼리, unnest 배치 UPDATE·아웃박스는 네이티브 SQL(JdbcTemplate)로 — **도구를 목적에 맞게** 씁니다.
+- **Flyway 도입** — R2DBC 시절 `CREATE TABLE IF NOT EXISTS` 방식 초기화를 **버전 관리 마이그레이션**(`V1__init.sql`, `flyway_schema_history`)으로 교체해 스키마 진화·롤백 이력을 확보했습니다.
+
+> 요약: **"리액티브가 빠르다더라"를 그대로 믿지 않고**, JDK 25 LTS에서 피닝이 해결된 가상 스레드가 "블로킹의 단순함 + 리액티브급 확장성"을 동시에 준다는 점을 근거로 스택을 되돌렸습니다. 아키텍처(헥사고날)가 이 교체를 **도메인 변경 0줄**로 흡수했다는 것이 이 저장소가 증명하려는 핵심입니다.
 
 ---
 

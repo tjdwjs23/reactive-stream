@@ -1,7 +1,6 @@
 package demo.board.adapter.`in`.batch
 
 import demo.board.application.port.`in`.RelayOutboxUseCase
-import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
@@ -22,8 +21,9 @@ class OutboxRelayScheduler(
     // fixedDelay: 이전 사이클이 끝난 뒤 간격을 둡니다(중첩 실행 방지). 기본 1초.
     @Scheduled(fixedDelayString = "\${board.outbox.relay.poll-interval-ms:1000}")
     fun run() {
-        // @Scheduled는 suspend를 직접 호출할 수 없어 스케줄러 스레드를 runBlocking으로 코루틴 세계에 잇습니다.
-        val result = runBlocking { relayOutboxUseCase.relay() }
+        // 릴레이는 순차 발행이라 블로킹으로 직접 호출합니다(코루틴 불필요). 스케줄러 스레드는 가상 스레드가 아니지만
+        // 폴링 1건이라 부담이 없고, 발행 자체는 짧습니다.
+        val result = relayOutboxUseCase.relay()
         if (result.published > 0) {
             log.info("outbox relay published {} event(s)", result.published)
         }

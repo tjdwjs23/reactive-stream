@@ -27,7 +27,7 @@ class AuthController(
 ) {
     @Operation(summary = "회원가입", description = "username/password(8자 이상)로 사용자를 만들고 201 + 생성된 id를 반환합니다.")
     @PostMapping("/signup")
-    suspend fun signUp(
+    fun signUp(
         @RequestBody request: SignUpRequest,
     ): ResponseEntity<SuccessResponse<SignUpResponse>> {
         val id = signUpUseCase.signUp(SignUpCommand(username = request.username, password = request.password))
@@ -39,7 +39,7 @@ class AuthController(
         description = "자격 증명을 검증하고 액세스 토큰(JWT) + 리프레시 토큰을 발급합니다. 실패 시 401, 반복 실패 시 429.",
     )
     @PostMapping("/login")
-    suspend fun login(
+    fun login(
         @RequestBody request: LoginRequest,
     ): ResponseEntity<SuccessResponse<TokenResponse>> {
         val tokens = loginUseCase.login(LoginCommand(username = request.username, password = request.password))
@@ -51,7 +51,7 @@ class AuthController(
         description = "리프레시 토큰으로 새 액세스+리프레시 토큰을 발급합니다(회전). 무효/만료/재사용 시 401.",
     )
     @PostMapping("/refresh")
-    suspend fun refresh(
+    fun refresh(
         @RequestBody request: RefreshRequest,
     ): ResponseEntity<SuccessResponse<TokenResponse>> {
         val tokens = refreshTokenUseCase.refresh(RefreshCommand(refreshToken = request.refreshToken))

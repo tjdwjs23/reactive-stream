@@ -9,8 +9,6 @@ import demo.board.support.NoOpObservabilityPort
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
 import java.time.LocalDateTime
 import java.util.Collections
 
@@ -23,19 +21,19 @@ private class FakeBoardRepositoryPort(
     override fun findPage(
         cursor: Long?,
         limit: Int,
-    ): Flow<Board> {
+    ): List<Board> {
         val ordered = boards.sortedByDescending { it.id!! }
         val afterCursor = if (cursor == null) ordered else ordered.filter { it.id!! < cursor }
-        return afterCursor.take(limit).asFlow()
+        return afterCursor.take(limit)
     }
 
-    override suspend fun save(board: Board): Board = throw UnsupportedOperationException("not needed")
+    override fun save(board: Board): Board = throw UnsupportedOperationException("not needed")
 
-    override suspend fun findById(id: Long): Board? = throw UnsupportedOperationException("not needed")
+    override fun findById(id: Long): Board? = throw UnsupportedOperationException("not needed")
 
-    override suspend fun deleteById(id: Long) = throw UnsupportedOperationException("not needed")
+    override fun deleteById(id: Long) = throw UnsupportedOperationException("not needed")
 
-    override suspend fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> =
+    override fun addViewCountsBatch(deltas: Map<Long, Long>): List<Board> =
         throw UnsupportedOperationException("not needed")
 }
 
@@ -55,7 +53,7 @@ private class FakeBoardSearchPort(
     @Volatile
     var lastPruneKeepIds: Set<Long>? = null
 
-    override suspend fun indexAll(boards: List<Board>): Int {
+    override fun indexAll(boards: List<Board>): Int {
         if (failOnId != null && boards.any { it.id == failOnId }) {
             throw IllegalStateException("forced bulk failure on page containing id=$failOnId")
         }
@@ -67,7 +65,7 @@ private class FakeBoardSearchPort(
     }
 
     // 실제 어댑터와 동일한 계약: 정본에 없고(id ∉ keepIds) max(keepIds) 이하인 문서만 삭제.
-    override suspend fun pruneExcept(keepIds: Set<Long>): Int {
+    override fun pruneExcept(keepIds: Set<Long>): Int {
         lastPruneKeepIds = keepIds
         val maxKeep = keepIds.maxOrNull()
         val orphans = esDocIds.filter { it !in keepIds && (maxKeep == null || it <= maxKeep) }
@@ -78,7 +76,7 @@ private class FakeBoardSearchPort(
     override fun search(
         keyword: String,
         size: Int,
-    ): Flow<BoardSearchHit> = searchResult.asFlow()
+    ): List<BoardSearchHit> = searchResult
 }
 
 private fun board(id: Long) = Board(id = id, title = "t$id", content = "c$id 내용입니다.", createdAt = LocalDateTime.now())

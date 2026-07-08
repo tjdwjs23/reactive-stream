@@ -6,6 +6,7 @@ import demo.board.application.port.`in`.ArchiveStaleBoardsUseCase
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
+import kotlinx.coroutines.runBlocking
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -30,9 +31,12 @@ class AdminBoardArchiveController(
                 "반환합니다. 삭제는 되돌릴 수 없으므로 retentionDays는 필수이며(실수로 대량 삭제 방지), chunkSize/concurrency로 " +
                 "처리량을 조절합니다. ROLE_ADMIN 권한(Bearer 토큰)이 필요합니다.",
     )
+    // 아카이브 유즈케이스는 내부적으로 코루틴(Channel 팬아웃)을 쓰는 유일한 경로라 suspend입니다.
+    // MVC 핸들러(블로킹)에서 그 suspend를 runBlocking으로 브리지합니다(코루틴 경계를 어댑터 안에 가둠 —
+    // 스케줄러 StaleBoardArchivingScheduler와 동일한 방식).
     @SecurityRequirement(name = "bearer-jwt")
     @PostMapping("/archive")
-    suspend fun archive(
+    fun archive(
         @RequestBody request: ArchiveBoardsRequest,
     ): ResponseEntity<SuccessResponse<ArchiveResult>> {
         // chunkSize/concurrency의 기본값은 커맨드(ArchiveStaleBoardsCommand)를 단일 출처로 삼고,
@@ -45,7 +49,7 @@ class AdminBoardArchiveController(
                 chunkSize = request.chunkSize ?: defaults.chunkSize,
                 concurrency = request.concurrency ?: defaults.concurrency,
             )
-        return SuccessResponse.ok(archiveStaleBoardsUseCase.archiveStaleBoards(command))
+        return SuccessResponse.ok(runBlocking { archiveStaleBoardsUseCase.archiveStaleBoards(command) })
     }
 }
 

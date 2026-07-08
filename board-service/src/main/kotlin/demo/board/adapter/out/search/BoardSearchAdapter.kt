@@ -8,50 +8,41 @@ import demo.board.config.ResilienceConfig
 import demo.board.domain.model.Board
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry
-import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.count
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.reactive.asFlow
-import kotlinx.coroutines.reactive.awaitFirstOrNull
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.elasticsearch.client.elc.NativeQuery
-import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations
 import org.springframework.data.elasticsearch.core.query.HighlightQuery
 import org.springframework.data.elasticsearch.core.query.highlight.Highlight
 import org.springframework.data.elasticsearch.core.query.highlight.HighlightField
 import org.springframework.data.elasticsearch.core.query.highlight.HighlightParameters
 import org.springframework.stereotype.Component
 
-// BoardSearchPort의 Elasticsearch 구현체. ReactiveElasticsearchOperations로 논블로킹 색인/검색을 합니다.
+// BoardSearchPort의 Elasticsearch 구현체. MVC 스택이라 블로킹 ElasticsearchOperations로 색인/검색을 합니다.
 // 서비스는 이 클래스를 모르고 BoardSearchPort 인터페이스에만 의존합니다(포트-어댑터 경계).
 @Component
 class BoardSearchAdapter(
-    private val operations: ReactiveElasticsearchOperations,
+    private val operations: ElasticsearchOperations,
     private val boardDocumentMapper: BoardDocumentMapper,
     circuitBreakerRegistry: CircuitBreakerRegistry,
 ) : BoardSearchPort {
-    // 검색(공개 read path)에 서킷브레이커를 겁니다. ES가 반복 실패/지연하면 서킷이 열려 검색이 즉시 실패하고,
-    // 요청이 ES 타임아웃만큼 매달리지 않습니다. 벌크 색인(indexAll)은 관리 재색인 경로라 대상에서 제외합니다.
+    // 검색(공개 read path)에 서킷브레이커를 겁니다. ES가 반복 실패/지연하면 서킷이 열려 검색이 즉시 실패하고
+    // (CallNotPermittedException), 요청이 ES 타임아웃만큼 매달리지 않습니다. 벌크 색인(indexAll)은 관리 재색인
+    // 경로라 대상에서 제외합니다.
     private val breaker: CircuitBreaker = circuitBreakerRegistry.circuitBreaker(ResilienceConfig.ELASTICSEARCH_SEARCH)
 
-    // 벌크 upsert: saveAll로 한 번에 색인해 건별 왕복을 줄입니다. 반환값은 색인된 문서 수.
-    override suspend fun indexAll(boards: List<Board>): Int {
+    // 벌크 upsert: save(Iterable)로 한 번에 색인해 건별 왕복을 줄입니다. 반환값은 색인된 문서 수.
+    override fun indexAll(boards: List<Board>): Int {
         if (boards.isEmpty()) return 0
         val documents = boards.map { boardDocumentMapper.toDocument(it) }
-        return operations
-            .saveAll(documents, BoardDocument::class.java)
-            .asFlow()
-            .count()
+        operations.save(documents)
+        return documents.size
     }
 
     // 고아 문서 정리: 전체 문서를 createdAt 오름차순 + search_after로 순회하며, 정본(DB)에 없는 문서(id ∉ keepIds)를
     // 삭제합니다. _id 필드는 기본적으로 fielddata 정렬이 금지돼 정렬 키로 쓸 수 없으므로, 모든 문서에 항상 존재하는
-    // createdAt(date, doc_values)로 정렬합니다. createdAt은 유일하지 않아 이론상 동일 시각이 페이지 경계에 걸치면
-    // 소수가 누락될 수 있으나(다음 재색인이 수거), 대량에서도 일정 메모리로 도는 안전한(끝에서 정리) 방식입니다.
-    // 재색인 도중 생성돼 아직 keepIds에 없는 문서를 지우지 않도록 max(keepIds) 이하만 삭제합니다.
-    override suspend fun pruneExcept(keepIds: Set<Long>): Int {
+    // createdAt(date, doc_values)로 정렬합니다. 재색인 도중 생성돼 아직 keepIds에 없는 문서를 지우지 않도록
+    // max(keepIds) 이하만 삭제합니다(keepIds가 비면 정본이 비었다는 뜻이라 전체 삭제).
+    override fun pruneExcept(keepIds: Set<Long>): Int {
         val maxKeep = keepIds.maxOrNull()
         var searchAfter: List<Any>? = null
         var pruned = 0
@@ -64,18 +55,14 @@ class BoardSearchAdapter(
                     .withPageable(PageRequest.of(0, PRUNE_PAGE_SIZE))
             searchAfter?.let { builder.withSearchAfter(it) }
 
-            val hits =
-                operations
-                    .search(builder.build(), BoardDocument::class.java)
-                    .asFlow()
-                    .toList()
+            val hits = operations.search(builder.build(), BoardDocument::class.java).searchHits
             if (hits.isEmpty()) break
 
             val orphanIds =
                 hits
                     .map { it.content.id.toLong() }
                     .filter { it !in keepIds && (maxKeep == null || it <= maxKeep) }
-            orphanIds.forEach { operations.delete(it.toString(), BoardDocument::class.java).awaitFirstOrNull() }
+            orphanIds.forEach { operations.delete(it.toString(), BoardDocument::class.java) }
             pruned += orphanIds.size
 
             searchAfter = hits.last().sortValues
@@ -89,7 +76,7 @@ class BoardSearchAdapter(
     override fun search(
         keyword: String,
         size: Int,
-    ): Flow<BoardSearchHit> {
+    ): List<BoardSearchHit> {
         val query =
             Query.of { q ->
                 q.multiMatch { m ->
@@ -118,19 +105,16 @@ class BoardSearchAdapter(
                 .withHighlightQuery(HighlightQuery(highlight, BoardDocument::class.java))
                 .build()
 
-        return operations
-            .search(nativeQuery, BoardDocument::class.java)
-            // 서킷이 열려 있으면 여기서 CallNotPermittedException으로 즉시 실패합니다(ES 왕복 없이).
-            .transformDeferred(CircuitBreakerOperator.of(breaker))
-            .asFlow()
-            .map { hit ->
-                BoardSearchHit(
-                    board = boardDocumentMapper.toDomain(hit.content),
-                    score = hit.score.toDouble(),
-                    highlightedTitle = hit.getHighlightField("title").firstOrNull(),
-                    highlightedContent = hit.getHighlightField("content").firstOrNull(),
-                )
-            }
+        // 서킷이 열려 있으면 여기서 CallNotPermittedException으로 즉시 실패합니다(ES 왕복 없이).
+        val hits = breaker.executeSupplier { operations.search(nativeQuery, BoardDocument::class.java).searchHits }
+        return hits.map { hit ->
+            BoardSearchHit(
+                board = boardDocumentMapper.toDomain(hit.content),
+                score = hit.score.toDouble(),
+                highlightedTitle = hit.getHighlightField("title").firstOrNull(),
+                highlightedContent = hit.getHighlightField("content").firstOrNull(),
+            )
+        }
     }
 
     private companion object {

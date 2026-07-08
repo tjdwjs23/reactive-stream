@@ -13,8 +13,6 @@ import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
 import java.time.Clock
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -24,11 +22,11 @@ import java.util.Collections
 private class RecordingOutboxPort : BoardEventOutboxPort {
     val events: MutableList<BoardChangedEvent> = Collections.synchronizedList(mutableListOf())
 
-    override suspend fun record(event: BoardChangedEvent) {
+    override fun record(event: BoardChangedEvent) {
         events.add(event)
     }
 
-    override suspend fun recordAll(events: List<BoardChangedEvent>) {
+    override fun recordAll(events: List<BoardChangedEvent>) {
         this.events.addAll(events)
     }
 }
@@ -36,7 +34,7 @@ private class RecordingOutboxPort : BoardEventOutboxPort {
 // 트랜잭션 경계를 그대로 통과시키는 러너(단위 테스트용). 실제 원자성은 통합 테스트에서 검증합니다.
 private val passThroughRunner =
     object : TransactionRunnerPort {
-        override suspend fun <T> execute(block: suspend () -> T): T = block()
+        override fun <T> execute(block: () -> T): T = block()
     }
 
 // 실제 DB 대신 인메모리 페이크 out-port. 스트리밍/청크/내결함성 흐름을 결정적으로 검증합니다.
@@ -48,14 +46,15 @@ private class FakeBoardBatchQueryPort(
     // 여러 워커가 동시에 기록하므로 thread-safe 리스트 사용
     val deletedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
-    // 페이크는 일부러 "필터 없이 전부" 돌려줍니다.
+    // 페이크는 before 필터를 일부러 무시하고 "id 키셋 순서로 전부" 페이지네이션해 돌려줍니다.
     // → 삭제 대상 확정은 서비스가 Board.isStale로 다시 한다는 점(도메인 규칙 권위)을 검증하기 위함.
-    override fun findStaleBoards(
+    override fun findStalePage(
         before: LocalDateTime,
+        lastId: Long,
         pageSize: Int,
-    ): Flow<Board> = data.asFlow()
+    ): List<Board> = data.filter { (it.id ?: 0L) > lastId }.sortedBy { it.id }.take(pageSize)
 
-    override suspend fun deleteByIds(ids: List<Long>): Int {
+    override fun deleteByIds(ids: List<Long>): Int {
         if (failAll || (failOnId != null && ids.contains(failOnId))) {
             throw IllegalStateException("forced failure on chunk (ids=$ids)")
         }
