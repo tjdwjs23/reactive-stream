@@ -47,9 +47,9 @@ class FlushBoardViewCountsService(
     // 이벤트 발생 시각 주입용 시계(도메인/서비스가 벽시계를 직접 읽지 않음 — BoardService와 동일 원칙, 테스트에서 고정 가능).
     private val clock: Clock,
     // 한 UPDATE에 묶을 게시글 수. 클수록 왕복↓(하지만 실패 시 재시도 단위↑·문장당 바인딩↑).
-    @Value("\${board.view-count.flush-chunk-size:1000}") private val chunkSize: Int,
+    @Value("\${search.view-count.flush-chunk-size:1000}") private val chunkSize: Int,
     // 플러시 락 TTL(ms). 홀더가 락을 쥔 채 죽어도 이 시간 뒤 자동 해제됩니다. 최대 플러시 소요보다 넉넉히 잡습니다.
-    @Value("\${board.view-count.flush-lock-ttl-ms:300000}") private val lockTtlMs: Long,
+    @Value("\${search.view-count.flush-lock-ttl-ms:300000}") private val lockTtlMs: Long,
 ) : FlushBoardViewCountsUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 

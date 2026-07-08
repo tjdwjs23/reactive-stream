@@ -80,9 +80,9 @@ board:views:pending   (Redis Hash)
 ### commit-then-delete = 유실 대신 재시도(at-least-once)
 DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 draining이 남아 다음 플러시가 재시도합니다. 최악의 경우 중복 계수(약간 더 셈)일 뿐, **유실은 없습니다**.
 
-> 튜닝: `board.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
+> 튜닝: `search.view-count.*` (flush-interval-ms, flush-chunk-size, flush-enabled). 다중 인스턴스는 `DistributedLockPort`로 "클러스터 전역에서 한 번만" 플러시하도록 직렬화합니다.
 
-**관련 파일** (`search-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/search/`):
 `application/service/BoardService.getBoard`, `adapter/out/redis/BoardViewCountRedisAdapter`, `application/service/FlushBoardViewCountsService`, `adapter/in/batch/BoardViewCountFlushScheduler`, `adapter/out/persistence/BoardPersistenceAdapter.addViewCountsBatch`.
 
 ---
@@ -121,9 +121,9 @@ DB 반영에 **성공한 청크만** 삭제합니다. 반영 도중 죽으면 dr
 - 청크마다 `deleteByIds`로 짧게 커밋.
 - 한 청크가 실패해도 `try/catch`로 건너뛰고 계속(`failedChunks++`, skip-and-continue). **전체가 실패**하면 `IllegalStateException`으로 신호(스케줄러가 성공으로 착각하지 않게). 상위 취소(`CancellationException`)는 삼키지 않고 재전파.
 
-> 튜닝: `board.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
+> 튜닝: `search.archiving.*` (enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 실행은 `POST /api/admin/boards/archive`.
 
-**관련 파일** (`search-service/src/main/kotlin/demo/board/`):
+**관련 파일** (`search-service/src/main/kotlin/demo/search/`):
 `application/service/ArchiveStaleBoardsService`, `adapter/out/persistence/BoardBatchPersistenceAdapter`(findStalePage, deleteByIds — Kotlin JDSL/JPA), `domain/model/Board.isStale`, `adapter/in/batch/StaleBoardArchivingScheduler`.
 
 ---

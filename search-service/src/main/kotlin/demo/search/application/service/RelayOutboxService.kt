@@ -24,7 +24,7 @@ class RelayOutboxService(
     private val eventPublisherPort: EventPublisherPort,
     // 미발행 백로그를 사이클마다 게이지로 보고합니다(board.outbox.unpublished). 릴레이가 밀리는지 관측하는 핵심 SLI.
     private val observability: ObservabilityPort,
-    @Value("\${board.outbox.relay.batch-size:100}") private val batchSize: Int = 100,
+    @Value("\${search.outbox.relay.batch-size:100}") private val batchSize: Int = 100,
 ) : RelayOutboxUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 

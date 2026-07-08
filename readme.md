@@ -179,7 +179,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **왜 아웃박스인가**: "DB 저장 후 곧바로 Kafka 발행"은 두 자원에 걸친 이중쓰기라, 저장은 됐는데 발행 직전에 죽으면 이벤트가 **유실**됩니다. Transactional Outbox는 이벤트를 **게시글과 같은 DB 트랜잭션**으로 기록해 유실을 없애고, 발행은 릴레이가 별도로 재시도합니다. `BoardService`의 "no `@Transactional`" 원칙에서 이 쓰기 경로 하나만 트랜잭션을 쓰는 이유입니다(경계는 `TransactionRunnerPort` out-port로 추상화 — 서비스는 Spring 트랜잭션 기술을 모릅니다).
 - **순서 보존**: 릴레이는 미발행 이벤트를 `id` 오름차순으로 발행하다 **한 건이라도 실패하면 그 지점에서 멈춥니다**(뒤 이벤트를 앞지르지 않음). 다음 사이클이 실패 지점부터 재시도합니다. Kafka는 `key = boardId`로 파티셔닝돼 **같은 게시글의 이벤트 순서**를 보장합니다.
 - **at-least-once + 멱등**: 발행 후 `published` 표시 전에 죽으면 다음 사이클이 재발행합니다(유실 대신 중복). 소비자는 `_id = boardId` 기준 **upsert/삭제라 자연히 멱등**이고, 파티션 순서까지 있어 "마지막 이벤트가 이긴다"로 안전합니다(별도 `eventId` 중복 저장 불필요).
-- **운영 스위치**: 릴레이 스케줄러는 아카이브 배치처럼 `board.outbox.relay.enabled=true`일 때만 활성화됩니다(로컬/테스트는 꺼진 채 Kafka 없이 조용).
+- **운영 스위치**: 릴레이 스케줄러는 아카이브 배치처럼 `search.outbox.relay.enabled=true`일 때만 활성화됩니다(로컬/테스트는 꺼진 채 Kafka 없이 조용).
 - **정합성 회복(무중단 alias 재색인)**: 이벤트 유실·매핑 변경 시 `POST /api/boards/search/reindex`가 DB를 키셋 순회해 **새 버전 인덱스(`boards_v{n}`)에 전량 재구축한 뒤 `boards` alias를 원자적으로 스왑**합니다(스왑 전까지 검색은 옛 인덱스를 보므로 무중단). 색인 실패가 있으면 스왑하지 않고 새 인덱스를 폐기해 **자동 롤백**합니다(재구축이라 과거의 고아 prune이 불필요). 상품도 `POST /api/products/search/reindex`로 동일합니다.
 
 관련 파일: `board_outbox`(db/migration/V1__init.sql), `OutboxPersistenceAdapter`, `RelayOutboxService`, `OutboxRelayScheduler`, `KafkaEventPublisherAdapter`, `SpringTransactionRunner` / (consumer) `BoardChangedListener`, `BoardIndexService`, `ElasticsearchBoardIndexAdapter`.
@@ -234,7 +234,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 | `POST` | `/api/admin/boards/archive` | 오래된 게시글 즉시 아카이브 → 200 | ROLE_ADMIN |
 | `GET` | `/actuator/health` · `/actuator/metrics` · `/swagger-ui.html` · `/v3/api-docs` | 상태·메트릭·문서 | 공개 |
 
-> **인증/인가**: 로그인이 HS256 JWT를 발급하고(`NimbusJwtTokenAdapter`), 이후 요청은 `Authorization: Bearer <token>`. JWT의 `sub`=사용자 id는 생성 시 `author_id`로 기록되고 **수정/삭제 소유권 검사**의 기준이 됩니다 — 소유자(`Board.isOwnedBy`) 또는 관리자만 변경 가능, 그 외엔 **403 `BOARD_ACCESS_DENIED`**(IDOR 차단), 토큰 없으면 401. 인가 규칙은 도메인 + 서비스(`assertCanModify`, 관리자 우회)에 두고, 컨트롤러는 `AuthenticatedUserProvider`로 요청자 정보를 커맨드에 실어 넘깁니다. 비밀번호는 BCrypt, 사용자 영속화·해싱·토큰 발급은 각각 out-port로 분리돼 서비스는 Spring Security를 모릅니다. 로그인은 access JWT와 함께 **불투명 리프레시 토큰**을 발급하고(서버는 SHA-256 해시만 `refresh_tokens`에 저장), `POST /api/auth/refresh`가 **회전 + 재사용 감지**(폐기된 토큰 재제시 시 해당 사용자 전체 무효화)를 수행합니다. 로그인 **brute-force 방어**는 Redis 슬라이딩 윈도우 rate limiter로 username별 실패를 세어 임계치 초과 시 **429**로 차단합니다. SPA용 **CORS**는 `board.security.cors.allowed-origins`로 허용 오리진을 주입합니다.
+> **인증/인가**: 로그인이 HS256 JWT를 발급하고(`NimbusJwtTokenAdapter`), 이후 요청은 `Authorization: Bearer <token>`. JWT의 `sub`=사용자 id는 생성 시 `author_id`로 기록되고 **수정/삭제 소유권 검사**의 기준이 됩니다 — 소유자(`Board.isOwnedBy`) 또는 관리자만 변경 가능, 그 외엔 **403 `BOARD_ACCESS_DENIED`**(IDOR 차단), 토큰 없으면 401. 인가 규칙은 도메인 + 서비스(`assertCanModify`, 관리자 우회)에 두고, 컨트롤러는 `AuthenticatedUserProvider`로 요청자 정보를 커맨드에 실어 넘깁니다. 비밀번호는 BCrypt, 사용자 영속화·해싱·토큰 발급은 각각 out-port로 분리돼 서비스는 Spring Security를 모릅니다. 로그인은 access JWT와 함께 **불투명 리프레시 토큰**을 발급하고(서버는 SHA-256 해시만 `refresh_tokens`에 저장), `POST /api/auth/refresh`가 **회전 + 재사용 감지**(폐기된 토큰 재제시 시 해당 사용자 전체 무효화)를 수행합니다. 로그인 **brute-force 방어**는 Redis 슬라이딩 윈도우 rate limiter로 username별 실패를 세어 임계치 초과 시 **429**로 차단합니다. SPA용 **CORS**는 `search.security.cors.allowed-origins`로 허용 오리진을 주입합니다.
 
 > **응답 포맷**: 모든 응답은 `BaseResponse<T>{code, status, result}`. 예외는 `@RestControllerAdvice`(`GlobalExceptionHandler`)가 `ErrorCode`로 매핑합니다 — `BoardNotFoundException`→404, `BoardValidationException`/`IllegalArgumentException`→400, `BoardAccessDeniedException`→403, 그 외→500. 도메인은 `ErrorCode`를 모릅니다.
 
@@ -247,7 +247,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **백프레셔 + 동시성**: `coroutineScope` 안에서 바운드 `Channel`(용량 = concurrency)로 생산자 1 + 워커 N. 소비가 밀리면 압력이 DB 읽기까지 자동 전파됩니다.
 - **도메인이 최종 권위**: SQL 사전 필터 후에도 `Board.isStale()`로 다시 확인하고 삭제합니다.
 - **내결함성**: 청크별 커밋. 일부 청크 실패는 건너뛰고 `ArchiveResult.failedChunks`에 집계(skip-and-continue), **전체 실패**는 `IllegalStateException`으로 신호(스케줄러가 성공으로 오인하지 않도록). `CancellationException`은 재전파.
-- 튜닝: `board.archiving.*`(enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 트리거는 `POST /api/admin/boards/archive`.
+- 튜닝: `search.archiving.*`(enabled 기본 false, cron, retention-days, chunk-size, concurrency). 온디맨드 트리거는 `POST /api/admin/boards/archive`.
 
 > 이 서브시스템의 "왜"와 흐름을 그림·비유로 풀어 쓴 심화 설명은 [`info.md`](./info.md)에 있습니다.
 
@@ -259,7 +259,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **조회**: DB `findById` → Redis `HINCRBY board:views:pending {id} 1` → 응답 = DB 누적값 + 미반영 델타(실시간처럼).
 - **플러시**(`@Scheduled`): `RENAME pending → draining`으로 원자적 스냅샷을 뜨고, `UPDATE ... FROM unnest(:ids,:deltas)`로 청크 배치 반영, **commit-then-delete**(반영 성공분만 삭제)로 유실 없이 at-least-once. 다중 인스턴스는 `DistributedLockPort`(Redis SET NX + Lua CAS)로 직렬화.
 - **우아한 강등**: Redis가 느리거나 죽으면 `withTimeout` 예산 초과 시 델타 0으로 강등해 DB 값으로 200 응답(조회 자체는 실패하지 않음).
-- 튜닝: `board.view-count.*`. 온디맨드 플러시는 `POST /api/admin/view-counts/flush`.
+- 튜닝: `search.view-count.*`. 온디맨드 플러시는 `POST /api/admin/view-counts/flush`.
 
 > 심화 설명(포스트잇/회계장부 비유, RENAME 스냅샷의 이유 등)은 [`info.md`](./info.md).
 
@@ -289,7 +289,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 - **비즈니스 메트릭**: `ObservabilityPort` out-port로 도메인 사건을 기록(`board_create_total`, `board_view_total`, `board_search_total` 등) — 서비스는 Micrometer를 모릅니다.
 - 테스트 프로필에선 OTLP export를 모두 끕니다(Alloy 없이도 조용히 통과).
 
-> 이벤트 파이프라인 관측성(구현됨): search-indexer는 **DLQ**(`board-changed-dlq`, `DefaultErrorHandler`+`DeadLetterPublishingRecoverer`)로 포이즌 메시지를 격리하고, **컨슈머 랙**(`kafka.consumer.*`)과 **아웃박스 미발행 백로그 게이지**(`board.outbox.unpublished`)를 노출하며 Grafana "이벤트 파이프라인" 행에 관련 패널이 있습니다. 외부 자원 장애는 서킷브레이커로 빠르게 실패시킵니다.
+> 이벤트 파이프라인 관측성(구현됨): search-indexer는 **DLQ**(`board-changed-dlq`, `DefaultErrorHandler`+`DeadLetterPublishingRecoverer`)로 포이즌 메시지를 격리하고, **컨슈머 랙**(`kafka.consumer.*`)과 **아웃박스 미발행 백로그 게이지**(`search.outbox.unpublished`)를 노출하며 Grafana "이벤트 파이프라인" 행에 관련 패널이 있습니다. 외부 자원 장애는 서킷브레이커로 빠르게 실패시킵니다.
 > 알려진 한계: HTTP 요청 → 아웃박스 기록 트레이스와 릴레이 폴링 → 발행 트레이스는 여전히 별도입니다(요청 컨텍스트를 아웃박스 행에 저장해 발행 시 복원하면 request→index까지 이을 수 있음 — 후속 과제).
 
 ---

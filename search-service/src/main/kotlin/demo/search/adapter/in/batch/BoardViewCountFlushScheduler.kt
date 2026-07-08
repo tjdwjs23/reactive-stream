@@ -15,7 +15,7 @@ class BoardViewCountFlushScheduler(
     private val log = LoggerFactory.getLogger(javaClass)
 
     // 고정 지연 주기로 실행합니다. 플러시는 블로킹이라 직접 호출합니다(클러스터 전역 직렬화는 서비스의 분산 락이 담당).
-    @Scheduled(fixedDelayString = "\${board.view-count.flush-interval-ms:30000}")
+    @Scheduled(fixedDelayString = "\${search.view-count.flush-interval-ms:30000}")
     fun run() {
         if (!properties.flushEnabled) return
         val result = flushUseCase.flush()

@@ -13,7 +13,7 @@
 #   docker compose down -v               # 볼륨까지 삭제(완전 초기화 — DB/ES/Kafka 리셋)
 #
 # 접속:
-#   PostgreSQL     localhost:5432        (db/user=board, pw=board1234)  ← application.yml 기본값과 일치
+#   PostgreSQL     localhost:5432        (db/user=search, pw=search1234)  ← application.yml 기본값과 일치
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200 (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
 #   Kafka          localhost:9092        (KRaft 단일 노드, 토픽 자동생성 on → board-changed[-dlq] 자동)
@@ -33,15 +33,15 @@ services:
     image: postgres:16
     container_name: search-postgres
     environment:
-      POSTGRES_DB: board
-      POSTGRES_USER: board
-      POSTGRES_PASSWORD: board1234
+      POSTGRES_DB: search
+      POSTGRES_USER: search
+      POSTGRES_PASSWORD: search1234
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U board -d board"]
+      test: ["CMD-SHELL", "pg_isready -U search -d search"]
       interval: 5s
       timeout: 3s
       retries: 5

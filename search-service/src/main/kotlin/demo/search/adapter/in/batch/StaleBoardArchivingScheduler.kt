@@ -17,7 +17,7 @@ class StaleBoardArchivingScheduler(
     private val log = LoggerFactory.getLogger(javaClass)
 
     // 프로퍼티 미설정 시에도 컨텍스트가 뜨도록 기본 cron을 둡니다(테스트/로컬 안전장치).
-    @Scheduled(cron = "\${board.archiving.cron:0 0 4 * * *}")
+    @Scheduled(cron = "\${search.archiving.cron:0 0 4 * * *}")
     fun run() {
         if (!properties.enabled) {
             log.debug("Stale board archiving is disabled. Skip.")

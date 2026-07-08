@@ -21,9 +21,9 @@ spring:
   # 접속 정보는 환경변수로 외부화합니다(운영은 Vault/K8s Secret로 주입, 로컬은 아래 기본값 사용).
   # 비밀번호를 소스에 평문으로 커밋하지 않기 위해 ${ENV:default} 형태를 씁니다.
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/board}
-    username: ${SPRING_DATASOURCE_USERNAME:board}
-    password: ${SPRING_DATASOURCE_PASSWORD:board1234}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/search}
+    username: ${SPRING_DATASOURCE_USERNAME:search}
+    password: ${SPRING_DATASOURCE_PASSWORD:search1234}
     driver-class-name: org.postgresql.Driver
     # HikariCP 풀. 대용량 쓰기/조회에서 풀 크기가 처리량 상한이 되므로 기본값(10)에 기대지 않고 외부화합니다.
     # connection-timeout은 "커넥션을 못 얻을 때 무한 대기"를 막는 회복탄력성 상한(풀 고갈 시 5초 뒤 실패)입니다.
@@ -142,28 +142,28 @@ management:
 
 # 오래된 게시글 일괄 아카이브 배치 설정
 
-board:
+search:
   # 인증/인가(자체 발급 JWT + 관리자 부트스트랩).
   security:
     jwt:
-      # HS256 서명용 대칭키(≥32byte). 비우면 개발용 고정 기본값 + 기동 경고. 운영은 반드시 BOARD_JWT_SECRET 주입.
-      secret: ${BOARD_JWT_SECRET:}
-      access-token-ttl-minutes: ${BOARD_JWT_TTL_MINUTES:60}
+      # HS256 서명용 대칭키(≥32byte). 비우면 개발용 고정 기본값 + 기동 경고. 운영은 반드시 SEARCH_JWT_SECRET 주입.
+      secret: ${SEARCH_JWT_SECRET:}
+      access-token-ttl-minutes: ${SEARCH_JWT_TTL_MINUTES:60}
     # 브라우저 클라이언트(SPA)의 교차 오리진 호출 허용 목록(쉼표 구분). 운영은 실제 프런트 도메인을 주입합니다.
     cors:
-      allowed-origins: ${BOARD_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+      allowed-origins: ${SEARCH_CORS_ALLOWED_ORIGINS:http://localhost:3000}
     # 로그인 brute-force 방어(Redis 슬라이딩 윈도우). username별 실패가 window 안에서 max-attempts를 넘으면 429로 차단.
     login:
-      max-attempts: ${BOARD_LOGIN_MAX_ATTEMPTS:5}
-      window-minutes: ${BOARD_LOGIN_WINDOW_MINUTES:15}
+      max-attempts: ${SEARCH_LOGIN_MAX_ATTEMPTS:5}
+      window-minutes: ${SEARCH_LOGIN_WINDOW_MINUTES:15}
     # Refresh Token(불투명 랜덤 + 회전). access가 만료돼도 이 토큰으로 재발급받습니다. 발급 시 회전+재사용 감지.
     refresh-token:
-      ttl-days: ${BOARD_REFRESH_TTL_DAYS:14}
+      ttl-days: ${SEARCH_REFRESH_TTL_DAYS:14}
     admin:
       # 기동 시 ROLE_ADMIN 계정을 부트스트랩합니다(가입 API는 ROLE_USER만 생성).
-      # password가 비어 있으면 부트스트랩을 건너뛰고 경고합니다. 운영은 BOARD_ADMIN_PASSWORD 주입.
-      username: ${BOARD_ADMIN_USERNAME:admin}
-      password: ${BOARD_ADMIN_PASSWORD:}
+      # password가 비어 있으면 부트스트랩을 건너뛰고 경고합니다. 운영은 SEARCH_ADMIN_PASSWORD 주입.
+      username: ${SEARCH_ADMIN_USERNAME:admin}
+      password: ${SEARCH_ADMIN_PASSWORD:}
 
   archiving:
     enabled: false            # 운영에서 켤 때만 true
@@ -183,8 +183,8 @@ board:
   # 아카이브 배치처럼 기본 OFF(opt-in) — enabled=true일 때만 스케줄러 빈이 등록됩니다(테스트/로컬은 Kafka 없이 조용).
   outbox:
     relay:
-      enabled: ${BOARD_OUTBOX_RELAY_ENABLED:false}
+      enabled: ${SEARCH_OUTBOX_RELAY_ENABLED:false}
       # 폴링 주기(ms). 짧을수록 지연↓·처리량↑(단 빈 폴링 부하↑). 대용량 쓰기에서 백로그 축적을 줄이려 200ms로.
-      poll-interval-ms: ${BOARD_OUTBOX_RELAY_POLL_MS:200}
+      poll-interval-ms: ${SEARCH_OUTBOX_RELAY_POLL_MS:200}
       # 한 사이클에 읽어 발행할 최대 이벤트 수. 처리량 상한 = batch-size / poll-interval. 500/200ms = ~2500 events/s.
-      batch-size: ${BOARD_OUTBOX_RELAY_BATCH_SIZE:500}
+      batch-size: ${SEARCH_OUTBOX_RELAY_BATCH_SIZE:500}

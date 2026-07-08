@@ -16,8 +16,8 @@ import java.time.Duration
 @Repository
 class RedisLoginRateLimiterAdapter(
     private val redis: StringRedisTemplate,
-    @Value("\${board.security.login.max-attempts:5}") private val maxAttempts: Int,
-    @Value("\${board.security.login.window-minutes:15}") private val windowMinutes: Long,
+    @Value("\${search.security.login.max-attempts:5}") private val maxAttempts: Int,
+    @Value("\${search.security.login.window-minutes:15}") private val windowMinutes: Long,
 ) : LoginRateLimiterPort {
     override fun isBlocked(key: String): Boolean {
         val current = redis.opsForValue().get(redisKey(key))?.toIntOrNull() ?: 0

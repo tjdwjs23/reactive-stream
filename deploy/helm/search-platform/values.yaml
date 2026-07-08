@@ -5,7 +5,7 @@ image:
   pullPolicy: IfNotPresent
 
 # ── 애플리케이션 ──
-boardService:
+searchService:
   image: search-service:local
   replicas: 1
   port: 8080
@@ -27,9 +27,9 @@ searchIndexer:
 postgres:
   enabled: true
   image: postgres:16
-  db: board
-  user: board
-  password: board1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
+  db: search
+  user: search
+  password: search1234 # 로컬 전용. 운영은 절대 이렇게 두지 말 것
   # 영속성: PVC를 쓰면 파드 재시작·rollout restart·colima 재시작은 물론
   # helm uninstall(=down.sh 기본)에도 데이터가 유지됩니다.
   # (PVC에 helm.sh/resource-policy: keep 부여 — postgres.yaml. up.sh가 기존 PVC에 재연결)

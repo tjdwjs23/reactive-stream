@@ -43,7 +43,7 @@ class AuthService(
     private val loginRateLimiterPort: LoginRateLimiterPort,
     // 생성 시각 주입용 시계(도메인이 벽시계를 직접 읽지 않음 — Board 관례와 동일).
     private val clock: Clock,
-    @Value("\${board.security.refresh-token.ttl-days:14}") private val refreshTtlDays: Long,
+    @Value("\${search.security.refresh-token.ttl-days:14}") private val refreshTtlDays: Long,
 ) : SignUpUseCase,
     LoginUseCase,
     RefreshTokenUseCase {

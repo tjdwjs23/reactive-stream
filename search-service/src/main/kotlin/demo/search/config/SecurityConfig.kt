@@ -33,10 +33,10 @@ import javax.crypto.spec.SecretKeySpec
 @Configuration
 @EnableWebSecurity
 class SecurityConfig(
-    @Value("\${board.security.jwt.secret:}") private val configuredSecret: String,
+    @Value("\${search.security.jwt.secret:}") private val configuredSecret: String,
     // 허용 오리진(쉼표 구분). SPA 등 브라우저 클라이언트가 다른 오리진에서 API를 호출할 수 있게 CORS를 명시합니다.
     // 기본은 로컬 프런트(3000). 운영은 BOARD_CORS_ALLOWED_ORIGINS로 실제 도메인을 주입합니다.
-    @Value("\${board.security.cors.allowed-origins:http://localhost:3000}") private val allowedOrigins: String,
+    @Value("\${search.security.cors.allowed-origins:http://localhost:3000}") private val allowedOrigins: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 

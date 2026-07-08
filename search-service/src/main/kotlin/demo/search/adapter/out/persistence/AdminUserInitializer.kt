@@ -22,8 +22,8 @@ class AdminUserInitializer(
     private val userRepositoryPort: UserRepositoryPort,
     private val passwordEncoderPort: PasswordEncoderPort,
     private val clock: Clock,
-    @Value("\${board.security.admin.username:admin}") private val adminUsername: String,
-    @Value("\${board.security.admin.password:}") private val adminPassword: String,
+    @Value("\${search.security.admin.username:admin}") private val adminUsername: String,
+    @Value("\${search.security.admin.password:}") private val adminPassword: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 

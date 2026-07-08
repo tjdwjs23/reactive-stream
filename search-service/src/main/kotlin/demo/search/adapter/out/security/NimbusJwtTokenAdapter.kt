@@ -21,7 +21,7 @@ import java.time.Instant
 class NimbusJwtTokenAdapter(
     private val jwtEncoder: JwtEncoder,
     private val clock: Clock,
-    @Value("\${board.security.jwt.access-token-ttl-minutes:60}") private val ttlMinutes: Long,
+    @Value("\${search.security.jwt.access-token-ttl-minutes:60}") private val ttlMinutes: Long,
 ) : AuthTokenPort {
     override fun issue(user: User): AuthToken {
         val userId = user.id ?: error("영속화되지 않은 사용자(id가 null)에게는 토큰을 발급할 수 없습니다.")

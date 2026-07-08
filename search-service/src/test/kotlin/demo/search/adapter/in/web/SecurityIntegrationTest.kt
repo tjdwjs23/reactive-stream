@@ -267,7 +267,7 @@ class SecurityIntegrationTest(
         fun registerProperties(registry: DynamicPropertyRegistry) {
             TestContainers.registerAll(registry)
             // admin 부트스트랩 활성화(기동 시 ROLE_ADMIN 계정 생성).
-            registry.add("board.security.admin.password") { "admin-pass-123" }
+            registry.add("search.security.admin.password") { "admin-pass-123" }
         }
     }
 }
