@@ -5,18 +5,46 @@
 ```
 deploy/
 ├── up.sh                          ⭐ 한 번에 전체 기동(colima→kind→build&load→helm→대기). COLIMA_CPU/COLIMA_MEM로 자원 조절
-├── obs.sh                         관측성(LGTM)만 켜고/끄기 — `obs.sh on|off` (up.sh 재실행 없이 helm으로 토글)
-├── pf.sh                          search-service(Swagger)+Grafana+Postgres를 한 번에 port-forward
+├── obs.sh                         관측성(Alloy→Grafana Cloud)만 켜고/끄기 — `obs.sh on|off` (up.sh 재실행 없이 helm으로 토글)
+├── pf.sh                          search-service(Swagger)+Postgres를 한 번에 port-forward
 ├── down.sh                        정리(helm uninstall — 데이터/클러스터 유지, --all이면 kind 삭제+colima 정지)
 ├── build-and-load.sh              이미지 3종 빌드 + kind 주입
-├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081/3000 매핑)
-├── helm/search-platform/           Helm 차트 (앱 2 + 데이터스토어 4 + LGTM 5)
+├── kind/kind-config.yaml          단일 노드 kind 클러스터(호스트 8080/8081 매핑)
+├── helm/search-platform/           Helm 차트 (앱 2 + 데이터스토어 4 + 관측성 Alloy 1)
+├── grafana-cloud/dashboards/       Grafana Cloud에 import할 대시보드(hexagonal-app.json)
 └── README.md                      이 문서(런북)
 ```
 
 구성 요소: `search-service`, `search-indexer` + `PostgreSQL` · `Redis` · `Elasticsearch(Nori)` · `Kafka(KRaft)`.
-관측성 스택(LGTM: Alloy·Mimir·Loki·Tempo·Grafana)도 **이 차트에 포함**되며 `observability.enabled`로 켜고 끕니다(모든 인프라가 kind+Helm 경로인 여기에). 참고로 레포 루트의 `docker-compose.yml`은 **여전히 존재**하며, kind 없이 데이터스토어 4종(PostgreSQL/Redis/Elasticsearch/Kafka)만 host 포트에 띄워 앱을 host에서 직접 `bootRun`/디버그하는 가벼운 경로용입니다.
-기본은 off(로컬 리소스 절약): 앱 OTLP export가 꺼지고 LGTM 파드도 뜨지 않습니다.
+관측성은 **Alloy 1파드**(OTLP 수집기)만 클러스터에 두고 `observability.enabled`로 켜고 끕니다. Alloy는 metrics/logs/traces 3종을 **Grafana Cloud** OTLP 게이트웨이로 전달합니다(자체 호스팅 LGTM은 걷어냄). 참고로 레포 루트의 `docker-compose.yml`은 **여전히 존재**하며, kind 없이 데이터스토어 4종(PostgreSQL/Redis/Elasticsearch/Kafka)만 host 포트에 띄워 앱을 host에서 직접 `bootRun`/디버그하는 가벼운 경로용입니다.
+기본은 off(로컬 리소스 절약): 앱 OTLP export가 꺼지고 Alloy 파드도 뜨지 않습니다.
+
+### Grafana Cloud 자격증명
+Grafana Cloud 포털 → 스택 → **OpenTelemetry** 타일에서 OTLP 엔드포인트·Instance ID·API Token을 발급합니다. `observability.enabled=true`로 켤 때 주입하세요(토큰은 절대 커밋 금지):
+```bash
+export GRAFANA_CLOUD_OTLP_ENDPOINT="https://otlp-gateway-prod-<region>-0.grafana.net/otlp"
+export GRAFANA_CLOUD_INSTANCE_ID="<INSTANCE_ID>"
+export GRAFANA_CLOUD_API_TOKEN="<API_TOKEN>"   # up.sh --obs / obs.sh on 이 env를 읽어 helm --set으로 주입(Secret에 저장)
+```
+### 대시보드 import (Grafana Cloud)
+대시보드 정본: **`deploy/grafana-cloud/dashboards/hexagonal-app.json`** (예전 자체 호스팅 시절 대시보드를 그대로 옮겨둠).
+
+1. macOS면 파일 내용을 클립보드로: `pbcopy < deploy/grafana-cloud/dashboards/hexagonal-app.json`
+2. Grafana Cloud → **Dashboards → New → Import** → **"Import via dashboard JSON model"** 칸에 붙여넣기 → **Load**
+3. Load 화면에서 **데이터소스 3개를 스택 것으로 매핑**(안 하면 패널이 "datasource not found"로 빈다):
+
+   | 대시보드 안 uid | 매핑할 Grafana Cloud 데이터소스 | 패널 수 |
+   |---|---|---|
+   | `mimir` (Prometheus 타입) | 스택 **Metrics/Prometheus** DS (보통 `grafanacloud-<stack>-prom`) | 102 |
+   | `loki` | 스택 **Logs/Loki** DS (`grafanacloud-<stack>-logs`) | 2 |
+   | `tempo` | 스택 **Traces/Tempo** DS (`grafanacloud-<stack>-traces`) | 2 |
+
+   > 최신 Grafana는 Load 시 위 3개를 자동 감지해 드롭다운을 띄웁니다. 각각 지정 후 **Import**.
+
+- 상단 `$job` 드롭다운 = `service.name`(`search-service` / `search-indexer`)으로 필터.
+- 메트릭 이름은 Grafana Cloud가 OTLP→Prometheus 접미사(`_total`/`_seconds_bucket`)를 붙여줘 기존 쿼리(`board_search_total`, `http_server_requests_seconds_bucket` 등)가 그대로 맞습니다. 단 **컨슈머 랙 패널**(`kafka_consumer_*`)은 배포 환경 실측 메트릭명에 따라 안 뜰 수 있습니다(알려진 한계).
+- HikariCP 커넥션 풀 패널은 stale `r2dbc_pool_*` → `hikaricp_connections_*`로 수정돼 있습니다(현 스택은 JDBC+HikariCP).
+- **exemplar**: Explore(Prometheus)에서 히스토그램(`http_server_requests_seconds_bucket`) 쿼리 → 우측 **Exemplars 토글 ON** → 그래프 위 점 hover → `trace_id`로 트레이스 점프.
 
 ---
 
@@ -28,16 +56,16 @@ deploy/
 brew install colima kind helm      # 최초 1회
 
 ./deploy/up.sh                     # 코어(앱 + PostgreSQL/Redis/Elasticsearch/Kafka)
-#   또는
-./deploy/up.sh --obs               # 관측성(LGTM)까지 함께 (colima 12G로 자동 기동)
+#   또는 (관측성 Alloy까지 — Grafana Cloud 자격증명 env를 함께 넘김)
+GRAFANA_CLOUD_OTLP_ENDPOINT=... GRAFANA_CLOUD_INSTANCE_ID=... GRAFANA_CLOUD_API_TOKEN=... ./deploy/up.sh --obs
 
 # 나중에 관측성만 추가/제거 (up.sh 재실행·이미지 재빌드 없이 helm으로 토글):
-./deploy/obs.sh on                 # LGTM 5파드 추가 + 앱 OTLP on (최초엔 이미지 pull로 수 분)
+GRAFANA_CLOUD_OTLP_ENDPOINT=... GRAFANA_CLOUD_INSTANCE_ID=... GRAFANA_CLOUD_API_TOKEN=... ./deploy/obs.sh on   # Alloy 추가 + 앱 OTLP on
 ./deploy/obs.sh off                # 제거
 
 # 접근(colima에선 직결 localhost가 불안정 → port-forward 권장):
-./deploy/pf.sh                     # search-service(8080)+Grafana(3000)+Postgres(5432) 한 번에, Ctrl+C로 종료
-#   → http://localhost:8080/swagger-ui.html , http://localhost:3000 (admin/admin, --obs일 때)
+./deploy/pf.sh                     # search-service(8080)+Postgres(5432) 한 번에, Ctrl+C로 종료
+#   → http://localhost:8080/swagger-ui.html  (관측성은 Grafana Cloud에서 조회)
 #   → DBeaver: localhost:5432 (db=search user=search pw=search1234); 5432 충돌 시 PG_LOCAL_PORT=5433 ./deploy/pf.sh
 
 # 정리:
@@ -45,7 +73,7 @@ brew install colima kind helm      # 최초 1회
 ./deploy/down.sh --all             # + kind 클러스터 삭제 + colima 정지 (⚠ DB 데이터도 삭제)
 ```
 
-> **접근 방식**: Mimir/Loki/Tempo/Alloy는 개별로 열지 않습니다 — Grafana 안에서 모두 조회합니다(로그=Loki, 트레이스=Tempo, 메트릭=Mimir). 그래서 일상적으로 열어둘 건 **search-service + Grafana** 둘뿐입니다. DB/Redis/ES/Kafka는 필요할 때 `kubectl exec`로 확인하세요.
+> **접근 방식**: 관측성은 **Grafana Cloud**에서 모두 조회합니다(로그·트레이스·메트릭 + 상관). 로컬 클러스터엔 Alloy(포워더)만 있고 Grafana는 없습니다. 그래서 로컬에서 일상적으로 열어둘 건 **search-service** 하나입니다. Alloy export가 정상인지는 `kubectl logs deploy/alloy`(401/403이면 자격증명 확인)로 봅니다. DB/Redis/ES/Kafka는 필요할 때 `kubectl exec`로 확인하세요.
 
 `up.sh`가 실패하거나 각 단계를 직접 이해하고 싶으면 아래 수동 절차를 따라가세요.
 
@@ -132,15 +160,18 @@ helm get values search-platform
 ## 설정 바꾸기 (values)
 
 ```bash
-# 예: 관측성(LGTM) 전체를 클러스터에 함께 배포 + 앱이 클러스터 내 Alloy로 push
-#   ⚠ 파드가 11개로 늘어 메모리 부담↑ — colima start --memory 12(이상) 권장.
-#   배포 후 Grafana는 http://localhost:3000 (admin/admin) — Mimir/Loki/Tempo 데이터소스·대시보드 자동 등록.
-helm upgrade search-platform deploy/helm/search-platform --set observability.enabled=true
+# 예: 관측성 Alloy(포워더)를 클러스터에 배포 + 앱이 클러스터 내 Alloy로 push → Alloy가 Grafana Cloud로 전달
+#   Alloy 1파드만 늘어 메모리 증분이 거의 없습니다. 자격증명을 함께 주입하세요(토큰 커밋 금지).
+helm upgrade search-platform deploy/helm/search-platform \
+  --set observability.enabled=true \
+  --set observability.grafanaCloud.otlpEndpoint="https://otlp-gateway-prod-<region>-0.grafana.net/otlp" \
+  --set observability.grafanaCloud.instanceId="<INSTANCE_ID>" \
+  --set observability.grafanaCloud.apiToken="<API_TOKEN>"
 
 # 예: 특정 데이터스토어를 외부 것으로 대체(차트에서 제외)
 helm upgrade search-platform deploy/helm/search-platform --set kafka.enabled=false
 ```
-주요 값: `searchService.image`, `searchIndexer.image`, `*.resources`, `postgres.password`, `security.jwtSecret`, `security.adminPassword`, `observability.enabled`. 전체는 `helm/search-platform/values.yaml` 참고.
+주요 값: `searchService.image`, `searchIndexer.image`, `*.resources`, `postgres.password`, `security.jwtSecret`, `security.adminPassword`, `observability.enabled`, `observability.grafanaCloud.{otlpEndpoint,instanceId,apiToken}`. 전체는 `helm/search-platform/values.yaml` 참고.
 
 ## 정리(teardown)
 

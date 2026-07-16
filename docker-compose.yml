@@ -7,7 +7,7 @@
 #
 # 사용법:
 #   docker compose up -d                 # 코어 4종(postgres+redis+elasticsearch+kafka) — 앱 테스트에 필요한 최소셋
-#   docker compose --profile obs up -d   # + 관측성 LGTM(Alloy/Mimir/Loki/Tempo/Grafana)
+#   docker compose --profile obs up -d   # + Alloy(OTLP 수집기, Grafana Cloud로 포워딩)
 #   docker compose ps                    # 상태 확인
 #   docker compose down                  # 정지+삭제(볼륨/데이터 유지)
 #   docker compose down -v               # 볼륨까지 삭제(완전 초기화 — DB/ES/Kafka 리셋)
@@ -17,8 +17,15 @@
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200 (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
 #   Kafka          localhost:9092        (KRaft 단일 노드, 토픽 자동생성 on → board-changed[-dlq] 자동)
-#   Grafana        http://localhost:3000 (admin/admin, --profile obs)
 #   Alloy          OTLP 수신 4318(HTTP)·4317(gRPC), 디버그 UI :12345 (--profile obs)
+#                  → 3종 신호(metrics/logs/traces)를 Grafana Cloud OTLP 게이트웨이로 전달합니다.
+#
+# 관측성(--profile obs)은 Grafana Cloud로 보냅니다. 자체 호스팅 LGTM은 걷어냈습니다.
+# Alloy를 띄우려면 Grafana Cloud 자격증명 3개를 호스트 환경변수(또는 .env)로 넣어야 합니다
+# (포털 OpenTelemetry 타일에서 발급):
+#   export GRAFANA_CLOUD_OTLP_ENDPOINT="https://otlp-gateway-prod-<region>-0.grafana.net/otlp"
+#   export GRAFANA_CLOUD_INSTANCE_ID="<INSTANCE_ID>"
+#   export GRAFANA_CLOUD_API_TOKEN="<API_TOKEN>"
 #
 # 참고: obs 프로파일 없이 앱만 띄우면 앱이 OTLP를 localhost:4318로 push하려다 "connection refused" 경고를
 #       주기적으로 남깁니다(무해, 기능엔 영향 없음). 없애려면 IntelliJ 실행 구성의 환경변수에 아래를 추가하거나
@@ -114,43 +121,11 @@ services:
       timeout: 5s
       retries: 10
 
-  # ─────────────────────── 관측성 LGTM (docker compose --profile obs) ───────────────────────
-  # 설정은 Helm 차트로 이관된 정본(deploy/helm/search-platform/files/)을 그대로 재사용합니다(서비스명이 동일).
-  mimir:
-    image: grafana/mimir:2.14.3
-    container_name: search-mimir
-    profiles: ["obs"]
-    command: -config.file=/etc/mimir/mimir.yml
-    ports:
-      - "9009:9009"
-    volumes:
-      - ./deploy/helm/search-platform/files/mimir/mimir.yml:/etc/mimir/mimir.yml:ro
-      - mimir-data:/data
-
-  loki:
-    image: grafana/loki:3.3.2
-    container_name: search-loki
-    profiles: ["obs"]
-    command: -config.file=/etc/loki/loki-config.yml
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./deploy/helm/search-platform/files/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
-      - loki-data:/loki
-
-  tempo:
-    image: grafana/tempo:2.7.1
-    container_name: search-tempo
-    profiles: ["obs"]
-    command: -config.file=/etc/tempo/tempo.yml
-    ports:
-      - "3200:3200"
-    volumes:
-      - ./deploy/helm/search-platform/files/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
-      - tempo-data:/var/tempo
-
+  # ─────────────────── 관측성 Alloy → Grafana Cloud (docker compose --profile obs) ───────────────────
+  # 설정은 Helm 차트로 이관된 정본(deploy/helm/search-platform/files/alloy/config.alloy)을 그대로 재사용합니다.
+  # 자격증명 3개는 호스트 환경변수로 주입합니다(위 헤더 주석 참고). 자체 호스팅 LGTM은 걷어냈습니다.
   alloy:
-    # 단일 OTLP 수집기. 호스트의 앱이 localhost:4318로 push → Alloy가 Mimir/Loki/Tempo로 팬아웃.
+    # 단일 OTLP 수집기. 호스트의 앱이 localhost:4318로 push → Alloy가 Grafana Cloud OTLP 게이트웨이로 전달.
     image: grafana/alloy:v1.5.1
     container_name: search-alloy
     profiles: ["obs"]
@@ -159,6 +134,11 @@ services:
       - /etc/alloy/config.alloy
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
+    environment:
+      # config.alloy가 sys.env로 읽습니다. 미설정 시 Alloy가 인증 실패(401/403)하니 발급값을 넣으세요.
+      GRAFANA_CLOUD_OTLP_ENDPOINT: "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}"
+      GRAFANA_CLOUD_INSTANCE_ID: "${GRAFANA_CLOUD_INSTANCE_ID:-}"
+      GRAFANA_CLOUD_API_TOKEN: "${GRAFANA_CLOUD_API_TOKEN:-}"
     ports:
       - "4317:4317"
       - "4318:4318"
@@ -166,35 +146,8 @@ services:
     volumes:
       - ./deploy/helm/search-platform/files/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy-data:/var/lib/alloy/data
-    depends_on:
-      - mimir
-      - loki
-      - tempo
-
-  grafana:
-    image: grafana/grafana:11.4.0
-    container_name: search-grafana
-    profiles: ["obs"]
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    volumes:
-      # 데이터소스(Mimir/Loki/Tempo)와 대시보드를 provisioning으로 자동 등록.
-      - ./deploy/helm/search-platform/files/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./deploy/helm/search-platform/files/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      - mimir
-      - loki
-      - tempo
 
 volumes:
   postgres-data:
   elasticsearch-data:
-  mimir-data:
-  grafana-data:
-  loki-data:
-  tempo-data:
   alloy-data:

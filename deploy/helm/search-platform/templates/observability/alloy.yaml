@@ -27,6 +27,9 @@ spec:
       labels:
         app: alloy
         app.kubernetes.io/part-of: search-platform
+      annotations:
+        # config.alloy가 바뀌면 파드를 롤아웃해 새 설정을 반영한다.
+        checksum/config: {{ .Files.Get "files/alloy/config.alloy" | sha256sum }}
     spec:
       containers:
         - name: alloy
@@ -37,6 +40,21 @@ spec:
             - /etc/alloy/config.alloy
             - --server.http.listen-addr=0.0.0.0:12345
             - --storage.path=/var/lib/alloy/data
+          env:
+            # Grafana Cloud OTLP 게이트웨이(.../otlp) — 평문(values). config.alloy가 sys.env로 읽는다.
+            - name: GRAFANA_CLOUD_OTLP_ENDPOINT
+              value: {{ .Values.observability.grafanaCloud.otlpEndpoint | quote }}
+            # Basic auth 자격증명 — Secret에서 주입(레포에 커밋하지 않음).
+            - name: GRAFANA_CLOUD_INSTANCE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: GRAFANA_CLOUD_INSTANCE_ID
+            - name: GRAFANA_CLOUD_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: search-platform-secrets
+                  key: GRAFANA_CLOUD_API_TOKEN
           ports:
             - containerPort: 4317 # OTLP gRPC (앱 push)
             - containerPort: 4318 # OTLP HTTP (앱 push)

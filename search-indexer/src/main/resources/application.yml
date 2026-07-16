@@ -32,8 +32,8 @@ logging:
     format:
       console: ecs
 
-# 관측성: search-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push.
-# service.name은 spring.application.name(=search-indexer)이라 search-service와 Grafana/Tempo/Mimir에서 구분됩니다.
+# 관측성: search-service와 동일한 OTLP 파이프라인으로 metrics/logs/traces를 단일 수집기 Grafana Alloy(:4318)에 push
+# → Alloy가 Grafana Cloud로 전달합니다. service.name은 spring.application.name(=search-indexer)이라 Grafana Cloud에서 search-service와 구분됩니다.
 # (service.namespace는 search-service와 동일한 이유로 두지 않습니다 — 상관 키를 raw service.name으로 통일.)
 management:
   endpoints:
@@ -43,9 +43,19 @@ management:
   endpoint:
     health:
       show-details: always
+  metrics:
+    distribution:
+      # 히스토그램 버킷에 exemplar(trace_id)가 실리도록 켭니다. 색인 배치 타이머(board/product.indexer.batch)는
+      # 코드에서 publishPercentileHistogram()으로 이미 히스토그램이며, http.server.requests도 여기서 켭니다.
+      percentiles-histogram:
+        http.server.requests: true
   tracing:
     sampling:
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+    # Exemplar: 메트릭 데이터 포인트에 활성 trace의 trace_id/span_id 부착 → Grafana에서 메트릭→트레이스 점프.
+    # Micrometer Tracing이 있으므로 ExemplarContextProvider가 자동 구성됩니다(별도 코드 불필요). search-service와 동일.
+    exemplars:
+      include: ${MANAGEMENT_TRACING_EXEMPLARS_INCLUDE:sampled}
   opentelemetry:
     resource-attributes:
       deployment.environment: ${DEPLOYMENT_ENV:local}

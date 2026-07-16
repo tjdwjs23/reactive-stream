@@ -71,24 +71,22 @@ security:
   jwtSecret: "local-dev-jwt-secret-please-change-me-32bytes-min"
   adminPassword: "admin1234"
 
-# ── 관측성 (LGTM 스택) ──
-# 기본은 off(로컬 리소스 절약): 앱의 OTLP export가 꺼지고, 아래 LGTM 파드도 배포되지 않습니다.
-# true로 켜면 클러스터 내 Alloy → Mimir/Loki/Tempo/Grafana가 함께 배포되고, 앱이 alloy:4318로 push합니다.
-#   helm upgrade search-platform deploy/helm/search-platform --set observability.enabled=true
-#   ⚠ 파드가 11개로 늘어 메모리 부담이 큽니다 — colima를 12~14GB로 띄우세요.
+# ── 관측성 (Alloy → Grafana Cloud) ──
+# 기본은 off(로컬 리소스 절약): 앱의 OTLP export가 꺼지고, Alloy 파드도 배포되지 않습니다.
+# true로 켜면 클러스터 내 Alloy 1파드만 배포되고, 앱이 alloy:4318로 push → Alloy가 Grafana Cloud로 전달합니다.
+# (자체 호스팅 LGTM은 걷어냈습니다. metrics/logs/traces 3종이 단일 OTLP 게이트웨이로 나갑니다.)
+#   helm upgrade search-platform deploy/helm/search-platform \
+#     --set observability.enabled=true \
+#     --set observability.grafanaCloud.instanceId=<INSTANCE_ID> \
+#     --set observability.grafanaCloud.apiToken=<API_TOKEN>
+# instanceId/token/endpoint는 Grafana Cloud 포털의 OpenTelemetry 타일에서 발급합니다(토큰은 절대 커밋 금지).
 observability:
   enabled: false
   otlpEndpointBase: "http://alloy:4318" # 앱이 push할 클러스터 내 Alloy OTLP/HTTP 엔드포인트
   alloy:
     image: grafana/alloy:v1.5.1
-  mimir:
-    image: grafana/mimir:2.14.3
-  loki:
-    image: grafana/loki:3.3.2
-  tempo:
-    image: grafana/tempo:2.7.1
-  grafana:
-    image: grafana/grafana:11.4.0
-    adminUser: admin
-    adminPassword: admin
-    nodePort: 30030 # kind 매핑(30030→host 3000)과 일치 — http://localhost:3000
+  grafanaCloud:
+    # 포털 값으로 교체(region은 스택에 따라 다름). otlphttp가 뒤에 /v1/{metrics,logs,traces}를 붙입니다.
+    otlpEndpoint: "https://otlp-gateway-prod-<region>-0.grafana.net/otlp"
+    instanceId: "" # 배포 시 --set으로 주입
+    apiToken: "" # 배포 시 --set으로 주입, 절대 커밋 금지
