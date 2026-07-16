@@ -28,7 +28,7 @@ class OpenApiDocsTest(
                     mockMvc
                         .perform(get("/v3/api-docs"))
                         .andExpect(status().isOk)
-                        .andExpect(jsonPath("$.info.title").value("Board API"))
+                        .andExpect(jsonPath("$.info.title").value("Search Platform API"))
                         .andExpect(jsonPath("$.paths['/api/boards']").exists())
                         .andExpect(jsonPath("$.paths['/api/boards/{id}']").exists())
                 }
