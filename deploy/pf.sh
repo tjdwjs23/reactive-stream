@@ -9,8 +9,8 @@
 #   ./deploy/pf.sh status    # 실행 여부 확인
 #   ./deploy/pf.sh stop      # 백그라운드 인스턴스 종료(모든 port-forward 정리)
 #
-# 열어두는 대상: search-service(Swagger/API) + Grafana(대시보드·Loki 로그·Tempo 트레이스) + Postgres(DBeaver 등).
-# Mimir/Loki/Tempo/Alloy는 개별로 열지 않습니다 — 전부 Grafana 안에서 조회합니다.
+# 열어두는 대상: search-service(Swagger/API) + Postgres(DBeaver 등).
+# 관측성은 Grafana Cloud로 전송하므로 로컬에 Grafana가 없습니다 — 대시보드/로그/트레이스는 Grafana Cloud에서 조회합니다.
 #
 # Postgres 로컬 포트는 PG_LOCAL_PORT로 바꿀 수 있습니다(로컬에 이미 Postgres가 5432를 쓸 때):
 #   PG_LOCAL_PORT=5433 ./deploy/pf.sh          → DBeaver는 localhost:5433
@@ -41,13 +41,7 @@ run_forwards() {
   pf search-service 8080:8080 "search-service" "http://localhost:8080/swagger-ui.html"
   pf postgres "${PG_LOCAL_PORT}:5432" "postgres" "localhost:${PG_LOCAL_PORT}  (db=search user=search pw=search1234)"
 
-  # Grafana는 --obs(observability.enabled=true)로 띄웠을 때만 존재합니다.
-  if kubectl get svc grafana >/dev/null 2>&1; then
-    pf grafana 3000:3000 "grafana" "http://localhost:3000  (admin/admin)"
-  else
-    echo "  (grafana 없음 — 관측성을 보려면 ./deploy/up.sh --obs 로 재배포)"
-  fi
-
+  # 관측성은 Grafana Cloud로 전송합니다 — 로컬 Grafana가 없으므로 port-forward 대상이 아닙니다.
   # 필요할 때만: search-indexer actuator (기본은 안 엶)
   # pf search-indexer 8081:8081 "search-indexer" "http://localhost:8081/actuator/health"
 
@@ -76,7 +70,6 @@ case "${1:-fg}" in
     echo "백그라운드로 port-forward 시작 (pid=$(cat "$PIDFILE")):"
     echo "  search-service   http://localhost:8080/swagger-ui.html"
     echo "  postgres        localhost:${PG_LOCAL_PORT}  (db=search user=search pw=search1234)"
-    kubectl get svc grafana >/dev/null 2>&1 && echo "  grafana         http://localhost:3000  (admin/admin)"
     echo
     echo "  로그:  tail -f $LOGFILE"
     echo "  종료:  ./deploy/pf.sh stop"

@@ -1,9 +1,10 @@
-// Grafana Alloy — 단일 OTLP 수집기.
-// 앱(호스트)이 metrics/logs/traces를 모두 OTLP로 이 에이전트에 push하면, 여기서 각 백엔드로 팬아웃한다.
-//   metrics → Mimir (OTLP 그대로 전달)     logs → Loki (OTel→Loki 변환)     traces → Tempo (OTLP)
-// 앱이 백엔드마다 다른 주소/프로토콜로 직접 붙던 것을 이 한 지점으로 통합한 구조다. 디버그 UI: http://localhost:12345
+// Grafana Alloy — 단일 OTLP 수집기(포워딩 에이전트).
+// 앱(호스트/파드)이 metrics/logs/traces를 모두 OTLP로 이 에이전트에 push하면, 여기서 Grafana Cloud로 전달한다.
+// 자체 호스팅 LGTM(Mimir/Loki/Tempo/Grafana)은 걷어냈고, 3종 신호를 단일 OTLP 게이트웨이로 내보낸다.
+//   metrics + logs + traces → Grafana Cloud OTLP gateway (Basic auth, 배치/재시도는 Alloy가 담당)
+// 인증정보/엔드포인트는 env로 주입한다(Deployment→Secret, compose→환경변수). 디버그 UI: http://localhost:12345
 
-// ── 수신: OTLP(gRPC 4317 / HTTP 4318). 호스트의 앱이 여기로 push한다. ─────────────────────────────
+// ── 수신: OTLP(gRPC 4317 / HTTP 4318). 앱이 여기로 push한다. ────────────────────────────────────────
 otelcol.receiver.otlp "default" {
   grpc {
     endpoint = "0.0.0.0:4317"
@@ -19,46 +20,30 @@ otelcol.receiver.otlp "default" {
   }
 }
 
-// ── 배치 처리: 신호별로 목적지 exporter로 분기한다. ────────────────────────────────────────────────
+// ── 배치 처리: 3종 신호를 모두 Grafana Cloud exporter 하나로 보낸다. ──────────────────────────────────
 otelcol.processor.batch "default" {
   output {
-    metrics = [otelcol.exporter.otlphttp.mimir.input]
-    logs    = [otelcol.exporter.loki.default.input]
-    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.otlphttp.grafanacloud.input]
+    logs    = [otelcol.exporter.otlphttp.grafanacloud.input]
+    traces  = [otelcol.exporter.otlphttp.grafanacloud.input]
   }
 }
 
-// ── metrics → Mimir ──────────────────────────────────────────────────────────────────────────────
-// OTLP 그대로 Mimir의 OTLP 수신부(/otlp/v1/metrics)로 전달한다. 접미사(_total 등)·저장은 Mimir가 처리하므로
-// 앱이 직접 push하던 때와 메트릭 이름이 동일하다(대시보드 그대로 동작). otlphttp가 endpoint에 /v1/metrics를 붙인다.
-otelcol.exporter.otlphttp "mimir" {
+// ── 인증: Grafana Cloud Basic auth(username=Instance ID, password=API Token). ──────────────────────
+// 포털 OpenTelemetry 타일에서 발급. 값은 env로 주입되며 레포에 커밋하지 않는다.
+otelcol.auth.basic "grafanacloud" {
+  username = sys.env("GRAFANA_CLOUD_INSTANCE_ID")
+  password = sys.env("GRAFANA_CLOUD_API_TOKEN")
+}
+
+// ── 내보내기: Grafana Cloud 단일 OTLP 게이트웨이(.../otlp). ─────────────────────────────────────────
+// otlphttp가 endpoint 뒤에 /v1/{metrics,logs,traces}를 자동으로 붙이므로 3종 신호를 이 하나로 통합한다.
+// metrics는 OTLP 그대로(_total 등 접미사·저장은 클라우드가 처리 → 메트릭 이름 유지), logs는 OTel LogRecord
+// 그대로 전송(클라우드가 Loki 변환, trace_id/span_id는 structured metadata로 실려 로그↔트레이스 상관 유지),
+// traces는 OTLP 그대로 전송된다.
+otelcol.exporter.otlphttp "grafanacloud" {
   client {
-    endpoint = "http://mimir:9009/otlp"
-    tls {
-      insecure = true
-    }
-  }
-}
-
-// ── traces → Tempo ───────────────────────────────────────────────────────────────────────────────
-otelcol.exporter.otlp "tempo" {
-  client {
-    endpoint = "tempo:4317"
-    tls {
-      insecure = true
-    }
-  }
-}
-
-// ── logs → Loki ──────────────────────────────────────────────────────────────────────────────────
-// OTel LogRecord를 Loki 포맷으로 변환해 Loki push API로 보낸다. trace_id/span_id는 구조화 메타데이터로 실려
-// Grafana에서 로그↔트레이스 상관이 가능하다(Loki loki-config.yml의 allow_structured_metadata: true 필요).
-otelcol.exporter.loki "default" {
-  forward_to = [loki.write.default.receiver]
-}
-
-loki.write "default" {
-  endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    endpoint = sys.env("GRAFANA_CLOUD_OTLP_ENDPOINT")
+    auth     = otelcol.auth.basic.grafanacloud.handler
   }
 }

@@ -49,20 +49,20 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
 
     // 관측성. Actuator(health + db(JDBC)/redis/es 헬스, /actuator/metrics).
-    // 메트릭 저장/조회는 Mimir가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
+    // 메트릭 저장/조회는 Grafana Cloud가 담당하고, 앱은 OTLP로 push합니다(아래 opentelemetry 스타터).
     // 스크레이프 파이프라인이 없어(Alloy는 OTLP 수신만) Prometheus 레지스트리는 두지 않습니다.
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     // 스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘어 Observation/MDC(traceId) 컨텍스트 전파 — Micrometer Tracing이 사용
     implementation("io.micrometer:context-propagation")
 
-    // 분산 트레이싱 + 메트릭을 모두 OTLP로 push하는 LGTM 파이프라인.
+    // 분산 트레이싱 + 메트릭을 모두 OTLP로 push하는 파이프라인(Alloy → Grafana Cloud).
     // Spring Boot 4는 트레이싱 자동구성을 전용 모듈로 분리했고, 이 스타터가 그 자동구성
     // (spring-boot-micrometer-tracing[-opentelemetry], spring-boot-opentelemetry)과 OTLP span exporter,
     // 그리고 OTLP '메트릭' 레지스트리(micrometer-registry-otlp)를 함께 가져옵니다.
     // (Boot 3.x식 micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 조합은 Boot 4에선
     //  자동구성이 딸려오지 않아 Tracer가 활성화되지 않습니다.)
     // → metrics/logs/traces를 모두 OTLP로 단일 수집기 Grafana Alloy(:4318)에 push하고, Alloy가
-    //   Mimir/Loki/Tempo로 팬아웃합니다(application.yml + deploy/helm/search-platform/files/alloy/config.alloy).
+    //   Grafana Cloud OTLP 게이트웨이로 전달합니다(application.yml + deploy/helm/search-platform/files/alloy/config.alloy).
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     // 로그도 OTLP로 내보내 3종 신호(metrics/logs/traces)를 단일 파이프라인(→ Grafana Alloy)으로 통합합니다.
     // 이 appender가 logback 로그를 OTel LogRecord로 변환하고, Boot가 구성한 OTLP log exporter가 Alloy로 push합니다.

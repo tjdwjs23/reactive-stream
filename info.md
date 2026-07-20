@@ -256,10 +256,10 @@ search-service                                                  search-indexer
 
 ```bash
 ./deploy/up.sh          # 코어 6개(앱 2 + DB/Redis/ES/Kafka)만 — 가볍게
-./deploy/up.sh --obs    # 관측성(LGTM 5개)까지 = 11개 — 모니터링 화면까지
+./deploy/up.sh --obs    # 관측성 Alloy 1개까지 = 7개 (Alloy가 Grafana Cloud로 전달, 자격증명 env 필요)
 ```
 
-`up.sh`가 순서대로 해줍니다: **Colima 켜기 → kind 클러스터 만들기 → 앱 이미지 빌드해 클러스터에 넣기 → Helm으로 배포 → 다 뜰 때까지 대기.** 끝나면 `localhost:8080`이 게시판, `--obs`면 `localhost:3000`이 Grafana입니다. 정리는 `./deploy/down.sh`.
+`up.sh`가 순서대로 해줍니다: **Colima 켜기 → kind 클러스터 만들기 → 앱 이미지 빌드해 클러스터에 넣기 → Helm으로 배포 → 다 뜰 때까지 대기.** 끝나면 `localhost:8080`이 게시판입니다. `--obs`면 관측성은 **Grafana Cloud**에서 조회합니다(로컬 Grafana 없음). 정리는 `./deploy/down.sh`.
 
 ## 왜 굳이 k8s로?
 

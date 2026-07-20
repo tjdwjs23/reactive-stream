@@ -79,20 +79,21 @@ spring:
 
 # 로그: 콘솔/stdout을 구조화 JSON(ECS)으로 출력합니다(Spring Boot 4 네이티브 구조화 로깅, 추가 의존성 없음).
 # Micrometer Tracing이 MDC에 넣는 trace.id/span.id가 ECS 필드로 함께 실려 로그↔트레이스 상관이 가능합니다.
-# (Loki push는 test 프로필에서 꺼지도록 logback-spring.xml에서 게이트합니다. 콘솔 JSON은 모든 환경 공통.)
+# (OTLP 로그 export는 test 프로필에서 꺼지도록 logback-spring.xml에서 게이트합니다. 콘솔 JSON은 모든 환경 공통.)
 logging:
   structured:
     format:
       console: ecs
 
-# 관측성(LGTM 스택 + 단일 수집기 Grafana Alloy). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
-# push하면, Alloy가 Mimir(metrics)·Loki(logs)·Tempo(traces)로 팬아웃합니다(Alloy 설정: deploy/helm/search-platform/files/alloy/config.alloy).
+# 관측성(단일 수집기 Grafana Alloy → Grafana Cloud). metrics·logs·traces를 모두 OTLP로 Alloy(:4318)에
+# push하면, Alloy가 Grafana Cloud OTLP 게이트웨이로 전달합니다(Alloy 설정: deploy/helm/search-platform/files/alloy/config.alloy).
+# 자체 호스팅 LGTM은 걷어냈습니다 — 저장/조회/상관은 Grafana Cloud(Mimir/Loki/Tempo)가 담당합니다.
 # 앱이 백엔드마다 다른 프로토콜/주소로 직접 붙던 것을 단일 OTLP 엔드포인트로 통합한 구조입니다.
 # - /actuator/health : 애플리케이션/의존성 상태(db(JDBC)/redis/es 헬스 포함)
-# - /actuator/metrics : 로컬 디버깅용 Micrometer 메트릭(JSON) 노출. 저장/조회는 Mimir가 담당(스크레이프 없음)
-# - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Mimir로 전달(이름/접미사는 Mimir가 처리)
-# - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Loki로 전달(trace_id는 구조화 메타데이터)
-# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Alloy에 export → Alloy가 Tempo로 전달.
+# - /actuator/metrics : 로컬 디버깅용 Micrometer 메트릭(JSON) 노출. 저장/조회는 Grafana Cloud가 담당(스크레이프 없음)
+# - metrics : Micrometer OTLP 레지스트리가 Alloy로 push → Alloy가 Grafana Cloud로 전달(exemplar로 trace_id 부착)
+# - logs    : OTel logback appender가 로그를 OTLP로 Alloy에 push → Alloy가 Grafana Cloud로 전달(trace_id는 구조화 메타데이터)
+# - tracing : Micrometer Tracing이 요청마다 trace/span을 만들고 OTLP로 Alloy에 export → Alloy가 Grafana Cloud로 전달.
 #   스레드 경계(아카이브 배치의 Dispatchers.IO 홉 등)를 넘는 trace 컨텍스트 전파는 Micrometer Tracing이 처리합니다(context-propagation).
 management:
   endpoints:
@@ -110,6 +111,14 @@ management:
     sampling:
       # 로컬/개발은 전량 샘플링. 운영은 MANAGEMENT_TRACING_SAMPLING_PROBABILITY로 낮춰 오버헤드를 제어합니다.
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+    # Exemplar: 메트릭(카운터/타이머/히스토그램) 데이터 포인트에 현재 활성 trace의 trace_id/span_id를 부착합니다.
+    # Grafana(Cloud)에서 지연 스파이크가 난 히스토그램 버킷 위 점을 클릭하면 그 순간의 실제 트레이스로 바로 점프됩니다.
+    # 카디널리티를 늘리지 않습니다(레이블이 아니라 값에 딸린 부가정보). Micrometer Tracing이 존재하므로
+    # ExemplarContextProvider가 자동 구성됩니다 — 별도 코드/빈 불필요. 히스토그램 버킷에 실려야 잘 보이므로
+    # 아래 percentiles-histogram과 함께 켭니다.
+    # include=sampled(기본): 샘플된 트레이스만 exemplar로. 운영에서 샘플링을 낮춰도 유효. all이면 미샘플까지 포함.
+    exemplars:
+      include: ${MANAGEMENT_TRACING_EXEMPLARS_INCLUDE:sampled}
   # Spring Boot 4에서 OTLP 트레이싱/로깅 export 설정은 management.opentelemetry.*.export.otlp.* 로 모였습니다
   # (Boot 3.x의 management.otlp.tracing.endpoint 아님). 둘 다 Alloy의 OTLP/HTTP 수신(4318)으로 push합니다.
   opentelemetry:
@@ -138,7 +147,8 @@ management:
     metrics:
       export:
         url: ${OTLP_METRICS_URL:http://localhost:4318/v1/metrics}
-        # Mimir는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다(Alloy가 그대로 전달).
+        # Grafana Cloud(Mimir)는 누적(cumulative) 시계열을 기대하므로 Micrometer 기본값(CUMULATIVE)을 그대로 씁니다
+        # (Alloy가 OTLP 그대로 Grafana Cloud로 전달). exemplar도 이 OTLP 경로로 함께 실려 나갑니다.
 
 # 오래된 게시글 일괄 아카이브 배치 설정
 

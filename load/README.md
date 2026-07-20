@@ -9,7 +9,7 @@
 - 대상 서버와 분리된 단독 바이너리 → `k6 run <script>.js` 한 방
 - Go 엔진이라 단일 노드에서 고동시성(수천 VU) 부하가 가볍다
 - `thresholds`로 p95 지연·에러율 합격 기준을 스크립트에 박아두면 = 그대로 CI 게이트
-- 관측성(LGTM — Alloy/Mimir/Loki/Tempo/Grafana)을 함께 띄우면(`./deploy/up.sh --obs`) 부하 중 지표를 Grafana에서 볼 수 있다(아래 참고)
+- 관측성 Alloy를 함께 띄우면(`./deploy/up.sh --obs`, Grafana Cloud 자격증명 필요) 부하 중 지표를 Grafana Cloud에서 볼 수 있다(아래 참고)
 
 ## 디렉토리 구성 (최소 세트)
 
@@ -195,11 +195,11 @@ done
 
 정리된 예시 결과와 해석은 [`results/mixed-sweep.md`](results/mixed-sweep.md) 참고.
 
-## 6. 부하 중 앱 내부 상태 보기 (선택) — Grafana
+## 6. 부하 중 앱 내부 상태 보기 (선택) — Grafana Cloud
 
 부하가 도는 동안 **앱 관점 지표**(HikariCP 커넥션 풀, HTTP 지연, JVM 스레드)를 실시간으로 봅니다.
-앱이 메트릭을 OTLP로 Mimir에 push하므로(스크레이프 아님), Grafana(`http://localhost:3000`, admin/admin)의
-"Hexagonal Search API" 대시보드나 Explore(Mimir 데이터소스)에서 확인합니다.
+앱이 메트릭을 OTLP로 Alloy → Grafana Cloud에 push하므로(스크레이프 아님), **Grafana Cloud**의
+"Hexagonal Search API" 대시보드(`deploy/grafana-cloud/dashboards/hexagonal-app.json` import)나 Explore에서 확인합니다.
 
 빠르게 커맨드라인으로 몇 개만 보고 싶으면:
 ```bash
