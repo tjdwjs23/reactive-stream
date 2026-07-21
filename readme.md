@@ -3,7 +3,7 @@
 > 헥사고날 아키텍처(Ports & Adapters) 게시판을, **이벤트 기반 MSA**로 확장한 Kotlin + Spring Boot 4 / **JDK 25 LTS** 프로젝트입니다.
 > 게시판 정본(PostgreSQL/JPA)과 검색 인덱스(Elasticsearch)를 **Kafka Transactional Outbox**로 분리하고, **Spring MVC + 가상 스레드(Virtual Threads)** 위에서 동작합니다.
 
-이 저장소는 아키텍처의 경계(포트-어댑터)를 그대로 둔 채 **바깥(스택)만 여러 번 갈아 끼우며** 검증해 왔습니다 — 도메인 모델은 한 줄도 바뀌지 않습니다. 한때는 논블로킹 리액티브 스택(WebFlux + 코루틴 + R2DBC)이었고, 지금은 **JDK 25 LTS의 가상 스레드 위 블로킹 스택(MVC + JPA)** 입니다. 이 전환의 "왜"는 아래 [스택 전환 근거](#-스택-전환-근거-webfluxr2dbc--mv--가상-스레드--jpa)에 정리했습니다. 헥사고날의 값어치가 바로 여기서 드러납니다 — 웹/영속성 어댑터와 포트 시그니처(블로킹/논블로킹)만 바뀌고 도메인·유즈케이스의 비즈니스 규칙은 불변이었습니다.
+이 저장소는 아키텍처의 경계(포트-어댑터)를 그대로 둔 채 **바깥(스택)만 여러 번 갈아 끼우며** 검증해 왔습니다 — 도메인 모델은 한 줄도 바뀌지 않습니다. 한때는 논블로킹 리액티브 스택(WebFlux + 코루틴 + R2DBC)이었고, 지금은 **JDK 25 LTS의 가상 스레드 위 블로킹 스택(MVC + JPA)** 입니다. 이 전환의 "왜"는 아래 [스택 전환 근거](#-스택-전환-근거-webfluxr2dbc--mvc--가상-스레드--jpa)에 정리했습니다. 헥사고날의 값어치가 바로 여기서 드러납니다 — 웹/영속성 어댑터와 포트 시그니처(블로킹/논블로킹)만 바뀌고 도메인·유즈케이스의 비즈니스 규칙은 불변이었습니다.
 
 핵심 변화는 **검색 색인의 분리**입니다. 예전에는 게시글을 쓸 때 같은 스레드에서 Elasticsearch에 인라인으로 색인했고, 실패하면 누락될 수 있었습니다. 지금은 게시글 쓰기와 **원자적으로** 아웃박스에 이벤트를 남기고, 릴레이가 Kafka로 발행하며, 별도 서비스(`search-indexer`)가 이를 소비해 색인합니다. 정합성은 "베스트에포트"에서 **아웃박스가 보장하는 최종 일관성**으로 올라갔습니다.
 
@@ -258,7 +258,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 조회마다 DB를 때리지 않도록 Redis에 델타를 모아 주기적으로 DB에 반영하는 write-back 버퍼(search-service).
 - **조회**: DB `findById` → Redis `HINCRBY board:views:pending {id} 1` → 응답 = DB 누적값 + 미반영 델타(실시간처럼).
 - **플러시**(`@Scheduled`): `RENAME pending → draining`으로 원자적 스냅샷을 뜨고, `UPDATE ... FROM unnest(:ids,:deltas)`로 청크 배치 반영, **commit-then-delete**(반영 성공분만 삭제)로 유실 없이 at-least-once. 다중 인스턴스는 `DistributedLockPort`(Redis SET NX + Lua CAS)로 직렬화.
-- **우아한 강등**: Redis가 느리거나 죽으면 `withTimeout` 예산 초과 시 델타 0으로 강등해 DB 값으로 200 응답(조회 자체는 실패하지 않음).
+- **우아한 강등**: Redis가 느리거나 죽으면 서킷브레이커 + Redis 명령 타임아웃(1s)으로 빠르게 실패하고, 예외를 삼켜 델타 0으로 강등해 DB 값으로 200 응답(조회 자체는 실패하지 않음).
 - 튜닝: `search.view-count.*`. 온디맨드 플러시는 `POST /api/admin/view-counts/flush`.
 
 > 심화 설명(포스트잇/회계장부 비유, RENAME 스냅샷의 이유 등)은 [`info.md`](./info.md).

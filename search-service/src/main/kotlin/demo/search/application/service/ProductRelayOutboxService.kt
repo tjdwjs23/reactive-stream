@@ -18,7 +18,7 @@ class ProductRelayOutboxService(
     private val productOutboxRelayPort: ProductOutboxRelayPort,
     private val eventPublisherPort: EventPublisherPort,
     private val observability: ProductObservabilityPort,
-    @Value("\${search.outbox.relay.batch-size:100}") private val batchSize: Int = 100,
+    @Value("\${search.outbox.relay.batch-size:500}") private val batchSize: Int,
 ) : ProductRelayOutboxUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 

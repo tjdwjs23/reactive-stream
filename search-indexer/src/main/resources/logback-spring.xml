@@ -3,7 +3,7 @@
   로깅 구성(search-service와 동일한 방식). 두 가지를 한다:
   1) 콘솔을 구조화 JSON(ECS)으로 출력한다(application.yml의 logging.structured.format.console: ecs).
      Micrometer Tracing이 MDC에 넣는 trace.id/span.id가 ECS 필드로 실려 로그↔트레이스 상관이 가능하다.
-  2) test 프로필이 아닐 때만 OpenTelemetry appender를 부착해 로그를 OTLP로 내보낸다(→ Alloy → Loki).
+  2) test 프로필이 아닐 때만 OpenTelemetry appender를 부착해 로그를 OTLP로 내보낸다(→ Alloy → Grafana Cloud(Loki)).
      Boot는 이 appender를 자동 부착하지 않으므로 기동 시 OpenTelemetryAppender.install(...)을 호출한다
      → config/OpenTelemetryLogbackInstaller.
 -->

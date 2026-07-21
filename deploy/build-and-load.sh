@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 앱 이미지 3종을 빌드해 kind 클러스터에 주입합니다(로컬 이미지라 pull 불가 → kind load 필수).
+# 이미지 3종(앱 2종 + ES/Nori)을 빌드해 kind 클러스터에 주입합니다(로컬 이미지라 pull 불가 → kind load 필수).
 #   ./deploy/build-and-load.sh
 # 환경변수 CLUSTER로 클러스터 이름 변경 가능(기본 search-platform).
 set -euo pipefail
