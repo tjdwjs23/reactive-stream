@@ -21,15 +21,15 @@
 
 ```
                                    ┌──────────────── event-contract (BoardChangedEvent) ────────────────┐
-                                   │                          (컴파일 타임 공유)                          │
-                                   ▼                                                                     ▼
+                                   │                          (컴파일 타임 공유)                            │
+                                   ▼                                                                    ▼
 ┌───────────────────────────────────────────┐        Kafka         ┌────────────────────────────────────────┐
-│  search-service                              │   (board-changed)    │  search-indexer                          │
-│  ┌────────────────────────────────────┐    │  ═══════════════▶    │  @KafkaListener → ApplyBoardChange       │
-│  │ write TX { board + outbox insert }  │    │                      │    → Elasticsearch upsert / delete       │
-│  └────────────────────────────────────┘    │                      └────────────────────────────────────────┘
+│  search-service                           │   (board-changed)    │  search-indexer                        │
+│  ┌────────────────────────────────────┐   │  ═══════════════▶    │  @KafkaListener → ApplyBoardChange     │
+│  │ write TX { board + outbox insert } │   │                      │    → Elasticsearch upsert / delete     │
+│  └────────────────────────────────────┘   │                      └────────────────────────────────────────┘
 │  Outbox Relay(폴링) → Kafka 발행            │                                       │
-│  검색 쿼리(GET /search) · 재색인(reindex) ──┼───────── read ───────────────────────┘ (같은 boards 인덱스)
+│  검색 쿼리(GET /search) · 재색인(reindex) ──  ┼───────── read  ───────────────────────┘ (같은 boards 인덱스)
 └───────────────────────────────────────────┘
 ```
 
