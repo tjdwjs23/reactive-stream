@@ -38,7 +38,7 @@ class ActuatorEndpointTest(
             }
 
             When("GET /actuator/metrics") {
-                Then("Micrometer 메트릭 목록이 노출된다(메트릭 저장/조회는 Mimir, 여기선 로컬 디버깅용)") {
+                Then("Micrometer 메트릭 목록이 노출된다(메트릭 저장/조회는 Grafana Cloud, 여기선 로컬 디버깅용)") {
                     mockMvc
                         .perform(get("/actuator/metrics"))
                         .andExpect(status().isOk)

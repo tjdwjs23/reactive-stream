@@ -140,7 +140,7 @@ BASE_URL=http://다른서버:8080 k6 run load/scenarios/mixed.js
 |---|---|---|
 | `BASE_URL` | `http://localhost:8080` | 대상 서버 |
 | `LOAD_USERNAME`/`LOAD_PASSWORD` | `loadtester`/`loadtest-password` | 쓰기 부하용 사용자(setup에서 가입·로그인해 Bearer 토큰 확보) |
-| `ADMIN_USERNAME`/`ADMIN_PASSWORD` | `admin`/(빈 값) | teardown 플러시용 관리자 자격(서버 `board.security.admin.*`와 일치해야 함). 빈 값이면 플러시 생략 |
+| `ADMIN_USERNAME`/`ADMIN_PASSWORD` | `admin`/(빈 값) | teardown 플러시용 관리자 자격(서버 `search.security.admin.*`와 일치해야 함). 빈 값이면 플러시 생략 |
 | `PEAK_RATE` | `1000` | 피크 목표 RPS |
 | `HOT_COUNT` | `30` | 인기 글 시드 수(읽기·검색 대상) |
 | `READ_PCT`/`WRITE_PCT` | `70`/`20` | 읽기/쓰기 비중(%), 나머지는 검색 |
