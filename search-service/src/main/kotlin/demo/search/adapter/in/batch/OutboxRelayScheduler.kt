@@ -18,7 +18,7 @@ class OutboxRelayScheduler(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    // fixedDelay: 이전 사이클이 끝난 뒤 간격을 둡니다(중첩 실행 방지). 기본 1초.
+    // fixedDelay: 이전 사이클이 끝난 뒤 간격을 둡니다(중첩 실행 방지). 기본 200ms.
     @Scheduled(fixedDelayString = "\${search.outbox.relay.poll-interval-ms:200}")
     fun run() {
         // 릴레이는 순차 발행이라 블로킹으로 직접 호출합니다(코루틴 불필요). 스케줄러 스레드는 가상 스레드가 아니지만

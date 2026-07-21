@@ -39,7 +39,7 @@ class GlobalExceptionHandler {
             e.message,
         )
 
-    // CreateBoardCommand.init 또는 Board.update()에서 발생하는 입력값 검증 실패
+    // Board.update()에서 발생하는 입력값 검증 실패(생성 시의 require() 실패는 아래 IllegalArgumentException 핸들러가 담당)
     @ExceptionHandler(BoardValidationException::class)
     fun handleBoardValidationException(e: BoardValidationException): ResponseEntity<FailureResponse> =
         failure(CommonErrorCode.ValidationError, e.message)

@@ -10,8 +10,9 @@ import org.springframework.stereotype.Component
 // (여기서만 Micrometer를 알고, 서비스/설정은 포트 인터페이스만 봅니다 — search-service와 동일한 헥사고날 규칙).
 //
 // MeterRegistry는 Boot가 자동 구성한 빈으로, micrometer-registry-otlp가 물려 있어 메트릭이 OTLP로 Alloy→Grafana Cloud에
-// push됩니다. 메트릭 이름은 search-service 관례대로 present-tense 동사로 두어 OpenMetrics 예약 접미사(_total/_bucket
-// 등)와 충돌하지 않게 합니다(board_indexer_indexed_total, board_indexer_dlq_total, board_indexer_batch_milliseconds).
+// push됩니다. 메트릭 이름(indexed/deleted/dlq/batch)은 OpenMetrics 예약 접미사(_total/_created/_count/_sum/_bucket)로
+// 끝나지 않게 지어, Prometheus 렌더링 시 접미사가 잘려 뭉개지지 않습니다(board_indexer_indexed_total,
+// board_indexer_dlq_total, board_indexer_batch_milliseconds).
 @Component
 class MicrometerIndexerObservabilityAdapter(
     registry: MeterRegistry,

@@ -74,10 +74,10 @@ class CreateBoardCommandTest :
         }
 
         Given("유효하지 않은 내용이 주어졌을 때") {
-            When("9자 내용으로 생성하면") {
+            When("10자 미만 내용으로 생성하면") {
                 Then("IllegalArgumentException을 던진다") {
                     shouldThrow<IllegalArgumentException> {
-                        CreateBoardCommand(title = "유효한 제목", content = "9자미만내용", authorId = 1L)
+                        CreateBoardCommand(title = "유효한 제목", content = "10자미만", authorId = 1L)
                     }
                 }
             }

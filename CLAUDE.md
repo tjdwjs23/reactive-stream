@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 모듈 | 역할 |
 |---|---|
-| `event-contract` | 두 서비스가 공유하는 **순수 Kotlin 이벤트 계약**(`BoardChangedEvent`, 토픽명). 프레임워크 무의존 |
-| `search-service` | 게시판 API(정본, JPA/PostgreSQL). 아래 Architecture 전체가 이 모듈을 설명합니다. 쓰기 시 **Transactional Outbox**로 이벤트를 기록하고 Kafka(`board-changed`)로 발행 |
-| `search-indexer` | `board-changed`를 **@KafkaListener로 소비**해 Elasticsearch 색인을 upsert/삭제하는 독립 서비스(ES writer) |
+| `event-contract` | 두 서비스가 공유하는 **순수 Kotlin 이벤트 계약**(`BoardChangedEvent`/`ProductChangedEvent`, 토픽명). 프레임워크 무의존 |
+| `search-service` | 게시판·상품 API(정본, JPA/PostgreSQL). 아래 Architecture 전체가 이 모듈을 설명합니다. 쓰기 시 **Transactional Outbox**로 이벤트를 기록하고 Kafka(`board-changed`/`product-changed`)로 발행 |
+| `search-indexer` | `board-changed`/`product-changed`를 **@KafkaListener로 소비**해 Elasticsearch 색인을 upsert/삭제하는 독립 서비스(ES writer) |
 
 루트 `subprojects{}`가 Kotlin/JDK25/ktlint 공통 컨벤션을 적용하고, 서비스별 `bootJar`/배포는 독립입니다.
 아래 문서의 소스 경로(`adapter/...`, `application/...`, `domain/...`)는 별도 언급이 없으면 **`search-service/src/main/kotlin/demo/search/` 기준**입니다.
@@ -45,7 +45,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Quality gates**: 아키텍처 규칙은 **Konsist**(`search-service/src/test/.../architecture/ArchitectureTest.kt`)가 테스트로 강제합니다 — 헥사고날 의존성 방향(Adapter→Application→Domain), 도메인의 프레임워크 무의존, `@Table`/`@Document` 엔티티의 패키지 격리 등. 일반 `./gradlew test`에 포함돼 돌아갑니다. 커버리지는 **Kover**가 search-service 하한 92%로 게이트(`koverVerify`)하며, 부트스트랩(`SearchApplication*`)은 집계에서 제외합니다.
 
-> **Note**: The app runs on **Spring MVC + virtual threads (JDK 25) with blocking JDBC — Spring Data JPA/Hibernate + Kotlin JDSL, no R2DBC/WebFlux anywhere**. `application.yml` configures `spring.datasource.*` (HikariCP) and `spring.jpa.*` (`ddl-auto=validate`, `open-in-view=false`). The schema is owned by **Flyway**: `db/migration/V*.sql` runs at startup and is tracked in `flyway_schema_history` (`baseline-on-migrate=true`). Simple CRUD uses Spring Data derived queries; keyset/stale scans use Kotlin JDSL; the unnest batch UPDATE / outbox writes use native SQL via `JdbcTemplate`. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/search`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`).
+> **Note**: The app runs on **Spring MVC + virtual threads (JDK 25) with blocking JDBC — Spring Data JPA/Hibernate + Kotlin JDSL, no R2DBC/WebFlux in search-service**(search-indexer는 actuator용 경량 WebFlux/Netty 서버만 씀). `application.yml` configures `spring.datasource.*` (HikariCP) and `spring.jpa.*` (`ddl-auto=validate`, `open-in-view=false`). The schema is owned by **Flyway**: `db/migration/V*.sql` runs at startup and is tracked in `flyway_schema_history` (`baseline-on-migrate=true`). Simple CRUD uses Spring Data derived queries; keyset/stale scans use Kotlin JDSL; the unnest batch UPDATE / outbox writes use native SQL via `JdbcTemplate`. `bootRun` needs a reachable PostgreSQL (see `application.yml`, default `localhost:5432/search`). Tests spin up PostgreSQL via Testcontainers (`support/PostgresTestContainer.kt`).
 
 ## 로컬 실행 / 배포 (Colima + kind + Helm)
 
@@ -119,7 +119,7 @@ Adapter (in/out)  →  Application (ports + service)  →  Domain (model + excep
 > **인증/인가 (서블릿 Spring Security + 자체 발급 JWT)**: `SecurityConfig`(`@EnableWebSecurity`, `HttpSecurity`, STATELESS 세션)가 필터 체인을 정의합니다 — 읽기(GET 단건/목록/검색)·문서·actuator는 **공개**, 게시글 쓰기(POST/PUT/DELETE)는 **인증**, 운영 트리거(reindex/flush/archive)는 **ROLE_ADMIN**. 로그인(`/api/auth/login`)이 HS256 JWT를 발급하고(`NimbusJwtTokenAdapter`), 이후 요청은 `Authorization: Bearer <token>`로 전달합니다. JWT의 `sub`=사용자 id는 게시글 생성 시 `author_id`로 기록되고, **수정/삭제 시 소유권 검사**의 기준이 됩니다 — 소유자(`Board.isOwnedBy`) 또는 관리자만 수정/삭제할 수 있고, 그 외에는 `BoardAccessDeniedException`→**403 `BOARD_ACCESS_DENIED`**(IDOR 차단). 인가 규칙은 도메인(`Board.isOwnedBy`)+서비스(`BoardService.assertCanModify`, 관리자 우회)에 두고, 컨트롤러는 `AuthenticatedUserProvider.current()`(`SecurityContextHolder` 기반)로 요청자 id·관리자 여부를 커맨드(`UpdateBoardCommand`/`DeleteBoardCommand`)에 실어 넘깁니다. 관리자 계정은 기동 시 `search.security.admin.*`로 부트스트랩됩니다(가입 API는 ROLE_USER만 생성). JWT 서명키는 `search.security.jwt.secret`(env `SEARCH_JWT_SECRET`, 미설정 시 dev 기본값 + 경고). 비밀번호는 BCrypt 해시로 저장하며, 사용자 영속화(`users` 테이블)·해싱·토큰 발급은 각각 out-port(`UserRepositoryPort`/`PasswordEncoderPort`/`AuthTokenPort`)로 분리돼 서비스는 Spring Security를 모릅니다.
 >
 > **리프레시 토큰(회전 + 재사용 감지)**: 로그인은 이제 access JWT 하나가 아니라 **access + 불투명 refresh 토큰 쌍**을 반환합니다(`TokenResponse`). refresh 원문은 클라이언트에게만 주어지고 서버는 **SHA-256 해시만** `refresh_tokens` 테이블에 저장합니다(`RefreshTokenPort`/`RefreshTokenHashPort` out-port, `Sha256RefreshTokenHashAdapter`). `POST /api/auth/refresh`는 사용한 토큰을 즉시 폐기(1회용 회전)하고 새 쌍을 발급하며, **이미 폐기된 토큰이 다시 제시되면(재사용=탈취 의심) 해당 사용자의 모든 토큰을 무효화**하고 401(`INVALID_REFRESH_TOKEN`)을 반환합니다. TTL은 `search.security.refresh-token.ttl-days`(기본 14).
-> **로그인 brute-force 방어(rate limiting)**: `LoginRateLimiterPort`(Redis 구현 `RedisLoginRateLimiterAdapter`)가 username별 실패를 슬라이딩 윈도우로 세고, `search.security.login.max-attempts`(기본 5)/`window-minutes`(기본 15)를 넘으면 자격 검증 이전에 **429 `TOO_MANY_LOGIN_ATTEMPTS`**로 차단합니다(성공 시 카운터 리셋).
+> **로그인 brute-force 방어(rate limiting)**: `LoginRateLimiterPort`(Redis 구현 `RedisLoginRateLimiterAdapter`)가 username별 실패를 고정 윈도우(INCR + 첫 실패 시 EXPIRE)로 세고, `search.security.login.max-attempts`(기본 5)/`window-minutes`(기본 15)를 넘으면 자격 검증 이전에 **429 `TOO_MANY_LOGIN_ATTEMPTS`**로 차단합니다(성공 시 카운터 리셋).
 > **CORS**: SPA 등 브라우저 클라이언트의 교차 오리진 호출을 위해 `SecurityConfig`가 CORS를 명시합니다 — 허용 오리진은 `search.security.cors.allowed-origins`(기본 `http://localhost:3000`, 운영은 `SEARCH_CORS_ALLOWED_ORIGINS`).
 >
 > **회복탄력성(Resilience4j 서킷브레이커)**: 외부 자원(Redis/Kafka/ES) 호출은 **어댑터에서만** 프로그래매틱 서킷브레이커로 감쌉니다(`ResilienceConfig`가 레지스트리 bean 제공, application/도메인은 무의존). 반복 실패 시 서킷이 열려 매 호출 타임아웃을 낭비하지 않고 즉시 실패합니다 — 조회수 Redis(→BoardService가 예외를 삼켜 DB 값으로 강등), Kafka 발행(→릴레이가 멈췄다 다음 사이클 재시도), ES 검색(→즉시 실패). 각 자원 클라이언트에는 타임아웃 상한(`application.yml`의 HikariCP pool/redis/elasticsearch)도 함께 둡니다.

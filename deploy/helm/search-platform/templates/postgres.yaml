@@ -37,7 +37,7 @@ spec:
                 secretKeyRef:
                   name: search-platform-secrets
                   key: POSTGRES_PASSWORD
-            # emptyDir 마운트 하위 디렉터리에 데이터를 두어 lost+found 등과 충돌 방지
+            # 볼륨(기본 PVC/local-path, 대체 emptyDir) 마운트 하위 디렉터리에 데이터를 두어 lost+found 등과 충돌 방지
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:

@@ -207,8 +207,9 @@ curl -s localhost:8080/actuator/metrics/hikaricp.connections.active | jq '.measu
 curl -s localhost:8080/actuator/metrics/jvm.threads.live    | jq '.measurements'   # 살아있는 스레드
 ```
 
-> k6 자체 지표(요청 지연/RPS)를 Grafana 그래프로도 보고 싶으면 Mimir의 remote-write 엔드포인트로 보냅니다:
-> `K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9009/api/v1/push k6 run -o experimental-prometheus-rw ...`
+> k6 자체 지표(요청 지연/RPS)를 Grafana 그래프로도 보고 싶으면 **Grafana Cloud**의 Prometheus remote-write 엔드포인트로 보냅니다
+> (자체 호스팅 Mimir는 걷어냈습니다 — 스택의 `.../api/prom/push` URL + Basic auth 사용):
+> `K6_PROMETHEUS_RW_SERVER_URL=<grafana-cloud-prom-push-url> k6 run -o experimental-prometheus-rw ...`
 > → Grafana 공식 k6 대시보드(ID **19665**) import.
 > (그냥 터미널 요약만으로도 충분하니 필수는 아님.)
 

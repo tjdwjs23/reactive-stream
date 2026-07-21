@@ -87,7 +87,8 @@
 search-platform/                     (rootProject)
 ├── event-contract/                 공유 이벤트 계약 (순수 Kotlin)
 │   └── demo.search.events
-│       └── BoardChangedEvent        TOPIC="board-changed", eventId(멱등키), CREATED/UPDATED/DELETED
+│       ├── BoardChangedEvent        TOPIC="board-changed", eventId(멱등키), CREATED/UPDATED/DELETED
+│       └── ProductChangedEvent      TOPIC="product-changed", eventId(멱등키), CREATED/UPDATED/DELETED
 │
 ├── search-service/                  게시판 API + Outbox 프로듀서
 │   └── demo.search
@@ -109,17 +110,17 @@ search-platform/                     (rootProject)
 │       ├── config                    Security(+CORS) · Kafka 프로듀서 · Resilience4j · OTel · Clock · OpenApi
 │       └── domain                    model(Board, User) · exception (순수 Kotlin)
 │
-└── search-indexer/                 board-changed 컨슈머 (ES writer)
+└── search-indexer/                 board-changed·product-changed 컨슈머 (ES writer)
     └── demo.search.indexer
         ├── adapter
-        │   ├── in.messaging          BoardChangedListener (@KafkaListener)
-        │   └── out.search            ElasticsearchBoardIndexAdapter · BoardDocument · 인덱스 초기화
+        │   ├── in.messaging          BoardChangedListener · ProductChangedListener (@KafkaListener)
+        │   └── out.search            Elasticsearch{Board,Product}IndexAdapter · {Board,Product}Document · 인덱스 초기화 · 관측성 어댑터
         ├── application
-        │   ├── port.in               ApplyBoardChangeUseCase
-        │   ├── port.out              BoardIndexPort
-        │   └── service               BoardIndexService
-        ├── config                    Kafka 컨슈머 · OTel
-        └── domain                    IndexedBoard (순수 Kotlin)
+        │   ├── port.in               Apply{Board,Product}ChangeUseCase
+        │   ├── port.out              {Board,Product}IndexPort · {,Product}IndexerObservabilityPort
+        │   └── service               {Board,Product}IndexService
+        ├── config                    Kafka 컨슈머(board·product) · Resilience4j · OTel
+        └── domain                    IndexedBoard · IndexedProduct (순수 Kotlin)
 ```
 
 > 각 서비스는 **헥사고날 계층**을 독립적으로 유지합니다 — 안쪽(Domain)으로만 의존이 향하고, ES/Kafka 같은 기술은 어댑터 뒤에 숨습니다.
@@ -223,7 +224,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 | `DELETE` | `/api/products/{id}` | 삭제 → 204 | ROLE_ADMIN |
 | `POST` | `/api/products/search/reindex` | DB→ES 전체 재색인(무중단 alias 스왑) → 200 | ROLE_ADMIN |
 
-> **초성 검색(ICU)**: `products` 인덱스의 `name.chosung` 서브필드는 **ICU 분석기**로 초성 색인합니다. `icu_normalizer`(nfkc, decompose)가 완성형 음절("삼각김밥")과 사용자가 타이핑한 호환 자모("ㅅㄱ")를 **모두 결합형 자모로 정규화**하고, `pattern_replace([^ᄀ-ᄒ])`로 **초성만 추출**한 뒤 `edge_ngram`으로 접두 자동완성을 만듭니다. `analyzer`(색인=초성+edge_ngram)와 `search_analyzer`(검색=초성 정규화만)를 분리해 별도 자모 매핑표 없이 동작합니다 — "ㅅㄱ"→삼각김밥·삼계탕, "ㅅㄱㄱ"→삼각김밥, 완성형 "삼"→ㅅ으로 정규화. ES 이미지에 `analysis-icu`가 필요합니다(`docker/elasticsearch/Dockerfile`). 일반 상품명 검색은 `name`(Nori)+`name.ngram`(부분)으로, 자동완성은 `name.chosung`으로 매칭합니다.
+> **초성 검색(ICU)**: `products` 인덱스의 `name.chosung` 서브필드는 **ICU 분석기**로 초성 색인합니다. `icu_normalizer`(nfkc, decompose)가 완성형 음절("삼각김밥")과 사용자가 타이핑한 호환 자모("ㅅㄱ")를 **모두 결합형 자모로 정규화**하고, `pattern_replace([^ᄀ-ᄒ])`로 **초성만 추출**한 뒤 `edge_ngram`으로 접두 자동완성을 만듭니다. `analyzer`(색인=초성+edge_ngram)와 `search_analyzer`(검색=초성 정규화만)를 분리해 별도 자모 매핑표 없이 동작합니다 — "ㅅㄱ"→삼각김밥·삼계탕, "ㅅㄱㄱ"→삼각김밥, 완성형 "삼"→ㅅ으로 정규화. ES 이미지에 `analysis-icu`가 필요합니다(`docker/elasticsearch/Dockerfile`). 일반 상품명 검색은 `name`(Nori)+`name.ngram`(접두 edge_ngram)으로, 자동완성은 `name.chosung`으로 매칭합니다.
 
 ### 운영 (Admin / Operational)
 
@@ -267,7 +268,7 @@ In-port(UseCase)는 컨트롤러/스케줄러/리스너가 구동하고, Out-por
 
 ## 🔎 Korean Full-Text Search (Elasticsearch + Nori)
 
-한글 형태소 전문검색은 **정본(JPA/PostgreSQL)과 분리된 ES 인덱스**로 제공되며, 색인 동기화는 [이벤트 파이프라인](#-이벤트-파이프라인-transactional-outbox--kafka--search-indexer)을 통합니다. 역할 분담이 명확합니다:
+한글 형태소 전문검색은 **정본(JPA/PostgreSQL)과 분리된 ES 인덱스**로 제공되며, 색인 동기화는 [이벤트 파이프라인](#-이벤트-파이프라인-transactional-outbox--kafka--search-indexer)을 통해 이루어집니다. 역할 분담이 명확합니다:
 
 - **`search-indexer` = writer**: `board-changed` 이벤트를 소비해 `boards` 인덱스를 upsert/삭제하고, 인덱스 스키마(Nori 설정/매핑) 생성도 소유합니다.
 - **`search-service` = reader**: 검색 쿼리(`GET /api/boards/search`)와 전체 재색인(`reindex`)만 담당합니다.

@@ -102,7 +102,7 @@ class FlushBoardViewCountsService(
         return FlushViewCountsResult(boards = deltas.size, updatedRows = updatedRows, failed = failed)
             .also {
                 log.info("view count flush finished: {}", it)
-                // DB에 실제 반영된(실패 제외) 게시글 수를 비즈니스 메트릭으로 기록합니다.
+                // 반영에 성공한(실패 청크 제외) 게시글 수를 비즈니스 메트릭으로 기록합니다.
                 observability.viewCountsFlushed(it.boards - it.failed)
             }
     }

@@ -13,7 +13,7 @@ import java.time.Clock
 import java.time.LocalDateTime
 
 // 기동 시 관리자(ROLE_ADMIN) 계정을 부트스트랩합니다. 가입 API는 항상 ROLE_USER만 만들므로,
-// 관리자는 여기서만(설정 기반) 생성됩니다 — admin 엔드포인트(reindex/flush)를 호출할 계정의 유일한 출처입니다.
+// 관리자는 여기서만(설정 기반) 생성됩니다 — admin 엔드포인트(reindex/flush/archive)를 호출할 계정의 유일한 출처입니다.
 // - search.security.admin.password가 비어 있으면 생성을 건너뛰고 경고합니다(로컬/개발 편의).
 // - 이미 같은 username이 있으면 멱등하게 건너뜁니다.
 // BoardSearchIndexInitializer와 동일하게 @EventListener(ApplicationReadyEvent)로 기동 직후 한 번 실행합니다(순수 블로킹).
@@ -32,7 +32,7 @@ class AdminUserInitializer(
         if (adminPassword.isBlank()) {
             log.warn(
                 "search.security.admin.password is not set — skipping admin bootstrap. " +
-                    "Set SEARCH_ADMIN_PASSWORD to enable admin endpoints (reindex/flush).",
+                    "Set SEARCH_ADMIN_PASSWORD to enable admin endpoints (reindex/flush/archive).",
             )
             return
         }

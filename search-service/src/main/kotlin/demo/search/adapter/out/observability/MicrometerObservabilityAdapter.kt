@@ -18,8 +18,8 @@ class MicrometerObservabilityAdapter(
     registry: MeterRegistry,
 ) : ObservabilityPort {
     // 메트릭 이름은 present-tense 동사로 통일합니다. OpenMetrics는 _total/_created/_count/_sum/_bucket 등을
-    // 예약 접미사로 취급하므로, 과거분사형("board.created")을 쓰면 Prometheus 렌더링 시 접미사가 잘려
-    // board_total 처럼 뭉개집니다. 그래서 create/update/delete/view/search/flush/archive 로 둡니다.
+    // 예약 접미사로 취급하므로, 과거분사형("board.created")을 쓰면 렌더링된 board_created가 예약 _created와
+    // 충돌해 계열이 뭉개집니다. 그래서 create/update/delete/view/search/flush/archive 로 둡니다.
     private val created = Counter.builder("board.create").description("생성된 게시글 수").register(registry)
     private val updated = Counter.builder("board.update").description("수정된 게시글 수").register(registry)
     private val deleted = Counter.builder("board.delete").description("삭제된 게시글 수").register(registry)

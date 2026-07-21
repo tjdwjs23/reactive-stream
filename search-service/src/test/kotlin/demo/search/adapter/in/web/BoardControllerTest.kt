@@ -122,7 +122,7 @@ class BoardControllerTest :
             }
         }
 
-        Given("존재하지 않는 형식의 id가 주어졌을 때 - GET /api/boards/{id}") {
+        Given("숫자가 아닌 잘못된 형식의 id가 주어졌을 때 - GET /api/boards/{id}") {
             val fixture = ControllerFixture()
 
             When("GET 요청을 보내면") {
