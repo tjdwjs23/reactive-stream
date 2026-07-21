@@ -9,12 +9,12 @@ import org.springframework.stereotype.Component
 // IndexerObservabilityPort의 Micrometer 구현. 색인 파이프라인 사건을 메트릭으로 변환하는 "유일한" 지점입니다
 // (여기서만 Micrometer를 알고, 서비스/설정은 포트 인터페이스만 봅니다 — search-service와 동일한 헥사고날 규칙).
 //
-// MeterRegistry는 Boot가 자동 구성한 빈으로, micrometer-registry-otlp가 물려 있어 메트릭이 OTLP로 Alloy→Mimir에
+// MeterRegistry는 Boot가 자동 구성한 빈으로, micrometer-registry-otlp가 물려 있어 메트릭이 OTLP로 Alloy→Grafana Cloud에
 // push됩니다. 메트릭 이름은 search-service 관례대로 present-tense 동사로 두어 OpenMetrics 예약 접미사(_total/_bucket
 // 등)와 충돌하지 않게 합니다(board_indexer_indexed_total, board_indexer_dlq_total, board_indexer_batch_milliseconds).
 @Component
 class MicrometerIndexerObservabilityAdapter(
-    private val registry: MeterRegistry,
+    registry: MeterRegistry,
 ) : IndexerObservabilityPort {
     private val indexed =
         Counter.builder("board.indexer.indexed").description("색인(upsert)에 반영된 문서 수").register(registry)

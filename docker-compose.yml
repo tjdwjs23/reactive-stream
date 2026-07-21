@@ -16,7 +16,7 @@
 #   PostgreSQL     localhost:5432        (db/user=search, pw=search1234)  ← application.yml 기본값과 일치
 #   Redis          localhost:6379
 #   Elasticsearch  http://localhost:9200 (ES 9.2.x, 보안 비활성화, 단일 노드, Nori 플러그인 포함)
-#   Kafka          localhost:9092        (KRaft 단일 노드, 토픽 자동생성 on → board-changed[-dlq] 자동)
+#   Kafka          localhost:9092        (KRaft 단일 노드, 토픽 자동생성 on → board-changed[-dlq]·product-changed[-dlq] 자동)
 #   Alloy          OTLP 수신 4318(HTTP)·4317(gRPC), 디버그 UI :12345 (--profile obs)
 #                  → 3종 신호(metrics/logs/traces)를 Grafana Cloud OTLP 게이트웨이로 전달합니다.
 #
@@ -92,7 +92,7 @@ services:
       retries: 10
 
   kafka:
-    # Apache Kafka(KRaft 모드, ZooKeeper 없음) 단일 노드. Transactional Outbox → board-changed → search-indexer.
+    # Apache Kafka(KRaft 모드, ZooKeeper 없음) 단일 노드. Transactional Outbox → board-changed·product-changed → search-indexer.
     image: apache/kafka:3.9.0
     container_name: search-kafka
     ports:
@@ -112,7 +112,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-      # 프로듀서/컨슈머가 board-changed(+ -dlq) 토픽을 자동 생성하도록 허용(로컬 편의).
+      # 프로듀서/컨슈머가 board-changed·product-changed(+ 각 -dlq) 토픽을 자동 생성하도록 허용(로컬 편의).
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: "3"
     healthcheck:

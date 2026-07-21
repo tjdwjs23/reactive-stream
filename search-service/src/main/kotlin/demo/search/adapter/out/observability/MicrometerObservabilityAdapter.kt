@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong
 // (여기서만 Micrometer를 알고, 서비스/도메인은 포트 인터페이스만 봅니다 — 헥사고날 의존성 방향 준수.)
 //
 // 카운터/서머리는 생성 시 한 번 등록해 재사용합니다. MeterRegistry는 Boot가 자동 구성한 빈으로,
-// Micrometer OTLP 레지스트리가 물려 있어 메트릭이 OTLP로 Alloy→Mimir에 push됩니다(board_create_total 등).
+// Micrometer OTLP 레지스트리가 물려 있어 메트릭이 OTLP로 Alloy→Grafana Cloud에 push됩니다(board_create_total 등).
 @Component
 class MicrometerObservabilityAdapter(
     registry: MeterRegistry,

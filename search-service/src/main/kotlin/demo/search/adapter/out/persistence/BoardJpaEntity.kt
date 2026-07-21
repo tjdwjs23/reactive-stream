@@ -9,7 +9,7 @@ import jakarta.persistence.Table
 import java.time.LocalDateTime
 
 // JPA(Hibernate) 매핑 대상(board 테이블). 도메인 Board ↔ 이 엔티티 변환은 BoardMapper가 담당합니다
-// (프레임워크 애노테이션이 도메인으로 새지 않도록 — R2DBC 시절과 동일한 격리 규칙).
+// (프레임워크 애노테이션이 도메인으로 새지 않도록).
 //
 // kotlin("plugin.jpa")가 no-arg 생성자 + allopen(프록시)을 부여하므로 별도 기본 생성자를 두지 않습니다.
 // 필드는 var로 둡니다(Hibernate가 로드 시 필드를 채우고, id는 IDENTITY로 채번). createdAt의 값은 도메인이
