@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **앱 설정 주입**: ConfigMap/Secret env — `SPRING_DATASOURCE_URL`=jdbc:postgresql://postgres, `SPRING_DATA_REDIS_HOST`=redis, `SPRING_ELASTICSEARCH_URIS`=http://elasticsearch:9200, `KAFKA_BOOTSTRAP_SERVERS`=kafka:9092, `SEARCH_OUTBOX_RELAY_ENABLED`=true.
 - **이미지**: `search-service/Dockerfile`·`search-indexer/Dockerfile`(멀티스테이지, 빌드 컨텍스트=레포 루트). `deploy/build-and-load.sh`가 빌드→`kind load`(로컬 이미지라 pull 불가, `imagePullPolicy: IfNotPresent`). 두 앱 모듈은 plain jar 비활성(`tasks.named<Jar>("jar")`)이라 `build/libs`에 bootJar 하나만 남습니다.
 - **접근**: search-service `localhost:8080`(NodePort 30080), search-indexer `localhost:8081`. 관측성은 **Grafana Cloud**에서 조회(로컬 Grafana 없음). 코드 변경 반영은 재빌드+load 후 `kubectl rollout restart deploy/<svc>`.
-- 빠른 개발 반복은 `:search-service:bootRun`(host 실행)도 됩니다 — 데이터스토어는 루트 `docker compose up -d`로 4종을 host 포트에 띄우거나(가장 가벼움), 이미 kind가 떠 있으면 `kubectl port-forward`로 당깁니다(단 `deploy/pf.sh`는 postgres만 forward하므로 redis/es/kafka는 직접 forward 필요). 상세 런북: `deploy/README.md`.
+- 빠른 개발 반복은 `:search-service:bootRun`(host 실행)도 됩니다 — 데이터스토어는 루트 `docker compose up -d`로 4종을 host 포트에 띄우거나(가장 가벼움), 이미 kind가 떠 있으면 `kubectl port-forward`로 당깁니다(단 `deploy/pf.sh`는 search-service·postgres만 forward하므로 redis/es/kafka는 직접 forward 필요). 상세 런북: `deploy/README.md`.
 
 ## Architecture
 

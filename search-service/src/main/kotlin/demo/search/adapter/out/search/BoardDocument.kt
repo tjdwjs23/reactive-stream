@@ -11,7 +11,8 @@ import java.time.LocalDateTime
 //
 // - @Setting: Nori 분석기 정의(analysis)를 board-settings.json에서 로드
 // - @Mapping: title/content를 korean(Nori) 분석기로 매핑하는 정의를 board-mappings.json에서 로드
-// 실제 필드 매핑은 mappingPath JSON이 최종 권위이며, 아래 프로퍼티는 문서 구조 문서화 용도입니다.
+// 분석기·필드 타입은 mappingPath JSON이 최종 권위이고, 아래 프로퍼티는 ES에 실제로 저장/복원되는
+// (de)serialization 계약입니다(BoardDocumentMapper가 읽고 씀) — 장식이 아니므로 함부로 지우면 round-trip이 깨집니다.
 // _id는 게시글 id(Long)를 문자열로 사용합니다.
 //
 // title/content만 전문검색(korean 분석기) 대상입니다. createdAt/viewCount는 검색어 매칭에는 쓰이지 않지만,

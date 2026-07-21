@@ -15,7 +15,7 @@ class ProductOutboxRelayScheduler(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @Scheduled(fixedDelayString = "\${search.outbox.relay.poll-interval-ms:1000}")
+    @Scheduled(fixedDelayString = "\${search.outbox.relay.poll-interval-ms:200}")
     fun run() {
         val result = productRelayOutboxUseCase.relay()
         if (result.published > 0) {

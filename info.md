@@ -54,7 +54,7 @@ board:views:pending   (Redis Hash)
 
 ### 만약 Redis가 죽으면? (Graceful Degradation)
 
-조회수 하나 때문에 글 조회 전체가 실패하면 안 됩니다. `withTimeout(200ms)`로 예산을 두고, Redis가 느리거나 죽으면 **델타 0으로 강등**해 DB값(1,000)으로 정상 200 응답합니다. ✅ 조회는 살아 있고, 조회수만 잠깐 안 오를 뿐입니다.
+조회수 하나 때문에 글 조회 전체가 실패하면 안 됩니다. 서킷브레이커 + Redis 명령 타임아웃(1s)으로 빠르게 실패하고, Redis가 느리거나 죽으면 예외를 삼켜 **델타 0으로 강등**해 DB값(1,000)으로 정상 200 응답합니다. ✅ 조회는 살아 있고, 조회수만 잠깐 안 오를 뿐입니다.
 
 ## 흐름 ② : 주기적 반영 (Write-Back / 플러시)
 
@@ -157,11 +157,11 @@ search-service                                                  search-indexer
       │
       ▼  하나의 트랜잭션 (원자적 — 둘 다 되거나 둘 다 롤백)
   ┌──────────────────────────────────────────────┐
-  │  boards 테이블 INSERT                          │
+  │  board 테이블 INSERT                           │
   │  board_outbox 테이블 INSERT (이벤트 사본)       │
   └──────────────────────────────────────────────┘
       │
-      ▼  집배원: OutboxRelayScheduler (~1초 주기 폴링, fixedDelay)
+      ▼  집배원: OutboxRelayScheduler (~200ms 주기 폴링, fixedDelay)
    발송함(board_outbox)에서 "아직 안 보낸" 행을 id 순으로 꺼내
    Kafka로 발행 → 성공한 것만 "보냄" 표시(published_at)
       │
@@ -245,7 +245,7 @@ search-service                                                  search-indexer
              ├─ search-service   (게시판 앱)      ← localhost:8080 로 노출
              ├─ search-indexer  (색인 앱)
              ├─ postgres · redis · elasticsearch · kafka   (데이터스토어 = 각 세대)
-             └─ (선택) alloy·mimir·loki·tempo·grafana        (관측성 = 관리사무소)
+             └─ (선택) alloy                                (관측성 = 관리사무소, Grafana Cloud로 전달)
 ```
 
 - **파드(Pod)** = 각 프로그램이 사는 집 한 채. 위 조각 하나하나가 파드입니다.

@@ -9,7 +9,7 @@
   2) test 프로필이 아닐 때만 OpenTelemetry appender를 정의·부착해 로그를 OTLP로 내보낸다.
      이 appender는 logback 로그를 OTel LogRecord로 변환하고(활성 span의 trace_id/span_id를 자동 첨부),
      Boot가 구성한 OTLP log exporter(application.yml의 management.opentelemetry.logging.export.otlp.*)가
-     이를 Grafana Alloy(:4318)로 push한다 → Alloy가 Loki로 전달. 즉 metrics/logs/traces가 모두 OTLP 단일 경로다.
+     이를 Grafana Alloy(:4318)로 push한다 → Alloy가 Grafana Cloud(Loki)로 전달. 즉 metrics/logs/traces가 모두 OTLP 단일 경로다.
      (test 프로필에선 appender를 아예 정의하지 않아, Alloy가 없는 테스트/최소 실행에서 연결 시도가 없다.)
 
   주의: Boot는 이 appender를 logback에 자동 부착하지 않는다. 기동 시 OpenTelemetryAppender.install(openTelemetry)로
